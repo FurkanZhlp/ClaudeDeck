@@ -66,6 +66,7 @@
     "login": "Giriş yap",
     "relogin": "Yeniden giriş",
     "refresh": "Durumu yenile",
+    "edit": "Hesabı düzenle",
     "remove": "Hesabı sil",
     "removeConfirm": "\"{{name}}\" hesabı silinsin mi?",
     "removeFiles": "Hesabın oturumunu kapat ve yerel dosyalarını da sil",

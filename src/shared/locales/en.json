@@ -66,6 +66,7 @@
     "login": "Sign in",
     "relogin": "Sign in again",
     "refresh": "Refresh status",
+    "edit": "Edit account",
     "remove": "Delete account",
     "removeConfirm": "Delete account \"{{name}}\"?",
     "removeFiles": "Also sign out and delete the account's local files",

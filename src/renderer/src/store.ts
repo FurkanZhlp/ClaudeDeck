@@ -38,6 +38,7 @@ interface AppStore {
   setLanguage: (language: Language | null) => Promise<void>
   refreshStatus: (accountId: string) => Promise<void>
   createAccount: (input: AccountInput) => Promise<void>
+  updateAccount: (id: string, patch: Partial<AccountInput>) => Promise<boolean>
   removeAccount: (id: string, deleteFiles: boolean) => Promise<void>
   setSettingsOpen: (open: boolean) => void
   setProjectDialog: (state: ProjectDialogState) => void
@@ -148,6 +149,12 @@ export const useApp = create<AppStore>((set, get) => {
     async createAccount(input) {
       const result = await guard(() => window.api.accounts.create(input))
       if (result) set({ data: result.state, loginAccountId: result.account.id })
+    },
+
+    async updateAccount(id, patch) {
+      const data = await guard(() => window.api.accounts.update(id, patch))
+      if (data) set({ data })
+      return !!data
     },
 
     async removeAccount(id, deleteFiles) {

@@ -1,15 +1,14 @@
-import { LogIn, Plus, RotateCw, Trash2 } from 'lucide-react'
+import { LogIn, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Account, Language } from '@shared/types'
 import { useApp } from '../store'
 import { AccountDot } from '../ui/AccountDot'
 import { Button } from '../ui/Button'
+import { ColorPicker } from '../ui/ColorPicker'
 import { Field } from '../ui/Field'
 import { Modal } from '../ui/Modal'
-import { inputClass, sectionTitleClass } from '../ui/styles'
-
-const COLORS = ['#c96442', '#2563eb', '#16a34a', '#9333ea', '#db2777', '#0891b2']
+import { ACCOUNT_COLORS, inputClass, sectionTitleClass } from '../ui/styles'
 
 export function SettingsDialog(): React.JSX.Element | null {
   const open = useApp((s) => s.settingsOpen)
@@ -23,7 +22,7 @@ function SettingsContent(): React.JSX.Element | null {
   const setLanguage = useApp((s) => s.setLanguage)
   const createAccount = useApp((s) => s.createAccount)
   const [name, setName] = useState('')
-  const [color, setColor] = useState(COLORS[0])
+  const [color, setColor] = useState(ACCOUNT_COLORS[0])
   if (!data) return null
 
   const add = (event: FormEvent): void => {
@@ -56,19 +55,7 @@ function SettingsContent(): React.JSX.Element | null {
           </Field>
           <div className="space-y-1.5">
             <span className="block text-[12px] font-medium text-muted">{t('settings.color')}</span>
-            <div className="flex h-[30px] items-center gap-1.5">
-              {COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  aria-label={c}
-                  aria-pressed={color === c}
-                  onClick={() => setColor(c)}
-                  className={`size-5 rounded-full ring-offset-2 ring-offset-elevated ${color === c ? 'ring-2 ring-fg' : ''}`}
-                  style={{ background: c }}
-                />
-              ))}
-            </div>
+            <ColorPicker value={color} onChange={setColor} label={t('settings.color')} />
           </div>
           <Button type="submit" variant="primary" disabled={!name.trim()}>
             <Plus size={14} />
@@ -107,6 +94,7 @@ function AccountRow({ account }: { account: Account }): React.JSX.Element {
   const setError = useApp((s) => s.setError)
   const [confirming, setConfirming] = useState(false)
   const [deleteFiles, setDeleteFiles] = useState(true)
+  const [editing, setEditing] = useState(false)
 
   const loggedIn = typeof status === 'object' && status.loggedIn
   const label =
@@ -115,6 +103,14 @@ function AccountRow({ account }: { account: Account }): React.JSX.Element {
       : status.loggedIn
         ? [t('settings.loggedIn'), status.email].filter(Boolean).join(' · ')
         : t('settings.loggedOut')
+
+  if (editing) {
+    return (
+      <li className="animate-fade-up rounded-lg border border-accent/50 bg-bg p-3">
+        <AccountEditForm account={account} onDone={() => setEditing(false)} />
+      </li>
+    )
+  }
 
   return (
     <li className="rounded-lg border border-border bg-bg p-3">
@@ -133,6 +129,17 @@ function AccountRow({ account }: { account: Account }): React.JSX.Element {
           onClick={() => void refreshStatus(account.id)}
         >
           <RotateCw size={14} />
+        </Button>
+        <Button
+          variant="ghost"
+          aria-label={t('settings.edit')}
+          title={t('settings.edit')}
+          onClick={() => {
+            setConfirming(false)
+            setEditing(true)
+          }}
+        >
+          <Pencil size={14} />
         </Button>
         <Button onClick={() => setLoginAccount(account.id)}>
           <LogIn size={14} />
@@ -167,5 +174,64 @@ function AccountRow({ account }: { account: Account }): React.JSX.Element {
         </div>
       )}
     </li>
+  )
+}
+
+function AccountEditForm({
+  account,
+  onDone
+}: {
+  account: Account
+  onDone: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  const updateAccount = useApp((s) => s.updateAccount)
+  const [name, setName] = useState(account.name)
+  const [color, setColor] = useState(account.color)
+  const changed = name.trim() !== account.name || color !== account.color
+
+  const save = (event: FormEvent): void => {
+    event.preventDefault()
+    if (!name.trim()) return
+    if (!changed) return onDone()
+    void updateAccount(account.id, { name, color }).then((ok) => ok && onDone())
+  }
+
+  return (
+    <form className="space-y-3" onSubmit={save}>
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label={t('settings.accountName')} className="min-w-48 flex-1">
+          <input
+            className={inputClass}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => {
+              // Keep Escape from closing the whole settings dialog.
+              if (event.key === 'Escape') {
+                event.stopPropagation()
+                onDone()
+              }
+            }}
+            autoFocus
+          />
+        </Field>
+        <div className="space-y-1.5">
+          <span className="block text-[12px] font-medium text-muted">{t('settings.color')}</span>
+          <ColorPicker value={color} onChange={setColor} label={t('settings.color')} />
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-muted">
+          <AccountDot color={color} size={10} />
+          <span className="truncate">{name.trim() || account.name}</span>
+        </span>
+        <div className="flex gap-2">
+          <Button onClick={onDone}>{t('common.cancel')}</Button>
+          <Button type="submit" variant="primary" disabled={!name.trim()}>
+            {t('common.save')}
+          </Button>
+        </div>
+      </div>
+    </form>
   )
 }
