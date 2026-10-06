@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -107,5 +107,33 @@ describe('Repository', () => {
     expect(repo.setLanguage('en').settings.language).toBe('en')
     expect(repo.setLanguage(null).settings.language).toBeNull()
     expect(() => repo.setLanguage('de' as 'en')).toThrowError('INVALID')
+  })
+})
+
+describe('settings', () => {
+  it('fills usage and login defaults for configs written by older versions', () => {
+    const file = join(dir, 'config.json')
+    writeFileSync(
+      file,
+      JSON.stringify({ accounts: [], projects: [], sessions: [], settings: { language: 'tr' } })
+    )
+    const settings = make().get().settings
+    expect(settings.language).toBe('tr')
+    expect(settings.usage).toEqual({
+      display: 'used',
+      trayEnabled: true,
+      trayMetric: 'both',
+      trayAccount: 'auto'
+    })
+    expect(settings.launchAtLogin).toBe(false)
+  })
+  it('validates usage settings', () => {
+    const repo = make()
+    expect(
+      repo.setUsageSettings({ display: 'remaining', trayMetric: 'weekly' }).settings.usage
+    ).toMatchObject({ display: 'remaining', trayMetric: 'weekly' })
+    expect(() => repo.setUsageSettings({ display: 'x' as 'used' })).toThrowError('INVALID')
+    expect(() => repo.setUsageSettings({ trayAccount: 'missing' })).toThrowError('NOT_FOUND')
+    expect(repo.setLaunchAtLogin(true).settings.launchAtLogin).toBe(true)
   })
 })

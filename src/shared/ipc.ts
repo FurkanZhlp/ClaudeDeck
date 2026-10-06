@@ -11,6 +11,8 @@ export const IPC = {
   sessionRename: 'session:rename',
   sessionRemove: 'session:remove',
   settingsSetLanguage: 'settings:setLanguage',
+  settingsSetUsage: 'settings:setUsage',
+  settingsSetLaunchAtLogin: 'settings:setLaunchAtLogin',
   ptyStartSession: 'pty:startSession',
   ptyStartLogin: 'pty:startLogin',
   ptyWrite: 'pty:write',

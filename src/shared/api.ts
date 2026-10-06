@@ -20,7 +20,8 @@ import type {
   AccountPlan,
   AccountStats,
   SessionKind,
-  UpdateInfo
+  UpdateInfo,
+  UsageSettings
 } from './types'
 
 type Unsubscribe = () => void
@@ -53,7 +54,11 @@ export interface Api {
     /** Main process asks the UI to select a session and start it (e.g. MCP open_session). */
     onOpenRequest(cb: (sessionId: string) => void): Unsubscribe
   }
-  settings: { setLanguage(language: Language | null): Promise<AppState> }
+  settings: {
+    setLanguage(language: Language | null): Promise<AppState>
+    setUsage(patch: Partial<UsageSettings>): Promise<AppState>
+    setLaunchAtLogin(enabled: boolean): Promise<AppState>
+  }
   pty: {
     startSession(
       sessionId: string,

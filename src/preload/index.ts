@@ -36,7 +36,11 @@ const api: Api = {
     remove: (id) => call(IPC.sessionRemove, id),
     onOpenRequest: (cb) => subscribe(IPC.sessionOpenRequest, cb)
   },
-  settings: { setLanguage: (language) => call(IPC.settingsSetLanguage, language) },
+  settings: {
+    setLanguage: (language) => call(IPC.settingsSetLanguage, language),
+    setUsage: (patch) => call(IPC.settingsSetUsage, patch),
+    setLaunchAtLogin: (enabled) => call(IPC.settingsSetLaunchAtLogin, enabled)
+  },
   pty: {
     startSession: (sessionId, resume, cols, rows) =>
       call(IPC.ptyStartSession, sessionId, resume, cols, rows),

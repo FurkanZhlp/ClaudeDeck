@@ -10,7 +10,8 @@ import type {
   Language,
   ProjectInput,
   SessionKind,
-  UpdateInfo
+  UpdateInfo,
+  UsageSettings
 } from '../shared/types'
 import {
   hasConversation,
@@ -46,6 +47,10 @@ interface Deps {
   revokeMcpTokens: (sessionIds: string[]) => void
   /** Stops a running profile optimization before its account goes away. */
   cancelOptimize: (accountId: string) => void
+  /** Usage display or menu bar settings changed. */
+  onUsageSettingsChange: () => void
+  /** Applies the login item setting to macOS (packaged app only). */
+  applyLaunchAtLogin: (enabled: boolean) => void
 }
 
 function completeOnboarding(configDir: string): void {
@@ -69,7 +74,9 @@ export function registerIpc({
   prepareProjectMemory,
   issueMcpToken,
   revokeMcpTokens,
-  cancelOptimize
+  cancelOptimize,
+  onUsageSettingsChange,
+  applyLaunchAtLogin
 }: Deps): void {
   const { handle, trusted } = createIpcTools(getWindow)
 
@@ -151,6 +158,25 @@ export function registerIpc({
   handle(IPC.settingsSetLanguage, (language: Language | null) => {
     const state = repo.setLanguage(language)
     onLanguageChange()
+    return state
+  })
+
+  handle(IPC.settingsSetUsage, (patch: Partial<UsageSettings>) => {
+    if (!patch || typeof patch !== 'object') throw new DomainError('INVALID')
+    const state = repo.setUsageSettings({
+      display: patch.display,
+      trayEnabled: patch.trayEnabled,
+      trayMetric: patch.trayMetric,
+      trayAccount: patch.trayAccount
+    })
+    onUsageSettingsChange()
+    return state
+  })
+
+  handle(IPC.settingsSetLaunchAtLogin, (enabled: boolean) => {
+    if (typeof enabled !== 'boolean') throw new DomainError('INVALID')
+    const state = repo.setLaunchAtLogin(enabled)
+    applyLaunchAtLogin(enabled)
     return state
   })
 

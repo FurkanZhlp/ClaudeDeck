@@ -26,9 +26,25 @@ export interface Session {
   claudeSessionId?: string
 }
 
+export type UsageDisplay = 'used' | 'remaining'
+export type TrayMetric = 'session' | 'weekly' | 'both'
+
+export interface UsageSettings {
+  /** Show meters and numbers as used or remaining percentage. */
+  display: UsageDisplay
+  /** Show ClaudeDeck in the macOS menu bar. */
+  trayEnabled: boolean
+  trayMetric: TrayMetric
+  /** 'auto' = the account closest to a limit, 'selected' = the selected account, or an account id. */
+  trayAccount: string
+}
+
 export interface Settings {
   /** null: sistem dilini kullan */
   language: Language | null
+  usage: UsageSettings
+  /** Open ClaudeDeck when the user logs in (packaged app only). */
+  launchAtLogin: boolean
 }
 
 export interface AppState {

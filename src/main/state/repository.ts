@@ -10,16 +10,38 @@ import type {
   Project,
   ProjectInput,
   Session,
-  SessionKind
+  SessionKind,
+  Settings,
+  UsageSettings
 } from '../../shared/types'
 import type { JsonStore } from './jsonStore'
+
+export const defaultSettings = (): Settings => ({
+  language: null,
+  usage: { display: 'used', trayEnabled: true, trayMetric: 'both', trayAccount: 'auto' },
+  launchAtLogin: false
+})
 
 export const emptyState = (): AppState => ({
   accounts: [],
   projects: [],
   sessions: [],
-  settings: { language: null }
+  settings: defaultSettings()
 })
+
+/** Fills settings added after the config file was written. */
+function withDefaultSettings(state: AppState): AppState {
+  const defaults = defaultSettings()
+  const saved = (state.settings ?? {}) as Partial<Settings>
+  return {
+    ...state,
+    settings: {
+      ...defaults,
+      ...saved,
+      usage: { ...defaults.usage, ...(saved.usage ?? {}) }
+    }
+  }
+}
 
 function requirePath(value: unknown): string {
   const path = requireText(value)
@@ -40,7 +62,7 @@ export class Repository {
     private readonly accountsRoot: string,
     private readonly newId: () => string = randomUUID
   ) {
-    this.state = store.load()
+    this.state = withDefaultSettings(store.load())
   }
 
   get(): AppState {
@@ -165,6 +187,34 @@ export class Repository {
   setLanguage(language: Language | null): AppState {
     if (language !== null && !LANGUAGES.includes(language)) throw new DomainError('INVALID')
     return this.commit({ ...this.state, settings: { ...this.state.settings, language } })
+  }
+
+  setUsageSettings(patch: Partial<UsageSettings>): AppState {
+    const usage = { ...this.state.settings.usage }
+    if (patch.display !== undefined) {
+      if (patch.display !== 'used' && patch.display !== 'remaining')
+        throw new DomainError('INVALID')
+      usage.display = patch.display
+    }
+    if (patch.trayEnabled !== undefined) usage.trayEnabled = patch.trayEnabled === true
+    if (patch.trayMetric !== undefined) {
+      if (!['session', 'weekly', 'both'].includes(patch.trayMetric))
+        throw new DomainError('INVALID')
+      usage.trayMetric = patch.trayMetric
+    }
+    if (patch.trayAccount !== undefined) {
+      const account = patch.trayAccount
+      if (account !== 'auto' && account !== 'selected') this.account(account)
+      usage.trayAccount = account
+    }
+    return this.commit({ ...this.state, settings: { ...this.state.settings, usage } })
+  }
+
+  setLaunchAtLogin(enabled: boolean): AppState {
+    return this.commit({
+      ...this.state,
+      settings: { ...this.state.settings, launchAtLogin: enabled === true }
+    })
   }
 
   private find<T extends { id: string }>(list: T[], id: string): T {

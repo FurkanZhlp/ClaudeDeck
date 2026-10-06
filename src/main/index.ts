@@ -88,6 +88,16 @@ const optimize = new OptimizeManager({
   onGuidelinesUpdated: (update) => send(IPC.profileGuidelinesUpdated, update)
 })
 
+/** Registers or removes ClaudeDeck as a macOS login item; only meaningful for the packaged app. */
+function applyLaunchAtLogin(enabled: boolean): void {
+  if (!app.isPackaged) return
+  try {
+    app.setLoginItemSettings({ openAtLogin: enabled })
+  } catch (error) {
+    console.warn('[login-item]', error)
+  }
+}
+
 const translator = (): Translate =>
   createTranslator(resolveLanguage(repo.get().settings.language, app.getLocale()))
 
@@ -364,6 +374,10 @@ app.whenReady().then(() => {
     },
     issueMcpToken: (scope) => mcpTokens.issue(scope),
     revokeMcpTokens: (sessionIds) => sessionIds.forEach((id) => mcpTokens.revoke(id)),
+    onUsageSettingsChange: () => {
+      // Menu bar wiring hooks in here.
+    },
+    applyLaunchAtLogin,
     cancelOptimize: (accountId) => {
       if (optimize.isActive(accountId)) void optimize.cancel(accountId)
     }
@@ -399,6 +413,8 @@ app.whenReady().then(() => {
   void startMcp()
   applyMenu()
   void resolveShellEnv()
+  // Keep macOS in sync with the saved choice (e.g. after the app was moved or reinstalled).
+  applyLaunchAtLogin(repo.get().settings.launchAtLogin)
   createWindow()
   usagePoller.start()
   setInterval(() => void checkUpdateQuietly(), UPDATE_INTERVAL_MS)
