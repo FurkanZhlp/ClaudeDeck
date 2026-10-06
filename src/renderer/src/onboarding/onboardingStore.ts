@@ -35,6 +35,8 @@ interface OnboardingStore {
   next: () => void
   setImported: (categories: ProfileCategory[]) => void
   setOptimized: () => void
+  /** Goes to the sign-in step, adding it to this run when it started later. */
+  showSignIn: () => void
   close: () => void
 }
 
@@ -82,5 +84,9 @@ export const useOnboarding = create<OnboardingStore>((set, get) => ({
 
   setImported: (imported) => set({ imported }),
   setOptimized: () => set({ optimized: true }),
+  showSignIn() {
+    const { steps } = get()
+    set({ step: 'signIn', steps: steps.includes('signIn') ? steps : ['signIn', ...steps] })
+  },
   close: () => set({ open: false })
 }))

@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { shell } from 'electron'
 import { DomainError } from '../../shared/errors'
 import { IPC, optimizePtyId } from '../../shared/ipc'
@@ -23,7 +25,13 @@ interface Deps {
   globalDir: string
   guidelinesText: string
   optimizePrompt: string
+  /** Guideline upgrades found before the renderer was ready; each is handed out once. */
+  takePendingGuidelineUpdates: () => GuidelinesUpdate[]
 }
+
+/** Empty cwd for the optimize session; the profile itself is added with `--add-dir`. */
+export const optimizeWorkspace = (configDir: string): string =>
+  join(configDir, 'claudedeck', 'workspace')
 
 /** Installs or upgrades guidelines for every account and reports the upgrades to the renderer. */
 export function installGuidelinesForAccounts(
@@ -81,15 +89,20 @@ export function registerProfileIpc(deps: Deps): void {
 
   handle(
     IPC.profileImport,
-    (accountId: string, source: ProfileSource, categories: ProfileCategory[]) => {
+    async (accountId: string, source: ProfileSource, categories: ProfileCategory[]) => {
       const [from, account] = endpoints(accountId, source)
       const chosen = parseCategories(categories)
+      // A running Claude reads plugins and settings from the profile being replaced.
+      if (ptys.hasAccount(account.id)) throw new DomainError('ACCOUNT_RUNNING')
       accounts.ensureConfigDir(account)
-      const result = importProfile(from, account.configDir, chosen)
+      // A ProfileImportError names the failed category; the IPC layer logs it.
+      const result = await importProfile(from, account.configDir, chosen)
       console.info('[profile] imported', account.id, source.kind, result.imported.join(','))
       return result
     }
   )
+
+  handle(IPC.profileTakeGuidelineUpdates, () => deps.takePendingGuidelineUpdates())
 
   handle(IPC.profileStartOptimize, async (accountId: string, cols: number, rows: number) => {
     if (!isText(accountId) || !isSize(cols) || !isSize(rows)) throw new DomainError('INVALID')
@@ -106,6 +119,8 @@ export function registerProfileIpc(deps: Deps): void {
       console.warn('[profile] could not mark onboarding complete', error)
     }
     installGuidelinesForAccounts([account], deps.guidelinesText, send)
+    const workspace = optimizeWorkspace(account.configDir)
+    mkdirSync(workspace, { recursive: true })
     ptys.spawn(
       id,
       {
@@ -113,12 +128,14 @@ export function registerProfileIpc(deps: Deps): void {
         args: [
           '-ilc',
           claudeCommand(account.configDir, [
+            '--add-dir',
+            account.configDir,
             '--append-system-prompt',
             deps.optimizePrompt,
             INITIAL_MESSAGE
           ])
         ],
-        cwd: account.configDir,
+        cwd: workspace,
         env: buildSessionEnv(base, account),
         cols,
         rows,

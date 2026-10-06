@@ -6,7 +6,10 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
+  statSync,
   symlinkSync,
+  chmodSync,
   utimesSync,
   writeFileSync
 } from 'node:fs'
@@ -15,6 +18,7 @@ import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ProfileCategory } from '../../shared/types'
 import {
+  ProfileImportError,
   copyEntry,
   diffProfile,
   importProfile,
@@ -22,6 +26,10 @@ import {
   rewritePaths,
   summarizeSource
 } from './importer'
+
+const failingClone = async (): Promise<void> => {
+  throw new Error('clone failed')
+}
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), 'claudedeck-import-'))
 
@@ -105,7 +113,7 @@ const ALL: ProfileCategory[] = [
 ]
 
 describe('summarizeSource', () => {
-  it('counts top-level entries per category', () => {
+  it('counts top-level entries per category', async () => {
     const summary = summarizeSource(makeSource())
     const by = Object.fromEntries(summary.map((s) => [s.category, s]))
     expect(by.instructions).toEqual({ category: 'instructions', available: true, items: 1 })
@@ -115,7 +123,7 @@ describe('summarizeSource', () => {
     expect(by.settings.items).toBe(1)
     expect(by.plugins.items).toBe(3)
   })
-  it('reports nothing for a missing source', () => {
+  it('reports nothing for a missing source', async () => {
     const summary = summarizeSource(join(tempDir(), 'missing'))
     expect(summary).toHaveLength(7)
     expect(summary.every((s) => !s.available && s.items === 0)).toBe(true)
@@ -123,31 +131,31 @@ describe('summarizeSource', () => {
 })
 
 describe('diffProfile', () => {
-  it('counts added, changed and removed files per category', () => {
+  it('counts added, changed and removed files per category', async () => {
     const src = makeSource()
     const dst = tempDir()
     put(dst, 'agents/a.md', 'agent a')
     put(dst, 'agents/b.md', 'agent B')
     put(dst, 'agents/old.md', 'old')
-    const by = Object.fromEntries(diffProfile(src, dst).map((d) => [d.category, d]))
+    const by = Object.fromEntries((await diffProfile(src, dst)).map((d) => [d.category, d]))
     expect(by.agents).toEqual({ category: 'agents', added: 0, changed: 1, removed: 1 })
     expect(by.skills).toMatchObject({ added: 1, changed: 0, removed: 0 })
     expect(by.plugins).toMatchObject({ added: 3 })
     expect(by.outputStyles).toMatchObject({ added: 0, changed: 0, removed: 0 })
   })
-  it('treats same content with a different mtime as unchanged', () => {
+  it('treats same content with a different mtime as unchanged', async () => {
     const src = tempDir()
     const dst = tempDir()
     put(src, 'commands/c.md', 'same')
     put(dst, 'commands/c.md', 'same')
     utimesSync(join(dst, 'commands/c.md'), new Date(1000), new Date(1000))
-    const by = Object.fromEntries(diffProfile(src, dst).map((d) => [d.category, d]))
+    const by = Object.fromEntries((await diffProfile(src, dst)).map((d) => [d.category, d]))
     expect(by.commands).toMatchObject({ added: 0, changed: 0, removed: 0 })
   })
 })
 
 describe('mergeSettings', () => {
-  it('lets imported keys win, keeps account keys, strips secrets and unions allow rules', () => {
+  it('lets imported keys win, keeps account keys, strips secrets and unions allow rules', async () => {
     const merged = mergeSettings(
       {
         theme: 'light',
@@ -167,13 +175,56 @@ describe('mergeSettings', () => {
       model: 'opus',
       apiKeyHelper: '/mine',
       env: { FOO: '1' },
-      permissions: { allow: ['Read', 'Edit', 'Bash(git:*)'] }
+      permissions: { allow: ['Read', 'Edit', 'Bash(git:*)'], deny: ['X'] }
     })
+  })
+
+  it('keeps the account safety rules and its default mode', () => {
+    const merged = mergeSettings(
+      {
+        env: { MINE: '1', MY_TOKEN: 'keep' },
+        permissions: {
+          deny: ['Bash(rm:*)'],
+          ask: ['Bash(git push:*)'],
+          additionalDirectories: ['/a'],
+          defaultMode: 'default'
+        }
+      },
+      {
+        awsAuthRefresh: 'x',
+        awsCredentialExport: 'x',
+        otelHeadersHelper: 'x',
+        env: { GITHUB_TOKEN: 's', DB_PASSWORD: 's', aws_secret: 's', Api_Key: 's', OK: '2' },
+        permissions: {
+          deny: ['Read(.env)'],
+          ask: ['Bash(git push:*)'],
+          additionalDirectories: ['/b'],
+          defaultMode: 'bypassPermissions'
+        }
+      }
+    )
+    expect(merged).toEqual({
+      env: { MINE: '1', MY_TOKEN: 'keep', OK: '2' },
+      permissions: {
+        deny: ['Read(.env)', 'Bash(rm:*)'],
+        ask: ['Bash(git push:*)'],
+        additionalDirectories: ['/b', '/a'],
+        defaultMode: 'default'
+      }
+    })
+  })
+
+  it('takes the source default mode only when the account has none', () => {
+    const merged = mergeSettings(
+      { permissions: { allow: ['Read'] } },
+      { permissions: { defaultMode: 'acceptEdits' } }
+    )
+    expect(merged.permissions).toEqual({ allow: ['Read'], defaultMode: 'acceptEdits' })
   })
 })
 
 describe('rewritePaths', () => {
-  it('rewrites only values under the source root', () => {
+  it('rewrites only values under the source root', async () => {
     expect(
       rewritePaths(
         { a: ['/src/x', '/srcother/y', '/src'], b: { c: '/src/z' }, n: 1 },
@@ -185,16 +236,14 @@ describe('rewritePaths', () => {
 })
 
 describe('copyEntry', () => {
-  it('falls back to a regular copy when cloning fails', () => {
+  it('falls back to a regular copy when cloning fails', async () => {
     const src = tempDir()
     const dst = tempDir()
     put(src, 'skills/s/SKILL.md', 'skill')
-    copyEntry(join(src, 'skills'), join(dst, 'skills'), true, () => {
-      throw new Error('clone failed')
-    })
+    await copyEntry(join(src, 'skills'), join(dst, 'skills'), true, failingClone)
     expect(read(dst, 'skills/s/SKILL.md')).toBe('skill')
   })
-  it('copies a symlinked folder as a real folder with real files', () => {
+  it('copies a symlinked folder as a real folder with real files', async () => {
     const real = tempDir()
     const src = tempDir()
     const dst = tempDir()
@@ -202,7 +251,7 @@ describe('copyEntry', () => {
     put(real, 'shared.md', 'shared')
     symlinkSync(join(real, 'shared.md'), join(real, 'agents/link.md'))
     symlinkSync(join(real, 'agents'), join(src, 'agents'))
-    copyEntry(join(src, 'agents'), join(dst, 'agents'), true)
+    await copyEntry(join(src, 'agents'), join(dst, 'agents'), true)
     expect(lstatSync(join(dst, 'agents')).isDirectory()).toBe(true)
     expect(lstatSync(join(dst, 'agents/link.md')).isSymbolicLink()).toBe(false)
     expect(read(dst, 'agents/link.md')).toBe('shared')
@@ -210,10 +259,10 @@ describe('copyEntry', () => {
 })
 
 describe('importProfile', () => {
-  it('copies chosen categories and never the excluded files', () => {
+  it('copies chosen categories and never the excluded files', async () => {
     const src = makeSource()
     const dst = tempDir()
-    const result = importProfile(src, dst, ['agents', 'skills', 'outputStyles'])
+    const result = await importProfile(src, dst, ['agents', 'skills', 'outputStyles'])
     expect(result).toEqual({ imported: ['agents', 'skills'], backupDir: null })
     expect(read(dst, 'agents/a.md')).toBe('agent a')
     expect(read(dst, 'skills/one/SKILL.md')).toBe('skill one')
@@ -223,22 +272,22 @@ describe('importProfile', () => {
     }
   })
 
-  it('moves existing items to a timestamped backup first', () => {
+  it('moves existing items to a timestamped backup first', async () => {
     const src = makeSource()
     const dst = tempDir()
     put(dst, 'agents/mine.md', 'mine')
     put(dst, 'commands/keep.md', 'untouched')
     const now = new Date('2026-10-07T10:20:30.000Z')
-    const result = importProfile(src, dst, ['agents'], now)
+    const result = await importProfile(src, dst, ['agents'], now)
     const backupDir = join(dst, 'claudedeck', 'backups', '2026-10-07T10-20-30.000Z')
     expect(result.backupDir).toBe(backupDir)
     expect(read(backupDir, 'agents/mine.md')).toBe('mine')
     expect(existsSync(join(dst, 'agents/mine.md'))).toBe(false)
     expect(read(dst, 'commands/keep.md')).toBe('untouched')
-    expect(importProfile(src, dst, ['agents'], now).backupDir).toBe(`${backupDir}-1`)
+    expect((await importProfile(src, dst, ['agents'], now)).backupDir).toBe(`${backupDir}-1`)
   })
 
-  it('merges settings instead of replacing them', () => {
+  it('merges settings instead of replacing them', async () => {
     const src = makeSource()
     const dst = tempDir()
     put(
@@ -246,7 +295,7 @@ describe('importProfile', () => {
       'settings.json',
       JSON.stringify({ theme: 'dark', permissions: { allow: ['Bash(npm test)'] } })
     )
-    const result = importProfile(src, dst, ['settings'])
+    const result = await importProfile(src, dst, ['settings'])
     expect(result.backupDir).not.toBeNull()
     expect(readJson(dst, 'settings.json')).toEqual({
       theme: 'dark',
@@ -256,10 +305,17 @@ describe('importProfile', () => {
     })
   })
 
-  it('rewrites plugin paths to the account dir', () => {
+  it('writes settings.json readable by the owner only', async () => {
     const src = makeSource()
     const dst = tempDir()
-    importProfile(src, dst, ['plugins'])
+    await importProfile(src, dst, ['settings'])
+    expect(statSync(join(dst, 'settings.json')).mode & 0o777).toBe(0o600)
+  })
+
+  it('rewrites plugin paths to the account dir', async () => {
+    const src = makeSource()
+    const dst = tempDir()
+    await importProfile(src, dst, ['plugins'])
     const installed = readJson(dst, 'plugins/installed_plugins.json')
     expect(installed).toEqual({
       plugins: { x: [{ installPath: join(dst, 'plugins/cache/x'), other: '/elsewhere/x' }] }
@@ -270,47 +326,190 @@ describe('importProfile', () => {
     expect(read(dst, 'plugins/cache/x/plugin.json')).toBe('{}')
   })
 
-  it('adds the guidelines import after copying CLAUDE.md', () => {
+  it('adds the guidelines import after copying CLAUDE.md', async () => {
     const src = makeSource()
     const dst = tempDir()
-    importProfile(src, dst, ['instructions'])
+    await importProfile(src, dst, ['instructions'])
     expect(read(dst, 'CLAUDE.md')).toBe('# Global rules\n\n@claudedeck/guidelines.md\n')
   })
 
-  it('leaves the source tree byte-identical', () => {
+  it('leaves the source tree byte-identical', async () => {
     const src = makeSource()
     const dst = tempDir()
     put(dst, 'agents/mine.md', 'mine')
     put(dst, 'settings.json', '{"theme":"dark"}')
     const before = snapshot(src)
-    importProfile(src, dst, ALL)
-    importProfile(src, dst, ALL)
+    await importProfile(src, dst, ALL)
+    await importProfile(src, dst, ALL)
     expect(snapshot(src)).toEqual(before)
   })
 
-  it('refuses overlapping source and target', () => {
+  it('refuses overlapping source and target', async () => {
     const src = makeSource()
-    expect(() => importProfile(src, src, ['agents'])).toThrow()
-    expect(() => importProfile(src, join(src, 'nested'), ['agents'])).toThrow()
+    await expect(importProfile(src, src, ['agents'])).rejects.toThrow()
+    await expect(importProfile(src, join(src, 'nested'), ['agents'])).rejects.toThrow()
   })
 
-  it('keeps the target settings when the source settings are invalid', () => {
+  it('keeps the target settings when the source settings are invalid', async () => {
     const src = tempDir()
     const dst = tempDir()
     put(src, 'settings.json', '{broken')
     put(dst, 'settings.json', '{"theme":"dark"}')
-    expect(() => importProfile(src, dst, ['settings'])).toThrow()
+    await expect(importProfile(src, dst, ['settings'])).rejects.toThrow(/settings/)
     expect(read(dst, 'settings.json')).toBe('{"theme":"dark"}')
   })
 
-  it('does not back up a CLAUDE.md that only holds the app import line', () => {
+  it('does not back up a CLAUDE.md that only holds the app import line', async () => {
     const src = mkdtempSync(join(tmpdir(), 'cd-src-'))
     const dst = mkdtempSync(join(tmpdir(), 'cd-dst-'))
     writeFileSync(join(src, 'CLAUDE.md'), '# Mine\n')
     writeFileSync(join(dst, 'CLAUDE.md'), '@claudedeck/guidelines.md\n')
-    const result = importProfile(src, dst, ['instructions'])
+    const result = await importProfile(src, dst, ['instructions'])
     expect(result.backupDir).toBeNull()
     expect(readFileSync(join(dst, 'CLAUDE.md'), 'utf8')).toContain('# Mine')
     expect(readFileSync(join(dst, 'CLAUDE.md'), 'utf8')).toContain('@claudedeck/guidelines.md')
+  })
+})
+
+describe('symlinks', () => {
+  /** Plugins with a relative link inside the entry and an absolute link into the source root. */
+  function pluginSource(): string {
+    const src = tempDir()
+    put(src, 'plugins/b/file.md', 'target file')
+    put(src, 'CLAUDE.md', '# root')
+    mkdirSync(join(src, 'plugins/a'), { recursive: true })
+    symlinkSync('../b/file.md', join(src, 'plugins/a/rel.md'))
+    symlinkSync(join(src, 'plugins/b/file.md'), join(src, 'plugins/a/abs.md'))
+    symlinkSync(join(src, 'CLAUDE.md'), join(src, 'plugins/a/root.md'))
+    return src
+  }
+
+  for (const [name, run] of [
+    ['clone', undefined],
+    ['fallback copy', failingClone]
+  ] as const) {
+    it(`keeps plugin links inside the target profile (${name})`, async () => {
+      const src = pluginSource()
+      const dst = tempDir()
+      await importProfile(src, dst, ['plugins'], new Date(), run)
+      expect(readlinkSync(join(dst, 'plugins/a/rel.md'))).toBe('../b/file.md')
+      expect(readlinkSync(join(dst, 'plugins/a/abs.md'))).toBe(join(dst, 'plugins/b/file.md'))
+      expect(readlinkSync(join(dst, 'plugins/a/root.md'))).toBe(join(dst, 'CLAUDE.md'))
+      expect(read(dst, 'plugins/a/rel.md')).toBe('target file')
+      const by = Object.fromEntries((await diffProfile(src, dst)).map((d) => [d.category, d]))
+      expect(by.plugins).toMatchObject({ added: 0, changed: 0, removed: 0 })
+    })
+  }
+
+  it('shows no changes after importing symlinked skills', async () => {
+    const real = tempDir()
+    const src = tempDir()
+    const dst = tempDir()
+    put(real, 'foo/SKILL.md', 'linked skill')
+    put(real, 'foo/ref.md', 'reference')
+    put(src, 'skills/plain/SKILL.md', 'plain')
+    symlinkSync(join(real, 'foo'), join(src, 'skills/foo'))
+    symlinkSync(join(real, 'foo/ref.md'), join(src, 'skills/plain/ref.md'))
+    await importProfile(src, dst, ['skills'])
+    expect(lstatSync(join(dst, 'skills/foo')).isDirectory()).toBe(true)
+    const by = Object.fromEntries((await diffProfile(src, dst)).map((d) => [d.category, d]))
+    expect(by.skills).toEqual({ category: 'skills', added: 0, changed: 0, removed: 0 })
+  })
+})
+
+describe('import atomicity', () => {
+  it('keeps the previous item when copying a category fails', async () => {
+    const src = tempDir()
+    const dst = tempDir()
+    put(src, 'agents/ok.md', 'ok')
+    put(src, 'agents/locked.md', 'locked')
+    chmodSync(join(src, 'agents/locked.md'), 0o000)
+    put(dst, 'agents/mine.md', 'mine')
+    try {
+      await expect(importProfile(src, dst, ['agents'])).rejects.toThrow(/agents/)
+    } finally {
+      chmodSync(join(src, 'agents/locked.md'), 0o644)
+    }
+    expect(read(dst, 'agents/mine.md')).toBe('mine')
+    expect(existsSync(join(dst, 'agents.claudedeck-tmp'))).toBe(false)
+    expect(existsSync(join(dst, 'claudedeck'))).toBe(false)
+  })
+
+  it('reports which category failed', async () => {
+    const src = tempDir()
+    const dst = tempDir()
+    put(src, 'commands/locked.md', 'x')
+    chmodSync(join(src, 'commands/locked.md'), 0o000)
+    try {
+      const error: unknown = await importProfile(src, dst, ['commands']).catch((e) => e)
+      expect(error).toBeInstanceOf(ProfileImportError)
+      expect((error as ProfileImportError).category).toBe('commands')
+    } finally {
+      chmodSync(join(src, 'commands/locked.md'), 0o644)
+    }
+    expect(existsSync(join(dst, 'commands'))).toBe(false)
+  })
+})
+
+describe('instructions', () => {
+  it('ignores a target CLAUDE.md that only holds the app import line', async () => {
+    const src = tempDir()
+    const dst = tempDir()
+    put(src, 'CLAUDE.md', '# Mine\n')
+    put(dst, 'CLAUDE.md', '@claudedeck/guidelines.md\n')
+    const by = Object.fromEntries((await diffProfile(src, dst)).map((d) => [d.category, d]))
+    expect(by.instructions).toMatchObject({ added: 1, changed: 0, removed: 0 })
+    expect((await diffProfile(src, dst)).some((d) => d.changed > 0 || d.removed > 0)).toBe(false)
+  })
+
+  it('shows no changes right after importing', async () => {
+    const src = makeSource()
+    const dst = tempDir()
+    put(dst, 'settings.json', JSON.stringify({ theme: 'dark' }))
+    await importProfile(src, dst, ALL)
+    for (const entry of await diffProfile(src, dst)) {
+      expect(entry).toEqual({ category: entry.category, added: 0, changed: 0, removed: 0 })
+    }
+  })
+
+  it('copies relative @imports that stay inside the source profile', async () => {
+    const parent = tempDir()
+    const src = join(parent, 'src')
+    const dst = tempDir()
+    put(
+      src,
+      'CLAUDE.md',
+      [
+        '# Rules',
+        '@docs/style.md',
+        '  @rules/a.md trailing words',
+        '@/etc/hosts',
+        '@~/global.md',
+        '@../outside.md',
+        '@missing.md',
+        '@.credentials.json',
+        '@claudedeck/guidelines.md',
+        '```',
+        '@code/x.md',
+        '```',
+        ''
+      ].join('\n')
+    )
+    put(src, 'docs/style.md', 'style')
+    put(src, 'rules/a.md', 'rule a')
+    put(src, 'code/x.md', 'code')
+    put(src, '.credentials.json', 'secret')
+    put(src, 'claudedeck/guidelines.md', 'theirs')
+    put(parent, 'outside.md', 'outside')
+    put(dst, 'docs/style.md', 'old style')
+    const result = await importProfile(src, dst, ['instructions'])
+    expect(read(dst, 'docs/style.md')).toBe('style')
+    expect(read(dst, 'rules/a.md')).toBe('rule a')
+    expect(read(result.backupDir ?? '', 'docs/style.md')).toBe('old style')
+    for (const rel of ['code/x.md', '.credentials.json', 'claudedeck/guidelines.md']) {
+      expect(existsSync(join(dst, rel))).toBe(false)
+    }
+    expect(existsSync(join(parent, 'outside.md'))).toBe(true)
+    expect(read(dst, 'CLAUDE.md')).toContain('@claudedeck/guidelines.md')
   })
 })

@@ -293,5 +293,12 @@
       "optimize": "Optimize with ClaudeDeck",
       "openFolder": "Open profile folder"
     }
+  },
+  "mcp": {
+    "allow": "Allow",
+    "confirmCreateProject": "Claude wants to create a new project \"{{name}}\": {{path}}",
+    "confirmOpenClaude": "Claude wants to open a new Claude tab in \"{{project}}\".",
+    "confirmOpenShell": "Claude wants to open a new terminal tab in \"{{project}}\".",
+    "requestedBy": "Requested by Claude in {{project}} ({{account}} account). The new tab does not run until you start it."
   }
 }

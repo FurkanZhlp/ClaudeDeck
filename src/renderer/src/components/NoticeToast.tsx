@@ -18,7 +18,7 @@ export function NoticeToast(): React.JSX.Element | null {
   return (
     <div
       role="status"
-      className="animate-fade-up fixed bottom-4 left-1/2 z-[60] flex max-w-md -translate-x-1/2 items-start gap-3 rounded-lg border border-border bg-elevated p-3 shadow-xl"
+      className="animate-fade-up fixed bottom-4 left-1/2 z-[90] flex max-w-md -translate-x-1/2 items-start gap-3 rounded-lg border border-border bg-elevated p-3 shadow-xl"
     >
       <Info size={16} className="mt-0.5 shrink-0 text-accent" />
       <span className="flex-1">{notice}</span>

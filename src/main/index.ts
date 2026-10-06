@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, Menu, net, session, shell } from 'electron'
+import { rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
@@ -18,10 +19,11 @@ import icon from '../../resources/icon.png?asset'
 import guidelinesText from '../../resources/claudedeck/guidelines.md?raw'
 import optimizePrompt from '../../resources/claudedeck/optimize-prompt.md?raw'
 import { createIpcTools } from './ipcUtil'
-import { registerMcpInConfig } from './mcp/register'
+import { registerMcpInConfig, unregisterMcpInConfig } from './mcp/register'
+import { createSessionTokens } from './mcp/sessionTokens'
 import { registerMcpIpc } from './mcp/mcpIpc'
 import { startMcpServer } from './mcp/server'
-import { createTools } from './mcp/tools'
+import { createTools, type ConfirmRequest } from './mcp/tools'
 import { registerNotesIpc, type NotesIpc } from './notes/notesIpc'
 import { listNotes, readNote, writeNote } from './notes/notesStore'
 import { ensureGuidelines } from './profile/guidelines'
@@ -36,7 +38,9 @@ const accounts = new AccountService(accountsRoot, resolveShellEnv)
 
 let mainWindow: BrowserWindow | null = null
 let notes: NotesIpc | null = null
-let mcp: { url: string; token: string; stop: () => Promise<void> } | null = null
+let mcp: { url: string; stop: () => Promise<void> } | null = null
+// Per-tab MCP tokens; each Claude tab only reaches its own project.
+const mcpTokens = createSessionTokens()
 // Guideline upgrades found before the window loaded; shown once the renderer is ready.
 let pendingGuidelineUpdates: GuidelinesUpdate[] = []
 
@@ -46,7 +50,10 @@ function send(channel: string, ...args: unknown[]): void {
 
 const ptys = new PtyManager({
   data: (id, data) => send(IPC.ptyData, id, data),
-  exit: (id, exitCode) => send(IPC.ptyExit, id, exitCode)
+  exit: (id, exitCode) => {
+    mcpTokens.revoke(id)
+    send(IPC.ptyExit, id, exitCode)
+  }
 })
 
 const translator = (): Translate =>
@@ -58,18 +65,56 @@ function prepareAccount(account: Account): void {
     const upgrade = ensureGuidelines(account.configDir, guidelinesText)
     if (upgrade && upgrade.from !== null) {
       const update: GuidelinesUpdate = { accountId: account.id, ...upgrade }
+      // Live while the UI is up; otherwise the renderer pulls it once it has loaded.
       if (mainWindow?.webContents.isLoading() === false) send(IPC.profileGuidelinesUpdated, update)
       else pendingGuidelineUpdates.push(update)
     }
   } catch (error) {
     console.warn('[profile] guidelines', account.id, error)
   }
-  if (!mcp) return
   try {
-    registerMcpInConfig(account.configDir, mcp.url, mcp.token)
+    // Without a running server the entry would only show a failing MCP server in Claude.
+    if (mcp) registerMcpInConfig(account.configDir, mcp.url)
+    else unregisterMcpInConfig(account.configDir)
   } catch (error) {
-    console.warn('[mcp] could not register for account', account.id, error)
+    console.warn('[mcp] could not update registration for account', account.id, error)
   }
+}
+
+/** Native confirmation for MCP actions that change the app; Cancel is the default. */
+async function confirmMcpRequest(request: ConfirmRequest): Promise<boolean> {
+  const t = translator()
+  const state = repo.get()
+  const requester = state.projects.find((p) => p.id === request.requestedBy.projectId)
+  const account = state.accounts.find((a) => a.id === request.requestedBy.accountId)
+  let message: string
+  if (request.kind === 'create_project') {
+    message = t('mcp.confirmCreateProject', { name: request.name, path: request.path })
+  } else {
+    const project = state.projects.find((p) => p.id === request.projectId)
+    message = t(
+      request.sessionKind === 'claude' ? 'mcp.confirmOpenClaude' : 'mcp.confirmOpenShell',
+      {
+        project: project?.name ?? ''
+      }
+    )
+  }
+  const options = {
+    type: 'question' as const,
+    buttons: [t('mcp.allow'), t('common.cancel')],
+    defaultId: 1,
+    cancelId: 1,
+    message,
+    detail: t('mcp.requestedBy', { project: requester?.name ?? '', account: account?.name ?? '' })
+  }
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+  }
+  const { response } = mainWindow
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options)
+  return response === 0
 }
 
 async function startMcp(): Promise<void> {
@@ -77,14 +122,13 @@ async function startMcp(): Promise<void> {
     repo,
     notes: { list: listNotes, read: readNote, write: writeNote },
     requestOpenSession: (sessionId) => send(IPC.sessionOpenRequest, sessionId),
-    notifyStateChanged: () => send(IPC.stateChanged, repo.get())
+    notifyStateChanged: () => send(IPC.stateChanged, repo.get()),
+    confirm: confirmMcpRequest
   })
+  // Older builds stored a long-lived token here; tokens are per tab and in memory now.
+  rmSync(join(userData, 'mcp.json'), { force: true })
   try {
-    mcp = await startMcpServer({
-      tools,
-      tokenFile: join(userData, 'mcp.json'),
-      version: app.getVersion()
-    })
+    mcp = await startMcpServer({ tools, tokens: mcpTokens, version: app.getVersion() })
   } catch (error) {
     console.error('[mcp] server did not start', error)
     mcp = null
@@ -217,8 +261,8 @@ function createWindow(): void {
   // Renderer yeniden yüklenince terminal görünümleri kaybolur; sahipsiz süreç bırakma.
   win.webContents.on('did-finish-load', () => {
     ptys.killAll()
-    pendingGuidelineUpdates.forEach((update) => send(IPC.profileGuidelinesUpdated, update))
-    pendingGuidelineUpdates = []
+    mcpTokens.revokeAll()
+    notes?.reset()
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -226,6 +270,17 @@ function createWindow(): void {
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+}
+
+// One instance only: a second copy would fight over the MCP port and every account's .claude.json.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+  })
 }
 
 app.whenReady().then(() => {
@@ -250,16 +305,31 @@ app.whenReady().then(() => {
     checkUpdate: checkUpdateQuietly,
     openUpdate: openUpdatePage,
     prepareAccount,
-    onProjectMoved: (before, after) => {
+    onProjectMoved: (before, after, projectId) => {
       try {
-        notes?.relocateForProjectChange(before, after)
+        notes?.relocateForProjectChange(before, after, projectId)
       } catch (error) {
         console.error('[notes] could not move project notes', error)
       }
-    }
+    },
+    prepareProjectMemory: (projectId) => {
+      try {
+        notes?.prepareProjectMemory(projectId)
+      } catch (error) {
+        console.error('[notes] could not prepare project notes', error)
+      }
+    },
+    issueMcpToken: (scope) => mcpTokens.issue(scope),
+    revokeMcpTokens: (sessionIds) => sessionIds.forEach((id) => mcpTokens.revoke(id))
   })
   const ipcTools = createIpcTools(() => mainWindow)
-  notes = registerNotesIpc({ handle: ipcTools.handle, repo, send })
+  notes = registerNotesIpc({
+    handle: ipcTools.handle,
+    repo,
+    send,
+    isProjectRunning: (projectId) =>
+      repo.get().sessions.some((s) => s.projectId === projectId && ptys.has(s.id))
+  })
   registerProfileIpc({
     handle: ipcTools.handle,
     repo,
@@ -268,7 +338,12 @@ app.whenReady().then(() => {
     send,
     globalDir: join(homedir(), '.claude'),
     guidelinesText,
-    optimizePrompt
+    optimizePrompt,
+    takePendingGuidelineUpdates: () => {
+      const updates = pendingGuidelineUpdates
+      pendingGuidelineUpdates = []
+      return updates
+    }
   })
   registerMcpIpc({
     handle: ipcTools.handle,
@@ -290,6 +365,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
   ptys.killAll()
+  mcpTokens.revokeAll()
   notes?.dispose()
   void mcp?.stop()
 })

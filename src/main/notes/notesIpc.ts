@@ -1,12 +1,11 @@
-import { existsSync, mkdirSync, watch, type FSWatcher } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, watch, type FSWatcher } from 'node:fs'
 import { shell } from 'electron'
 import { DomainError } from '../../shared/errors'
 import { IPC } from '../../shared/ipc'
 import { isText, type IpcTools } from '../ipcUtil'
 import type { Repository } from '../state/repository'
-import { memoryDir } from './memoryPath'
-import { isValidNoteName, listNotes, readNote, relocateMemory } from './notesStore'
+import { existingNotePath, isSafeMemoryDir, listNotes, readNote } from './notesStore'
+import { createNotesSync, type ProjectLocation } from './notesSync'
 
 const CHANGE_DEBOUNCE_MS = 150
 
@@ -14,11 +13,8 @@ interface Deps {
   handle: IpcTools['handle']
   repo: Repository
   send: (channel: string, ...args: unknown[]) => void
-}
-
-interface ProjectLocation {
-  configDir: string
-  path: string
+  /** True while any terminal of the project is alive. */
+  isProjectRunning: (projectId: string) => boolean
 }
 
 interface Watch {
@@ -29,8 +25,16 @@ interface Watch {
 }
 
 export interface NotesIpc {
-  /** Moves the memory folder when a project's account or path changes; re-targets watchers. */
-  relocateForProjectChange(before: ProjectLocation, after: ProjectLocation): void
+  /**
+   * Moves the memory folder when a project's account or path changes and re-targets watchers.
+   * Deferred while the project runs; copies instead of moving when another project of the old
+   * account shares the memory key.
+   */
+  relocateForProjectChange(before: ProjectLocation, after: ProjectLocation, projectId: string): void
+  /** Call before every Claude tab starts: applies deferred moves, merges orphaned notes. */
+  prepareProjectMemory(projectId: string): void
+  /** Closes all watchers and clears ref counts (renderer reload). */
+  reset(): void
   dispose(): void
 }
 
@@ -43,13 +47,13 @@ async function openPath(path: string): Promise<null> {
   return null
 }
 
-export function registerNotesIpc({ handle, repo, send }: Deps): NotesIpc {
+export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps): NotesIpc {
   const watches = new Map<string, Watch>()
+  const sync = createNotesSync({ repo, isProjectRunning })
 
   const dirOf = (projectId: unknown): string => {
     if (!isText(projectId)) throw new DomainError('INVALID')
-    const project = repo.project(projectId)
-    return memoryDir(repo.account(project.accountId).configDir, project.path)
+    return sync.dirOf(projectId)
   }
 
   const notify = (projectId: string, entry: Watch): void => {
@@ -69,6 +73,10 @@ export function registerNotesIpc({ handle, repo, send }: Deps): NotesIpc {
 
   const start = (projectId: string, entry: Watch): void => {
     stop(entry)
+    if (!isSafeMemoryDir(entry.dir)) {
+      console.warn('[notes] refusing to watch an unsafe memory folder')
+      return
+    }
     try {
       mkdirSync(entry.dir, { recursive: true })
       const watcher = watch(entry.dir, () => notify(projectId, entry))
@@ -82,23 +90,50 @@ export function registerNotesIpc({ handle, repo, send }: Deps): NotesIpc {
     }
   }
 
-  handle(IPC.notesList, (projectId: string) => listNotes(dirOf(projectId)))
+  /** Points the project's watcher at its current folder and refreshes the panel. */
+  const retarget = (projectId: string, changed: boolean): void => {
+    const entry = watches.get(projectId)
+    if (!entry) return
+    const dir = sync.dirOf(projectId)
+    if (dir !== entry.dir) {
+      entry.dir = dir
+      start(projectId, entry)
+      changed = true
+    }
+    if (changed) notify(projectId, entry)
+  }
+
+  const prepare = (projectId: string): boolean => {
+    try {
+      return sync.prepare(projectId)
+    } catch (error) {
+      console.warn('[notes] could not prepare project memory', error)
+      return false
+    }
+  }
+
+  handle(IPC.notesList, (projectId: string) => {
+    const dir = dirOf(projectId)
+    // The listing already includes merged files, so the panel needs no change event.
+    prepare(projectId)
+    return listNotes(dir)
+  })
   handle(IPC.notesRead, (projectId: string, name: string) => readNote(dirOf(projectId), name))
 
-  handle(IPC.notesOpen, (projectId: string, name: string) => {
-    if (!isValidNoteName(name)) throw new DomainError('INVALID')
-    const path = join(dirOf(projectId), name)
-    if (!existsSync(path)) throw new DomainError('NOT_FOUND')
-    return openPath(path)
-  })
+  handle(IPC.notesOpen, (projectId: string, name: string) =>
+    openPath(existingNotePath(dirOf(projectId), name))
+  )
   handle(IPC.notesReveal, (projectId: string) => {
     const dir = dirOf(projectId)
+    if (!isSafeMemoryDir(dir)) throw new DomainError('INVALID')
     mkdirSync(dir, { recursive: true })
     return openPath(dir)
   })
 
   handle(IPC.notesWatch, (projectId: string) => {
-    const dir = dirOf(projectId)
+    dirOf(projectId)
+    prepare(projectId)
+    const dir = sync.dirOf(projectId)
     const existing = watches.get(projectId)
     if (existing) {
       existing.refs++
@@ -123,23 +158,20 @@ export function registerNotesIpc({ handle, repo, send }: Deps): NotesIpc {
     return null
   })
 
+  const reset = (): void => {
+    watches.forEach(stop)
+    watches.clear()
+  }
+
   return {
-    relocateForProjectChange(before, after) {
-      const fromDir = memoryDir(before.configDir, before.path)
-      const toDir = memoryDir(after.configDir, after.path)
-      if (fromDir === toDir) return
-      const result = relocateMemory(fromDir, toDir)
-      if (result.moved > 0) console.info('[notes] memory relocated', result)
-      for (const [projectId, entry] of watches) {
-        if (entry.dir !== fromDir) continue
-        entry.dir = toDir
-        start(projectId, entry)
-        notify(projectId, entry)
-      }
+    relocateForProjectChange(before, after, projectId) {
+      const outcome = sync.relocate(before, after, projectId)
+      retarget(projectId, outcome !== 'none')
     },
-    dispose() {
-      watches.forEach(stop)
-      watches.clear()
-    }
+    prepareProjectMemory(projectId) {
+      retarget(projectId, prepare(projectId))
+    },
+    reset,
+    dispose: reset
   }
 }

@@ -18,7 +18,7 @@ export function ErrorToast(): React.JSX.Element | null {
   return (
     <div
       role="alert"
-      className="fixed bottom-4 right-4 z-[60] flex max-w-sm items-start gap-3 rounded-lg border border-border bg-elevated p-3 shadow-xl"
+      className="fixed bottom-4 right-4 z-[90] flex max-w-sm items-start gap-3 rounded-lg border border-border bg-elevated p-3 shadow-xl"
     >
       <span className="flex-1 text-danger">
         {t(`errors.${error}`, { defaultValue: t('errors.UNKNOWN') })}

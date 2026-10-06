@@ -1,27 +1,30 @@
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { createReadStream, readdirSync, statSync, type Stats } from 'node:fs'
 import {
-  cpSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  readlinkSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  type Stats
-} from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+  cp,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+  symlink,
+  unlink,
+  writeFile
+} from 'node:fs/promises'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isDeepStrictEqual, promisify } from 'node:util'
 import type {
   ProfileCategory,
   ProfileCategorySummary,
   ProfileDiffEntry,
   ProfileImportResult
 } from '../../shared/types'
-import { GUIDELINES_IMPORT_LINE, ensureGuidelinesImport, writeFileAtomic } from './guidelines'
+import { GUIDELINES_IMPORT_LINE, withGuidelinesImport } from './guidelines'
 
 /** Source entry (relative to the config dir) for each importable category. */
 export const CATEGORY_ENTRIES: Record<ProfileCategory, string> = {
@@ -40,11 +43,46 @@ export const isProfileCategory = (value: unknown): value is ProfileCategory =>
   typeof value === 'string' && Object.hasOwn(CATEGORY_ENTRIES, value)
 
 const FINDER_JUNK = '.DS_Store'
+const TMP_SUFFIX = '.claudedeck-tmp'
+const COPY_TIMEOUT_MS = 5 * 60 * 1000
+const SETTINGS_MODE = 0o600
 const PLUGIN_INDEX_FILES = ['installed_plugins.json', 'known_marketplaces.json']
-const STRIPPED_SETTINGS = ['apiKeyHelper']
-const STRIPPED_ENV = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']
+const STRIPPED_SETTINGS = [
+  'apiKeyHelper',
+  'awsAuthRefresh',
+  'awsCredentialExport',
+  'otelHeadersHelper'
+]
+const SECRET_ENV = /(TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)/i
+const UNION_PERMISSIONS = ['allow', 'deny', 'ask', 'additionalDirectories']
+/** Top-level names a CLAUDE.md `@import` may never pull into the profile. */
+const DENIED_IMPORT_ROOTS = new Set([
+  'settings.json',
+  'settings.local.json',
+  'projects',
+  'sessions',
+  'plugins',
+  'history.jsonl'
+])
+const GUIDELINES_FILE = GUIDELINES_IMPORT_LINE.slice(1)
+
+/** Plugins keep their symlinks; everything else is copied (and compared) through them. */
+const followsLinks = (category: ProfileCategory): boolean => category !== 'plugins'
 
 type Json = Record<string, unknown>
+
+/** Thrown when one category could not be imported; the target keeps its previous content. */
+export class ProfileImportError extends Error {
+  constructor(
+    readonly category: ProfileCategory,
+    cause: unknown
+  ) {
+    super(`importing ${category} failed: ${cause instanceof Error ? cause.message : cause}`, {
+      cause
+    })
+    this.name = 'ProfileImportError'
+  }
+}
 
 function statOrNull(path: string): Stats | null {
   try {
@@ -53,6 +91,24 @@ function statOrNull(path: string): Stats | null {
     return null
   }
 }
+
+async function statAsync(path: string): Promise<Stats | null> {
+  try {
+    return await stat(path)
+  } catch {
+    return null
+  }
+}
+
+async function lstatAsync(path: string): Promise<Stats | null> {
+  try {
+    return await lstat(path)
+  } catch {
+    return null
+  }
+}
+
+const within = (path: string, root: string): boolean => path === root || path.startsWith(root + sep)
 
 /** Top-level entries of a folder, ignoring dotfiles such as .DS_Store. */
 function visibleEntries(dir: string): string[] {
@@ -70,6 +126,62 @@ export function summarizeSource(sourceDir: string): ProfileCategorySummary[] {
   })
 }
 
+/**
+ * Where symlinks of a copied entry must point. Links inside the entry stay relative, links into
+ * the source profile are moved into the target profile, anything else keeps its destination.
+ */
+interface Relocation {
+  /** Resolved source entry, where the links physically live. */
+  realEntry: string
+  roots: Array<[from: string, to: string]>
+  /** Source profile roots (resolved and as given) mapped to the target profile. */
+  profileRoots: Array<[from: string, to: string]>
+}
+
+async function relocationFor(source: string, target: string, entry: string): Promise<Relocation> {
+  const srcEntry = join(source, entry)
+  const destEntry = join(target, entry)
+  const realEntry = await realpath(srcEntry)
+  const profileRoots: Array<[string, string]> = [
+    [await realpath(source), target],
+    [source, target]
+  ]
+  return {
+    realEntry,
+    roots: [[realEntry, destEntry], [srcEntry, destEntry], ...profileRoots],
+    profileRoots
+  }
+}
+
+/** New value for a link found at `rel` (relative to the entry) with the value `value`. */
+export function relocateLink(value: string, rel: string, relocation: Relocation): string {
+  const resolved = resolve(relocation.realEntry, dirname(rel), value)
+  if (!isAbsolute(value) && within(resolved, relocation.realEntry)) return value
+  for (const [from, to] of relocation.roots) {
+    if (within(resolved, from)) return to + resolved.slice(from.length)
+  }
+  return resolved
+}
+
+/** Rewrites every symlink under `dir` (a copy of the relocation's entry) in place. */
+async function relocateLinks(dir: string, relocation: Relocation): Promise<void> {
+  const walk = async (abs: string, rel: string): Promise<void> => {
+    const stats = await lstatAsync(abs)
+    if (!stats) return
+    if (stats.isSymbolicLink()) {
+      const value = await readlink(abs)
+      const next = relocateLink(value, rel, relocation)
+      if (next !== value) {
+        await unlink(abs)
+        await symlink(next, abs)
+      }
+    } else if (stats.isDirectory()) {
+      for (const name of await readdir(abs)) await walk(join(abs, name), join(rel, name))
+    }
+  }
+  await walk(dir, '')
+}
+
 interface FileInfo {
   path: string
   size: number
@@ -77,19 +189,25 @@ interface FileInfo {
   link: boolean
 }
 
-/** Files under `root` keyed by relative path; a missing root yields an empty map. */
-function listFiles(root: string): Map<string, FileInfo> {
+/**
+ * Files under `root` keyed by relative path; a missing root yields an empty map. With `follow`
+ * symlinks are walked like the copy dereferences them, otherwise they are listed as links.
+ */
+async function listFiles(root: string, follow: boolean): Promise<Map<string, FileInfo>> {
   const files = new Map<string, FileInfo>()
-  const walk = (abs: string, rel: string): void => {
-    let stats: Stats
-    try {
-      stats = rel === '' ? statSync(abs) : lstatSync(abs)
-    } catch {
-      return
-    }
+  const walk = async (abs: string, rel: string, ancestors: string[]): Promise<void> => {
+    const stats = rel === '' || follow ? await statAsync(abs) : await lstatAsync(abs)
+    if (!stats) return
     if (stats.isDirectory()) {
-      for (const name of readdirSync(abs)) {
-        if (name !== FINDER_JUNK) walk(join(abs, name), rel ? join(rel, name) : name)
+      let chain = ancestors
+      if (follow) {
+        // A link back to an ancestor would recurse forever.
+        const real = await realpath(abs)
+        if (ancestors.includes(real)) return
+        chain = [...ancestors, real]
+      }
+      for (const name of await readdir(abs)) {
+        if (name !== FINDER_JUNK) await walk(join(abs, name), rel ? join(rel, name) : name, chain)
       }
     } else if (stats.isFile() || stats.isSymbolicLink()) {
       files.set(rel, {
@@ -100,93 +218,206 @@ function listFiles(root: string): Map<string, FileInfo> {
       })
     }
   }
-  walk(root, '')
+  await walk(root, '', [])
   return files
 }
 
-function fingerprint(file: FileInfo): string {
-  if (file.link) return `link:${readlinkSync(file.path)}`
-  return createHash('sha256').update(readFileSync(file.path)).digest('hex')
+async function hashFile(path: string): Promise<string> {
+  const hash = createHash('sha256')
+  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer)
+  return hash.digest('hex')
 }
 
-function sameFile(a: FileInfo, b: FileInfo): boolean {
+/** Copies keep timestamps, but a fallback copy may only keep whole milliseconds. */
+const sameTime = (a: FileInfo, b: FileInfo): boolean => Math.abs(a.mtimeMs - b.mtimeMs) < 1
+
+async function sameContent(a: FileInfo, b: FileInfo): Promise<boolean> {
+  if (a.size !== b.size) return false
+  if (sameTime(a, b)) return true
+  return (await hashFile(a.path)) === (await hashFile(b.path))
+}
+
+/** Plugin trees can be huge: links are compared by destination, files by size and mtime only. */
+async function samePluginFile(
+  a: FileInfo,
+  b: FileInfo,
+  rel: string,
+  relocation: Relocation
+): Promise<boolean> {
   if (a.link !== b.link) return false
-  if (!a.link && a.size !== b.size) return false
-  if (!a.link && a.mtimeMs === b.mtimeMs) return true
-  return fingerprint(a) === fingerprint(b)
+  if (a.link)
+    return relocateLink(await readlink(a.path), rel, relocation) === (await readlink(b.path))
+  if (PLUGIN_INDEX_FILES.includes(rel)) {
+    const expected = await rewrittenIndex(a.path, relocation.profileRoots)
+    return expected === (await readFile(b.path, 'utf8'))
+  }
+  return a.size === b.size && sameTime(a, b)
+}
+
+async function readText(file: string): Promise<string | null> {
+  const stats = await statAsync(file)
+  return stats?.isFile() ? readFile(file, 'utf8') : null
+}
+
+/** A CLAUDE.md holding only the app's own import line has nothing of the user's in it. */
+const isGuidelinesOnly = (text: string): boolean => text.trim() === GUIDELINES_IMPORT_LINE
+
+const counts = (
+  category: ProfileCategory,
+  added = 0,
+  changed = 0,
+  removed = 0
+): ProfileDiffEntry => ({ category, added, changed, removed })
+
+async function diffCategory(
+  category: ProfileCategory,
+  source: string,
+  target: string
+): Promise<ProfileDiffEntry> {
+  const entry = CATEGORY_ENTRIES[category]
+  const src = join(source, entry)
+  const dest = join(target, entry)
+  // Importing an absent category changes nothing.
+  if (!(await statAsync(src))) return counts(category)
+
+  if (category === 'instructions') {
+    const incoming = await readText(src)
+    let current = await readText(dest)
+    if (current !== null && isGuidelinesOnly(current)) current = null
+    if (incoming === null) return counts(category)
+    if (current === null) return counts(category, 1)
+    return counts(category, 0, withGuidelinesImport(incoming) === current ? 0 : 1)
+  }
+
+  if (category === 'settings') {
+    if (!(await statAsync(dest))) return counts(category, 1)
+    try {
+      const current = await readJson(dest)
+      const unchanged = isDeepStrictEqual(mergeSettings(current, await readJson(src)), current)
+      return counts(category, 0, unchanged ? 0 : 1)
+    } catch {
+      return counts(category, 0, 1)
+    }
+  }
+
+  const follow = followsLinks(category)
+  const incoming = await listFiles(src, follow)
+  const current = await listFiles(dest, follow)
+  const relocation = follow ? null : await relocationFor(source, target, entry)
+  let added = 0
+  let changed = 0
+  let removed = 0
+  for (const [rel, file] of incoming) {
+    const existing = current.get(rel)
+    if (!existing) added++
+    else if (
+      !(relocation
+        ? await samePluginFile(file, existing, rel, relocation)
+        : !file.link && !existing.link && (await sameContent(file, existing)))
+    )
+      changed++
+  }
+  for (const rel of current.keys()) if (!incoming.has(rel)) removed++
+  return counts(category, added, changed, removed)
 }
 
 /** Per-category file counts that importing from `sourceDir` would add, change or remove. */
-export function diffProfile(sourceDir: string, targetDir: string): ProfileDiffEntry[] {
-  return PROFILE_CATEGORIES.map((category) => {
-    const entry = CATEGORY_ENTRIES[category]
-    const source = listFiles(join(sourceDir, entry))
-    const target = listFiles(join(targetDir, entry))
-    let added = 0
-    let changed = 0
-    let removed = 0
-    for (const [rel, file] of source) {
-      const existing = target.get(rel)
-      if (!existing) added++
-      else if (!sameFile(file, existing)) changed++
-    }
-    for (const rel of target.keys()) if (!source.has(rel)) removed++
-    return { category, added, changed, removed }
+export async function diffProfile(
+  sourceDir: string,
+  targetDir: string
+): Promise<ProfileDiffEntry[]> {
+  const source = resolve(sourceDir)
+  const target = resolve(targetDir)
+  const result: ProfileDiffEntry[] = []
+  for (const category of PROFILE_CATEGORIES) {
+    result.push(await diffCategory(category, source, target))
+  }
+  return result
+}
+
+export type CopyRunner = (src: string, dest: string, dereference: boolean) => Promise<void>
+
+const execFileAsync = promisify(execFile)
+
+/** APFS clone through `cp -c`; fails on other volumes or file systems. */
+export const cloneCopy: CopyRunner = async (src, dest, dereference) => {
+  await execFileAsync('/bin/cp', [dereference ? '-cRLp' : '-cRp', src, dest], {
+    timeout: COPY_TIMEOUT_MS
   })
 }
 
-export type CopyRunner = (src: string, dest: string, dereference: boolean) => void
-
-/** APFS clone through `cp -c`; fails on other volumes or file systems. */
-export const cloneCopy: CopyRunner = (src, dest, dereference) => {
-  execFileSync('/bin/cp', [dereference ? '-cRL' : '-cR', src, dest], { stdio: 'ignore' })
-}
-
 /**
- * Copies `src` to `dest` (which must not exist). The source is resolved first so a symlinked
- * folder is copied as a real folder; with `dereference` nested symlinks are copied as files too,
- * so later edits in the profile never write through a link into the source.
+ * Copies `src` to `dest` (which must not exist), keeping timestamps. The source is resolved first
+ * so a symlinked folder is copied as a real folder; with `dereference` nested symlinks are copied
+ * as files too, so later edits in the profile never write through a link into the source.
+ * Without it links are copied verbatim (relative links stay relative).
  */
-export function copyEntry(
+export async function copyEntry(
   src: string,
   dest: string,
   dereference: boolean,
   run: CopyRunner = cloneCopy
-): void {
-  const real = realpathSync(src)
+): Promise<void> {
+  const real = await realpath(src)
   try {
-    run(real, dest, dereference)
+    await run(real, dest, dereference)
   } catch {
-    cpSync(real, dest, { recursive: true, dereference, force: true })
+    await rm(dest, { recursive: true, force: true })
+    await cp(real, dest, {
+      recursive: true,
+      dereference,
+      verbatimSymlinks: !dereference,
+      preserveTimestamps: true,
+      force: true
+    })
   }
 }
 
-function readJson(file: string): Json {
-  if (!existsSync(file)) return {}
-  const value: unknown = JSON.parse(readFileSync(file, 'utf8'))
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {}
+async function readJson(file: string): Promise<Json> {
+  const text = await readText(file)
+  if (text === null) return {}
+  const value: unknown = JSON.parse(text)
+  return isObject(value) ? value : {}
 }
 
 const isObject = (value: unknown): value is Json =>
   !!value && typeof value === 'object' && !Array.isArray(value)
 
-/** Imported keys win, account-only keys stay, secrets never travel and allow rules are unioned. */
-export function mergeSettings(target: Json, source: Json): Json {
+function withoutSecrets(source: Json): Json {
   const incoming: Json = { ...source }
   for (const key of STRIPPED_SETTINGS) delete incoming[key]
   if (isObject(incoming.env)) {
-    const env = { ...incoming.env }
-    for (const key of STRIPPED_ENV) delete env[key]
-    incoming.env = env
+    incoming.env = Object.fromEntries(
+      Object.entries(incoming.env).filter(([key]) => !SECRET_ENV.test(key))
+    )
   }
+  return incoming
+}
+
+function mergePermissions(target: Json, source: Json): Json {
+  const merged: Json = { ...target, ...source }
+  for (const key of UNION_PERMISSIONS) {
+    const lists = [source[key], target[key]].filter(Array.isArray) as unknown[][]
+    if (lists.length) merged[key] = [...new Set(lists.flat())]
+  }
+  // The account's own default mode is a safety choice; only fill it when missing.
+  if (target.defaultMode !== undefined) merged.defaultMode = target.defaultMode
+  return merged
+}
+
+/**
+ * Imported keys win and account-only keys stay. Secrets and credential helpers never travel,
+ * env maps are merged, permission lists are unioned and the account's default mode is kept.
+ */
+export function mergeSettings(target: Json, source: Json): Json {
+  const incoming = withoutSecrets(source)
   const merged: Json = { ...target, ...incoming }
+  if (isObject(target.env) && isObject(incoming.env)) {
+    merged.env = { ...target.env, ...incoming.env }
+  }
   const targetPerms = isObject(target.permissions) ? target.permissions : null
   const sourcePerms = isObject(incoming.permissions) ? incoming.permissions : null
-  if (targetPerms && sourcePerms && Array.isArray(targetPerms.allow)) {
-    const allow = Array.isArray(sourcePerms.allow) ? [...(sourcePerms.allow as unknown[])] : []
-    for (const rule of targetPerms.allow as unknown[]) if (!allow.includes(rule)) allow.push(rule)
-    merged.permissions = { ...sourcePerms, allow }
-  }
+  if (targetPerms && sourcePerms) merged.permissions = mergePermissions(targetPerms, sourcePerms)
   return merged
 }
 
@@ -203,97 +434,177 @@ export function rewritePaths(value: unknown, from: string, to: string): unknown 
   return walk(value)
 }
 
-function rewritePluginIndexes(pluginsDir: string, sourceDir: string, targetDir: string): void {
+/** Text of a plugin index file once its paths point into the target profile. */
+async function rewrittenIndex(file: string, roots: Array<[string, string]>): Promise<string> {
+  const raw = await readFile(file, 'utf8')
+  let json: unknown
+  try {
+    json = JSON.parse(raw)
+  } catch {
+    return raw
+  }
+  const before = JSON.stringify(json, null, 2)
+  // Paths may be recorded through a symlinked or a resolved source root.
+  for (const [from, to] of roots) json = rewritePaths(json, from, to)
+  const after = JSON.stringify(json, null, 2)
+  return after === before ? raw : after + '\n'
+}
+
+async function rewritePluginIndexes(
+  pluginsDir: string,
+  roots: Array<[string, string]>
+): Promise<void> {
   for (const name of PLUGIN_INDEX_FILES) {
     const file = join(pluginsDir, name)
-    if (!existsSync(file)) continue
-    let json: unknown
-    try {
-      json = JSON.parse(readFileSync(file, 'utf8'))
-    } catch {
-      continue
-    }
-    const before = JSON.stringify(json, null, 2)
-    // Paths may be recorded through a symlinked or a resolved source root.
-    for (const root of new Set([sourceDir, realpathSync(sourceDir)])) {
-      json = rewritePaths(json, root, targetDir)
-    }
-    const after = JSON.stringify(json, null, 2)
-    if (after !== before) writeFileAtomic(file, after + '\n')
+    if (!(await statAsync(file))?.isFile()) continue
+    const raw = await readFile(file, 'utf8')
+    const next = await rewrittenIndex(file, roots)
+    if (next !== raw) await writeFile(file, next, 'utf8')
   }
+}
+
+/**
+ * Relative files the source CLAUDE.md pulls in with `@path` lines, so they can travel with it.
+ * Only existing files inside the source profile are returned, never app-managed or private ones.
+ */
+async function instructionImports(source: string, text: string): Promise<string[]> {
+  const found = new Set<string>()
+  let fenced = false
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('```')) fenced = !fenced
+    if (fenced || !trimmed.startsWith('@')) continue
+    const ref = trimmed.slice(1).split(/\s+/, 1)[0] ?? ''
+    if (!ref || isAbsolute(ref) || ref.startsWith('~')) continue
+    const abs = resolve(source, ref)
+    if (!within(abs, source) || abs === source) continue
+    const rel = relative(source, abs)
+    const top = rel.split(sep, 1)[0]
+    if (
+      top.startsWith('.') ||
+      DENIED_IMPORT_ROOTS.has(top) ||
+      rel === CATEGORY_ENTRIES.instructions ||
+      rel === GUIDELINES_FILE ||
+      within(rel, join('claudedeck', 'backups'))
+    )
+      continue
+    if ((await statAsync(abs))?.isFile()) found.add(rel)
+  }
+  return [...found]
 }
 
 function backupStamp(now: Date): string {
   return now.toISOString().replace(/:/g, '-')
 }
 
-function freshDir(base: string): string {
+async function freshDir(base: string): Promise<string> {
   let dir = base
-  for (let i = 1; existsSync(dir); i++) dir = `${base}-${i}`
+  for (let i = 1; await lstatAsync(dir); i++) dir = `${base}-${i}`
   return dir
 }
 
 /**
- * Copies the chosen categories from `sourceDir` into `targetDir`. Existing target items are moved
- * to a timestamped backup folder first. `sourceDir` is only ever read.
+ * Copies the chosen categories from `sourceDir` into `targetDir`. Each item is built next to its
+ * destination first; only once that succeeded is the existing item moved to a timestamped backup
+ * folder and the new one renamed into place, so a failure never leaves an item missing.
+ * `sourceDir` is only ever read.
  */
-export function importProfile(
+export async function importProfile(
   sourceDir: string,
   targetDir: string,
   categories: ProfileCategory[],
   now: Date = new Date(),
   run: CopyRunner = cloneCopy
-): ProfileImportResult {
+): Promise<ProfileImportResult> {
   const source = resolve(sourceDir)
   const target = resolve(targetDir)
-  if (source === target || target.startsWith(source + sep) || source.startsWith(target + sep)) {
+  if (source === target || within(target, source) || within(source, target)) {
     throw new Error('source and target profiles overlap')
   }
   const chosen = PROFILE_CATEGORIES.filter((c) => categories.includes(c))
-  const available = chosen.filter((c) => existsSync(join(source, CATEGORY_ENTRIES[c])))
-
-  let backupDir: string | null = null
-  const backup = (entry: string): void => {
-    const from = join(target, entry)
-    if (!existsSync(from) && !isLink(from)) return
-    // A CLAUDE.md holding only the app's own import line has nothing of the user's to keep.
-    if (
-      entry === CATEGORY_ENTRIES.instructions &&
-      !isLink(from) &&
-      readFileSync(from, 'utf8').trim() === GUIDELINES_IMPORT_LINE
-    ) {
-      rmSync(from)
-      return
-    }
-    backupDir ??= freshDir(join(target, 'claudedeck', 'backups', backupStamp(now)))
-    mkdirSync(backupDir, { recursive: true })
-    renameSync(from, join(backupDir, entry))
+  const available: ProfileCategory[] = []
+  for (const category of chosen) {
+    if (await statAsync(join(source, CATEGORY_ENTRIES[category]))) available.push(category)
   }
 
-  mkdirSync(target, { recursive: true })
+  let backupDir: string | null = null
+  /** Moves the current item away; returns where it went, or null when nothing was there. */
+  const backup = async (entry: string): Promise<string | null> => {
+    const from = join(target, entry)
+    const stats = await lstatAsync(from)
+    if (!stats) return null
+    // Files are replaced atomically by the rename; the app's own import line is not worth keeping.
+    if (
+      entry === CATEGORY_ENTRIES.instructions &&
+      stats.isFile() &&
+      isGuidelinesOnly(await readFile(from, 'utf8'))
+    ) {
+      return null
+    }
+    backupDir ??= await freshDir(join(target, 'claudedeck', 'backups', backupStamp(now)))
+    const to = join(backupDir, entry)
+    await mkdir(dirname(to), { recursive: true })
+    await rename(from, to)
+    return to
+  }
+
+  const replaceItem = async (
+    entry: string,
+    produce: (tmp: string) => Promise<void>
+  ): Promise<void> => {
+    const dest = join(target, entry)
+    const tmp = dest + TMP_SUFFIX
+    await mkdir(dirname(dest), { recursive: true })
+    await rm(tmp, { recursive: true, force: true })
+    try {
+      await produce(tmp)
+    } catch (error) {
+      await rm(tmp, { recursive: true, force: true })
+      throw error
+    }
+    const moved = await backup(entry)
+    try {
+      await rename(tmp, dest)
+    } catch (error) {
+      if (moved) await rename(moved, dest).catch(() => undefined)
+      await rm(tmp, { recursive: true, force: true })
+      throw error
+    }
+  }
+
+  await mkdir(target, { recursive: true })
   for (const category of available) {
     const entry = CATEGORY_ENTRIES[category]
     const src = join(source, entry)
-    const dest = join(target, entry)
-    if (category === 'settings') {
-      // Parse both sides before moving anything so invalid JSON leaves the target untouched.
-      const merged = mergeSettings(readJson(dest), readJson(src))
-      backup(entry)
-      writeFileAtomic(dest, JSON.stringify(merged, null, 2) + '\n')
-      continue
+    try {
+      if (category === 'settings') {
+        // Parse both sides before touching anything so invalid JSON leaves the target untouched.
+        const merged = mergeSettings(await readJson(join(target, entry)), await readJson(src))
+        await replaceItem(entry, (tmp) =>
+          writeFile(tmp, JSON.stringify(merged, null, 2) + '\n', {
+            encoding: 'utf8',
+            mode: SETTINGS_MODE
+          })
+        )
+      } else if (category === 'instructions') {
+        const text = await readFile(src, 'utf8')
+        for (const rel of await instructionImports(source, text)) {
+          await replaceItem(rel, (tmp) => copyEntry(join(source, rel), tmp, true, run))
+        }
+        await replaceItem(entry, (tmp) => writeFile(tmp, withGuidelinesImport(text), 'utf8'))
+      } else {
+        const follow = followsLinks(category)
+        const relocation = follow ? null : await relocationFor(source, target, entry)
+        await replaceItem(entry, async (tmp) => {
+          await copyEntry(src, tmp, follow, run)
+          if (!relocation) return
+          await relocateLinks(tmp, relocation)
+          if (category === 'plugins') await rewritePluginIndexes(tmp, relocation.profileRoots)
+        })
+      }
+    } catch (error) {
+      throw new ProfileImportError(category, error)
     }
-    backup(entry)
-    copyEntry(src, dest, category !== 'plugins', run)
-    if (category === 'plugins') rewritePluginIndexes(dest, source, target)
-    if (category === 'instructions') ensureGuidelinesImport(target)
   }
   return { imported: available, backupDir }
-}
-
-function isLink(path: string): boolean {
-  try {
-    return lstatSync(path).isSymbolicLink()
-  } catch {
-    return false
-  }
 }

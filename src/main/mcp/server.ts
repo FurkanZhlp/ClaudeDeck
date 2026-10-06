@@ -1,56 +1,52 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { dirname } from 'node:path'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { MCP_SERVER_NAME } from './register'
-import type { ToolName, Tools } from './tools'
+import type { McpScope, SessionTokens } from './sessionTokens'
+import type { ToolName, ToolResult, Tools } from './tools'
 
 export const DEFAULT_MCP_PORT = 47821
 const HOST = '127.0.0.1'
 const MCP_PATH = '/mcp'
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
-const TOKEN_PATTERN = /^[0-9a-f]{64}$/
+const DEFAULT_RATE_LIMIT: RateLimit = { limit: 60, windowMs: 60_000 }
+
+export interface RateLimit {
+  limit: number
+  windowMs: number
+}
 
 export interface McpServerOptions {
   tools: Tools
-  tokenFile: string
+  tokens: SessionTokens
   preferredPort?: number
   version?: string
+  /** Tool calls allowed per session and window; defaults to 60 per minute. */
+  rateLimit?: RateLimit
 }
 
 export interface RunningMcpServer {
   url: string
-  token: string
   stop(): Promise<void>
 }
 
-/** Reads the persisted token, or creates one (0600, atomic) on first run. */
-export function loadOrCreateToken(file: string): string {
-  if (existsSync(file)) {
-    try {
-      const { token } = JSON.parse(readFileSync(file, 'utf8')) as { token?: unknown }
-      if (typeof token === 'string' && TOKEN_PATTERN.test(token)) return token
-    } catch {
-      // Unreadable token file: replace it below.
+/** Fixed-window counter per key. */
+function createLimiter({ limit, windowMs }: RateLimit): (key: string) => boolean {
+  const windows = new Map<string, { start: number; count: number }>()
+  return (key) => {
+    const now = Date.now()
+    if (windows.size > 1000) {
+      for (const [k, w] of windows) if (now - w.start >= windowMs) windows.delete(k)
     }
+    const current = windows.get(key)
+    if (!current || now - current.start >= windowMs) {
+      windows.set(key, { start: now, count: 1 })
+      return true
+    }
+    current.count += 1
+    return current.count <= limit
   }
-  const token = randomBytes(32).toString('hex')
-  mkdirSync(dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  writeFileSync(tmp, JSON.stringify({ token }), { encoding: 'utf8', mode: 0o600 })
-  renameSync(tmp, file)
-  return token
-}
-
-// Hashing first gives equal lengths, so timingSafeEqual never throws or leaks the length.
-const digest = (value: string): Buffer => createHash('sha256').update(value).digest()
-
-function authorized(req: IncomingMessage, expected: Buffer): boolean {
-  const match = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')
-  return !!match && timingSafeEqual(digest(match[1]), expected)
 }
 
 function sendError(res: ServerResponse, status: number, message: string): void {
@@ -62,13 +58,30 @@ function sendError(res: ServerResponse, status: number, message: string): void {
   res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message }, id: null }))
 }
 
-function buildMcpServer(tools: Tools, version: string): McpServer {
+// The token lives in a Map keyed by its SHA-256 (see sessionTokens), so no comparison of secret
+// bytes happens here and timingSafeEqual is not needed.
+function scopeOf(req: IncomingMessage, tokens: SessionTokens): McpScope | null {
+  const match = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')
+  return match ? tokens.lookup(match[1]) : null
+}
+
+const RATE_LIMITED: ToolResult = {
+  content: [{ type: 'text', text: 'Rate limit exceeded, try again in a minute.' }],
+  isError: true
+}
+
+function buildMcpServer(
+  tools: Tools,
+  version: string,
+  scope: McpScope,
+  allow: (key: string) => boolean
+): McpServer {
   const server = new McpServer({ name: MCP_SERVER_NAME, version })
   for (const [name, tool] of Object.entries(tools) as [ToolName, Tools[ToolName]][]) {
     server.registerTool(
       name,
       { description: tool.description, inputSchema: tool.inputSchema },
-      (args) => tool.call(args)
+      (args) => (allow(scope.sessionId) ? tool.call(args, scope) : RATE_LIMITED)
     )
   }
   return server
@@ -90,23 +103,29 @@ function listen(server: Server, port: number): Promise<number> {
   })
 }
 
-/** Streamable HTTP MCP server on loopback, guarded by a bearer token. Stateless per request. */
+/**
+ * Streamable HTTP MCP server on loopback. Each Claude tab authenticates with its own short-lived
+ * token, and every tool call runs within that tab's scope. Stateless per request.
+ */
 export async function startMcpServer(opts: McpServerOptions): Promise<RunningMcpServer> {
-  const token = loadOrCreateToken(opts.tokenFile)
-  const expected = digest(token)
   const version = opts.version ?? '0.0.0'
+  const allow = createLimiter(opts.rateLimit ?? DEFAULT_RATE_LIMIT)
   let allowedHosts: string[] = []
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (!LOOPBACK.has(req.socket.remoteAddress ?? '')) return sendError(res, 403, 'Forbidden')
+    // Claude Code never sends Origin; a browser always does, so refuse any web page outright.
+    if (req.headers.origin !== undefined) return sendError(res, 403, 'Forbidden')
     if (new URL(req.url ?? '/', 'http://localhost').pathname !== MCP_PATH) {
       return sendError(res, 404, 'Not found')
     }
-    if (!authorized(req, expected)) return sendError(res, 401, 'Unauthorized')
+    if (req.method === 'OPTIONS') return sendError(res, 405, 'Method not allowed')
+    const scope = scopeOf(req, opts.tokens)
+    if (!scope) return sendError(res, 401, 'Unauthorized')
     // Stateless mode has no standalone SSE stream or session to delete.
     if (req.method !== 'POST') return sendError(res, 405, 'Method not allowed')
 
-    const server = buildMcpServer(opts.tools, version)
+    const server = buildMcpServer(opts.tools, version, scope, allow)
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
@@ -140,7 +159,6 @@ export async function startMcpServer(opts: McpServerOptions): Promise<RunningMcp
 
   return {
     url: `http://${HOST}:${port}${MCP_PATH}`,
-    token,
     stop: () =>
       new Promise<void>((done) => {
         http.close(() => done())

@@ -49,6 +49,10 @@ export class PtyManager {
     return true
   }
 
+  has(id: string): boolean {
+    return this.ptys.has(id)
+  }
+
   hasAccount(accountId: string): boolean {
     return [...this.ptys.values()].some((entry) => entry.accountId === accountId)
   }

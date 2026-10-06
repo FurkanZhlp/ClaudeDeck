@@ -8,10 +8,10 @@ export const guidelinesPath = (configDir: string): string =>
   join(configDir, 'claudedeck', 'guidelines.md')
 
 /** Writes through a temp file so readers never see a half-written file. */
-export function writeFileAtomic(file: string, content: string): void {
+export function writeFileAtomic(file: string, content: string, mode?: number): void {
   mkdirSync(dirname(file), { recursive: true })
   const tmp = `${file}.claudedeck-tmp`
-  writeFileSync(tmp, content, 'utf8')
+  writeFileSync(tmp, content, { encoding: 'utf8', mode })
   renameSync(tmp, file)
 }
 
@@ -29,13 +29,17 @@ export function parseGuidelinesVersion(text: string): number | null {
 export function ensureGuidelinesImport(configDir: string): boolean {
   const file = join(configDir, 'CLAUDE.md')
   const current = existsSync(file) ? readFileSync(file, 'utf8') : ''
-  if (current.split(/\r?\n/).some((line) => line.trim() === GUIDELINES_IMPORT_LINE)) return false
-  let next = `${GUIDELINES_IMPORT_LINE}\n`
-  if (current.trim() !== '') {
-    next = `${current}${current.endsWith('\n') ? '' : '\n'}\n${next}`
-  }
+  const next = withGuidelinesImport(current)
+  if (next === current) return false
   writeFileAtomic(file, next)
   return true
+}
+
+/** CLAUDE.md text with the guidelines import line appended when it is missing. */
+export function withGuidelinesImport(current: string): string {
+  if (current.split(/\r?\n/).some((line) => line.trim() === GUIDELINES_IMPORT_LINE)) return current
+  if (current.trim() === '') return `${GUIDELINES_IMPORT_LINE}\n`
+  return `${current}${current.endsWith('\n') ? '' : '\n'}\n${GUIDELINES_IMPORT_LINE}\n`
 }
 
 /**

@@ -20,6 +20,7 @@ import {
 import { buildSessionEnv, claudeCommand, defaultShell, resolveShellEnv } from './env/shellEnv'
 import type { PtyManager } from './pty/ptyManager'
 import { createIpcTools, isSize, isText } from './ipcUtil'
+import { MCP_TOKEN_ENV } from './mcp/sessionTokens'
 import type { Repository } from './state/repository'
 
 interface Deps {
@@ -35,8 +36,14 @@ interface Deps {
   /** A project's account or folder changed; its notes must follow. */
   onProjectMoved: (
     before: { configDir: string; path: string },
-    after: { configDir: string; path: string }
+    after: { configDir: string; path: string },
+    projectId: string
   ) => void
+  /** Pulls notes left under other accounts into the project's current memory folder. */
+  prepareProjectMemory: (projectId: string) => void
+  /** Token that limits a Claude tab's ClaudeDeck MCP access to its own project. */
+  issueMcpToken: (scope: { sessionId: string; projectId: string; accountId: string }) => string
+  revokeMcpTokens: (sessionIds: string[]) => void
 }
 
 function completeOnboarding(configDir: string): void {
@@ -56,7 +63,10 @@ export function registerIpc({
   checkUpdate,
   openUpdate,
   prepareAccount,
-  onProjectMoved
+  onProjectMoved,
+  prepareProjectMemory,
+  issueMcpToken,
+  revokeMcpTokens
 }: Deps): void {
   const { handle, trusted } = createIpcTools(getWindow)
 
@@ -111,13 +121,16 @@ export function registerIpc({
     })
     const after = location(id)
     if (before.configDir !== after.configDir || before.path !== after.path) {
-      onProjectMoved(before, after)
+      onProjectMoved(before, after, id)
+      // Running tabs keep the old account; their MCP scope no longer matches the project.
+      revokeMcpTokens(state.sessions.filter((s) => s.projectId === id).map((s) => s.id))
     }
     return state
   })
   handle(IPC.projectRemove, (id: string) => {
     const { state, removedSessionIds } = repo.removeProject(id)
     removedSessionIds.forEach((sessionId) => ptys.kill(sessionId))
+    revokeMcpTokens(removedSessionIds)
     return state
   })
 
@@ -127,6 +140,7 @@ export function registerIpc({
   handle(IPC.sessionRename, (id: string, title: string) => repo.renameSession(id, title))
   handle(IPC.sessionRemove, (id: string) => {
     ptys.kill(id)
+    revokeMcpTokens([id])
     return repo.removeSession(id)
   })
 
@@ -153,9 +167,16 @@ export function registerIpc({
       const account = repo.account(project.accountId)
       if (!existsSync(project.path)) throw new DomainError('PATH_MISSING')
       accounts.ensureConfigDir(account)
+      let mcpToken: string | null = null
       if (session.kind === 'claude') {
         completeOnboarding(account.configDir)
         prepareAccount(account)
+        prepareProjectMemory(project.id)
+        mcpToken = issueMcpToken({
+          sessionId: session.id,
+          projectId: project.id,
+          accountId: account.id
+        })
       }
 
       let args = ['-il']
@@ -180,7 +201,9 @@ export function registerIpc({
           file: defaultShell(base),
           args,
           cwd: project.path,
-          env: buildSessionEnv(base, account),
+          env: mcpToken
+            ? { ...buildSessionEnv(base, account), [MCP_TOKEN_ENV]: mcpToken }
+            : buildSessionEnv(base, account),
           cols,
           rows,
           accountId: account.id
@@ -224,6 +247,7 @@ export function registerIpc({
   })
   handle(IPC.ptyKill, (id: string) => {
     if (isText(id)) ptys.kill(id)
+    if (isText(id)) revokeMcpTokens([id])
     return null
   })
 

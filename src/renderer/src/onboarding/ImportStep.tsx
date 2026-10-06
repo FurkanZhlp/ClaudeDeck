@@ -11,6 +11,7 @@ import type {
 import { errorCode, useApp } from '../store'
 import { AccountDot } from '../ui/AccountDot'
 import { Button } from '../ui/Button'
+import { Notice } from '../ui/Notice'
 import { sectionTitleClass } from '../ui/styles'
 import { useOnboarding } from './onboardingStore'
 
@@ -41,6 +42,8 @@ export function ImportStep({ accountId }: { accountId: string }): React.JSX.Elem
   const [selected, setSelected] = useState<Set<ProfileCategory>>(new Set())
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<ProfileImportResult | null>(null)
+  // Shown inline: the global error toast sits behind the onboarding screen.
+  const [failure, setFailure] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -58,7 +61,7 @@ export function ImportStep({ accountId }: { accountId: string }): React.JSX.Elem
       })
       .catch((error) => {
         if (cancelled) return
-        useApp.getState().setError(errorCode(error))
+        setFailure(errorCode(error))
         setLoaded({ key, summary: [], diff: null })
         setSelected(new Set())
       })
@@ -69,6 +72,11 @@ export function ImportStep({ accountId }: { accountId: string }): React.JSX.Elem
 
   const loading = loaded?.key !== key
   const available = loaded && !loading ? loaded.summary.filter((s) => s.available) : []
+
+  const selectSource = (nextKey: string): void => {
+    setFailure(null)
+    setKey(nextKey)
+  }
 
   const toggle = (category: ProfileCategory): void => {
     setSelected((prev) => {
@@ -82,13 +90,14 @@ export function ImportStep({ accountId }: { accountId: string }): React.JSX.Elem
   const runImport = async (): Promise<void> => {
     if (!selected.size || importing) return
     setImporting(true)
+    setFailure(null)
     try {
       const categories = [...selected]
       const imported = await window.api.profile.import(accountId, toSource(key), categories)
       setResult(imported)
       setImported(imported.imported)
     } catch (error) {
-      useApp.getState().setError(errorCode(error))
+      setFailure(errorCode(error))
     } finally {
       setImporting(false)
     }
@@ -135,7 +144,7 @@ export function ImportStep({ accountId }: { accountId: string }): React.JSX.Elem
         <div role="radiogroup" aria-label={t('onboarding.import.source')} className="grid gap-2">
           <SourceOption
             checked={key === GLOBAL_KEY}
-            onSelect={() => setKey(GLOBAL_KEY)}
+            onSelect={() => selectSource(GLOBAL_KEY)}
             icon={<HardDrive size={14} className="text-accent" />}
             title={t('onboarding.import.global')}
             hint={t('onboarding.import.globalHint')}
@@ -145,7 +154,7 @@ export function ImportStep({ accountId }: { accountId: string }): React.JSX.Elem
             <SourceOption
               key={account.id}
               checked={key === account.id}
-              onSelect={() => setKey(account.id)}
+              onSelect={() => selectSource(account.id)}
               icon={<AccountDot color={account.color} size={10} />}
               title={account.name}
               hint={account.email ?? t('onboarding.import.accountHint')}
@@ -183,6 +192,14 @@ export function ImportStep({ accountId }: { accountId: string }): React.JSX.Elem
           </>
         )}
       </fieldset>
+
+      {failure && (
+        <div className="mt-5" role="alert">
+          <Notice tone="danger">
+            <p>{t(`errors.${failure}`, { defaultValue: t('errors.UNKNOWN') })}</p>
+          </Notice>
+        </div>
+      )}
 
       <div className="mt-6 flex items-center justify-end gap-2">
         <Button variant="ghost" onClick={next} disabled={importing}>

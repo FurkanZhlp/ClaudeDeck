@@ -1,4 +1,4 @@
-import { Archive, ListChecks, Loader2, ShieldCheck } from 'lucide-react'
+import { Archive, ListChecks, Loader2, LogIn, ShieldCheck } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { optimizePtyId } from '@shared/ipc'
@@ -6,6 +6,7 @@ import { errorCode, useApp } from '../store'
 import { TerminalView } from '../terminal/TerminalView'
 import * as pool from '../terminal/terminalPool'
 import { Button } from '../ui/Button'
+import { Notice } from '../ui/Notice'
 import { useOnboarding } from './onboardingStore'
 
 const POINTS = [
@@ -20,11 +21,23 @@ export function OptimizeStep({ accountId }: { accountId: string }): React.JSX.El
   const { t } = useTranslation()
   const next = useOnboarding((s) => s.next)
   const setOptimized = useOnboarding((s) => s.setOptimized)
+  const showSignIn = useOnboarding((s) => s.showSignIn)
+  const accountName = useApp((s) => s.data?.accounts.find((a) => a.id === accountId)?.name ?? '')
+  const status = useApp((s) => s.statuses[accountId])
+  const signedOut = typeof status === 'object' && !status.loggedIn
   const ptyId = optimizePtyId(accountId)
   const [phase, setPhase] = useState<Phase>('intro')
   const [hasOutput, setHasOutput] = useState(false)
+  const [launched, setLaunched] = useState(false)
   const [exitCode, setExitCode] = useState<number | null>(null)
+  // Shown inline: the global error toast sits behind the onboarding screen.
+  const [failure, setFailure] = useState<string | null>(null)
   const started = useRef(false)
+
+  // Only a session that actually started and printed something counts as optimized.
+  useEffect(() => {
+    if (launched && hasOutput) setOptimized()
+  }, [launched, hasOutput, setOptimized])
 
   // Output reaches the terminal through the store's global PTY listener; here it only
   // tells the UI that Claude is up, and when the session ends.
@@ -62,14 +75,16 @@ export function OptimizeStep({ accountId }: { accountId: string }): React.JSX.El
     (cols: number, rows: number) => {
       if (started.current) return
       started.current = true
-      setOptimized()
-      window.api.profile.startOptimize(accountId, cols, rows).catch((error) => {
-        useApp.getState().setError(errorCode(error))
-        setExitCode(-1)
-        setPhase('exited')
-      })
+      window.api.profile
+        .startOptimize(accountId, cols, rows)
+        .then(() => setLaunched(true))
+        .catch((error) => {
+          setFailure(errorCode(error))
+          setExitCode(-1)
+          setPhase('exited')
+        })
     },
-    [accountId, setOptimized]
+    [accountId]
   )
 
   if (phase === 'intro') {
@@ -92,13 +107,27 @@ export function OptimizeStep({ accountId }: { accountId: string }): React.JSX.El
             </li>
           ))}
         </ul>
+        {signedOut && (
+          <div className="mt-5">
+            <Notice tone="warn">
+              <p>{t('onboarding.done.signedOut', { name: accountName })}</p>
+            </Notice>
+          </div>
+        )}
         <div className="mt-6 flex items-center justify-end gap-2">
           <Button variant="ghost" onClick={next}>
             {t('onboarding.skip')}
           </Button>
-          <Button variant="primary" data-autofocus onClick={begin}>
-            {t('onboarding.optimize.start')}
-          </Button>
+          {signedOut ? (
+            <Button variant="primary" data-autofocus onClick={showSignIn}>
+              <LogIn size={14} />
+              {t('onboarding.steps.signIn')}
+            </Button>
+          ) : (
+            <Button variant="primary" data-autofocus onClick={begin}>
+              {t('onboarding.optimize.start')}
+            </Button>
+          )}
         </div>
       </div>
     )
@@ -129,6 +158,13 @@ export function OptimizeStep({ accountId }: { accountId: string }): React.JSX.El
           </div>
         )}
       </div>
+      {failure && (
+        <div className="mt-4" role="alert">
+          <Notice tone="danger">
+            <p>{t(`errors.${failure}`, { defaultValue: t('errors.UNKNOWN') })}</p>
+          </Notice>
+        </div>
+      )}
       <div className="mt-5 flex items-center justify-between gap-3">
         <p role="status" className="flex min-w-0 items-center gap-2 text-[12px] text-muted">
           <span

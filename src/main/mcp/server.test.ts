@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -7,11 +7,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { AppState } from '../../shared/types'
 import { JsonStore } from '../state/jsonStore'
 import { emptyState, Repository } from '../state/repository'
-import { loadOrCreateToken, startMcpServer, type RunningMcpServer } from './server'
-import { createTools } from './tools'
+import { startMcpServer, type RunningMcpServer } from './server'
+import { createSessionTokens, type McpScope, type SessionTokens } from './sessionTokens'
+import { createTools, type Tools } from './tools'
 
 let dir: string
 let running: RunningMcpServer
+let tokens: SessionTokens
+let tools: Tools
+let scope: McpScope
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'claudedeck-mcp-server-'))
@@ -21,55 +25,76 @@ beforeAll(async () => {
   )
   const { account } = repo.createAccount({ name: 'Work', color: '#000' })
   repo.createProject({ name: 'App', path: '/code/app', accountId: account.id })
-  const tools = createTools({
+  const other = repo.createAccount({ name: 'Other', color: '#111' }).account
+  repo.createProject({ name: 'Hidden', path: '/code/hidden', accountId: other.id })
+  const project = repo.get().projects[0]
+  scope = { sessionId: 'tab1', projectId: project.id, accountId: account.id }
+  tools = createTools({
     repo,
     notes: { list: () => [], read: () => '', write: () => undefined },
     requestOpenSession: () => undefined,
-    notifyStateChanged: () => undefined
+    notifyStateChanged: () => undefined,
+    confirm: () => Promise.resolve(false)
   })
-  running = await startMcpServer({ tools, tokenFile: join(dir, 'mcp.json'), preferredPort: 0 })
+  tokens = createSessionTokens()
+  running = await startMcpServer({ tools, tokens, preferredPort: 0 })
 })
 
 afterAll(async () => {
   await running?.stop()
 })
 
-const post = (headers: Record<string, string>): Promise<Response> =>
+const post = (headers: Record<string, string>, method = 'POST'): Promise<Response> =>
   fetch(running.url, {
-    method: 'POST',
+    method,
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
       ...headers
     },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    body: method === 'POST' ? JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) : null
   })
+
+async function connect(url: string, token: string): Promise<Client> {
+  const client = new Client({ name: 'test', version: '0.0.0' })
+  const transport = new StreamableHTTPClientTransport(new URL(url), {
+    requestInit: { headers: { Authorization: `Bearer ${token}` } }
+  })
+  await client.connect(transport)
+  return client
+}
+
+const textOf = (result: Awaited<ReturnType<Client['callTool']>>): string =>
+  (result.content as { type: string; text: string }[])[0].text
 
 describe('MCP server', () => {
-  it('binds to loopback and persists a private token', () => {
+  it('binds to loopback and exposes no token', () => {
     expect(running.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/)
-    expect(running.token).toMatch(/^[0-9a-f]{64}$/)
-    const file = join(dir, 'mcp.json')
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ token: running.token })
-    expect(statSync(file).mode & 0o777).toBe(0o600)
-    expect(loadOrCreateToken(file)).toBe(running.token)
+    expect(Object.keys(running).sort()).toEqual(['stop', 'url'])
   })
 
-  it('rejects requests without a valid bearer token', async () => {
+  it('rejects requests without a valid session token', async () => {
+    const token = tokens.issue(scope)
     expect((await post({})).status).toBe(401)
     expect((await post({ Authorization: 'Bearer nope' })).status).toBe(401)
-    expect((await post({ Authorization: running.token })).status).toBe(401)
+    expect((await post({ Authorization: `Bearer ${'0'.repeat(64)}` })).status).toBe(401)
+    expect((await post({ Authorization: token })).status).toBe(401)
   })
 
-  it('serves tools/list and tools/call through the SDK client', async () => {
-    const client = new Client({ name: 'test', version: '0.0.0' })
-    const transport = new StreamableHTTPClientTransport(new URL(running.url), {
-      requestInit: { headers: { Authorization: `Bearer ${running.token}` } }
-    })
-    await client.connect(transport)
+  it('rejects browser requests carrying an Origin and answers OPTIONS with 405', async () => {
+    const token = tokens.issue(scope)
+    const auth = { Authorization: `Bearer ${token}` }
+    expect((await post({ ...auth, Origin: 'https://evil.example' })).status).toBe(403)
+    expect((await post({ ...auth, Origin: 'null' })).status).toBe(403)
+    expect((await post(auth, 'OPTIONS')).status).toBe(405)
+    expect((await post(auth)).status).toBe(200)
+  })
+
+  it('serves scoped tools through the SDK client', async () => {
+    const client = await connect(running.url, tokens.issue(scope))
     try {
-      const { tools } = await client.listTools()
-      expect(tools.map((t) => t.name).sort()).toEqual([
+      const { tools: listed } = await client.listTools()
+      expect(listed.map((t) => t.name).sort()).toEqual([
         'create_project',
         'get_project',
         'list_accounts',
@@ -80,14 +105,61 @@ describe('MCP server', () => {
         'read_note',
         'write_note'
       ])
-      const result = await client.callTool({ name: 'list_projects', arguments: {} })
-      const content = result.content as { type: string; text: string }[]
-      expect(JSON.parse(content[0].text)).toMatchObject([{ name: 'App', accountName: 'Work' }])
+      const projects = await client.callTool({ name: 'list_projects', arguments: {} })
+      expect(JSON.parse(textOf(projects))).toMatchObject([{ name: 'App', accountName: 'Work' }])
 
-      const failed = await client.callTool({ name: 'get_project', arguments: { id: 'missing' } })
-      expect(failed.isError).toBe(true)
+      const hidden = await client.callTool({ name: 'list_notes', arguments: { projectId: 'x' } })
+      expect(hidden.isError).toBe(true)
+      expect(textOf(hidden)).toBe('Not allowed')
+
+      const declined = await client.callTool({
+        name: 'open_session',
+        arguments: { projectId: scope.projectId, kind: 'claude' }
+      })
+      expect(declined.isError).toBeFalsy()
+      expect(textOf(declined)).toBe('The user declined.')
     } finally {
       await client.close()
+    }
+  })
+
+  it('stops accepting a token once it is revoked or reissued', async () => {
+    const first = tokens.issue(scope)
+    expect((await post({ Authorization: `Bearer ${first}` })).status).toBe(200)
+    const second = tokens.issue(scope)
+    expect((await post({ Authorization: `Bearer ${first}` })).status).toBe(401)
+    tokens.revoke(scope.sessionId)
+    expect((await post({ Authorization: `Bearer ${second}` })).status).toBe(401)
+  })
+
+  it('rate limits tool calls per session', async () => {
+    const limited = await startMcpServer({
+      tools,
+      tokens,
+      preferredPort: 0,
+      rateLimit: { limit: 2, windowMs: 60_000 }
+    })
+    const client = await connect(limited.url, tokens.issue(scope))
+    try {
+      const call = (): ReturnType<Client['callTool']> =>
+        client.callTool({ name: 'list_accounts', arguments: {} })
+      expect((await call()).isError).toBeFalsy()
+      expect((await call()).isError).toBeFalsy()
+      const third = await call()
+      expect(third.isError).toBe(true)
+      expect(textOf(third)).toMatch(/Rate limit/)
+
+      // Another tab has its own budget.
+      const otherClient = await connect(limited.url, tokens.issue({ ...scope, sessionId: 'tab2' }))
+      try {
+        const r = await otherClient.callTool({ name: 'list_accounts', arguments: {} })
+        expect(r.isError).toBeFalsy()
+      } finally {
+        await otherClient.close()
+      }
+    } finally {
+      await client.close()
+      await limited.stop()
     }
   })
 })

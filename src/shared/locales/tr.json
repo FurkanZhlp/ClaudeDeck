@@ -293,5 +293,12 @@
       "optimize": "ClaudeDeck ile optimize et",
       "openFolder": "Profil klasörünü aç"
     }
+  },
+  "mcp": {
+    "allow": "İzin ver",
+    "confirmCreateProject": "Claude, \"{{name}}\" adlı yeni bir proje oluşturmak istiyor: {{path}}",
+    "confirmOpenClaude": "Claude, \"{{project}}\" projesinde yeni bir Claude sekmesi açmak istiyor.",
+    "confirmOpenShell": "Claude, \"{{project}}\" projesinde yeni bir terminal sekmesi açmak istiyor.",
+    "requestedBy": "İsteyen: {{project}} projesindeki Claude ({{account}} hesabı). Açılan sekme siz başlatana kadar çalışmaz."
   }
 }

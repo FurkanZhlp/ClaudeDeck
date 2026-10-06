@@ -13,7 +13,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DomainError } from '../../shared/errors'
-import { isValidNoteName, listNotes, readNote, relocateMemory, writeNote } from './notesStore'
+import {
+  existingNotePath,
+  isSafeMemoryDir,
+  isValidNoteName,
+  listNotes,
+  readNote,
+  relocateMemory,
+  writeNote
+} from './notesStore'
 
 let root: string
 
@@ -160,5 +168,85 @@ describe('relocateMemory', () => {
     expect(lstatSync(link).isSymbolicLink()).toBe(true)
     expect(readdirSync(real)).toEqual(['MEMORY.md'])
     expect(existsSync(to)).toBe(false)
+  })
+})
+
+describe('relocateMemory copy mode', () => {
+  it('copies into a missing destination and keeps the source', () => {
+    const from = files(join(root, 'cfg', 'projects', '-a', 'memory'), { 'MEMORY.md': 'm' })
+    const to = join(root, 'cfg2', 'projects', '-a', 'memory')
+    expect(relocateMemory(from, to, 1, 'copy')).toEqual({ moved: 1, renamed: 0 })
+    expect(readFileSync(join(from, 'MEMORY.md'), 'utf8')).toBe('m')
+    expect(readFileSync(join(to, 'MEMORY.md'), 'utf8')).toBe('m')
+  })
+
+  it('merges into an existing destination without touching the source', () => {
+    const from = files(join(root, 'a'), { 'MEMORY.md': 'src', 'same.md': 's' })
+    const to = files(join(root, 'b'), { 'MEMORY.md': 'dst', 'same.md': 's' })
+    expect(relocateMemory(from, to, 7, 'copy')).toEqual({ moved: 1, renamed: 1 })
+    expect(readdirSync(from).sort()).toEqual(['MEMORY.md', 'same.md'])
+    expect(readFileSync(join(to, 'MEMORY-moved-7.md'), 'utf8')).toBe('src')
+  })
+})
+
+describe('symlink hardening', () => {
+  function projectsDir(): string {
+    const dir = join(root, 'cfg', 'projects')
+    mkdirSync(dir, { recursive: true })
+    return dir
+  }
+
+  it('accepts a regular memory folder inside projects/', () => {
+    expect(isSafeMemoryDir(join(projectsDir(), '-p', 'memory'))).toBe(true)
+  })
+
+  it('refuses to write through a symlinked memory folder', () => {
+    const outside = files(join(root, 'outside'), {})
+    mkdirSync(join(projectsDir(), '-p'))
+    const memory = join(projectsDir(), '-p', 'memory')
+    symlinkSync(outside, memory)
+    expect(isSafeMemoryDir(memory)).toBe(false)
+    expect(codeOf(() => writeNote(memory, 'MEMORY.md', 'x'))).toBe('INVALID')
+    expect(readdirSync(outside)).toEqual([])
+  })
+
+  it('refuses a symlinked key folder that points outside projects/', () => {
+    const outside = files(join(root, 'outside'), {})
+    symlinkSync(outside, join(projectsDir(), '-p'))
+    const memory = join(projectsDir(), '-p', 'memory')
+    expect(codeOf(() => writeNote(memory, 'MEMORY.md', 'x'))).toBe('INVALID')
+    expect(readdirSync(outside)).toEqual([])
+  })
+
+  it('refuses to replace a note that is not a regular file', () => {
+    const memory = files(join(projectsDir(), '-p', 'memory'), {})
+    symlinkSync(join(root, 'elsewhere.md'), join(memory, 'MEMORY.md'))
+    expect(codeOf(() => writeNote(memory, 'MEMORY.md', 'x'))).toBe('INVALID')
+    expect(existsSync(join(root, 'elsewhere.md'))).toBe(false)
+  })
+
+  it('refuses to relocate into a symlinked destination', () => {
+    const from = files(join(projectsDir(), '-a', 'memory'), { 'MEMORY.md': 'm' })
+    const outside = files(join(root, 'outside'), {})
+    mkdirSync(join(projectsDir(), '-b'))
+    const to = join(projectsDir(), '-b', 'memory')
+    symlinkSync(outside, to)
+    expect(codeOf(() => relocateMemory(from, to))).toBe('INVALID')
+    expect(readdirSync(outside)).toEqual([])
+    expect(readdirSync(from)).toEqual(['MEMORY.md'])
+  })
+
+  it('opens only regular .md files that stay inside the memory folder', () => {
+    const memory = files(join(projectsDir(), '-p', 'memory'), { 'MEMORY.md': 'm' })
+    const secret = files(join(root, 'outside'), { 'secret.md': 's', 'run.command': 'x' })
+    symlinkSync(join(secret, 'secret.md'), join(memory, 'leak.md'))
+    symlinkSync(join(secret, 'run.command'), join(memory, 'run.md'))
+    mkdirSync(join(memory, 'dir.md'))
+    expect(existingNotePath(memory, 'MEMORY.md')).toBe(join(memory, 'MEMORY.md'))
+    expect(codeOf(() => existingNotePath(memory, 'leak.md'))).toBe('INVALID')
+    expect(codeOf(() => existingNotePath(memory, 'run.md'))).toBe('INVALID')
+    expect(codeOf(() => existingNotePath(memory, 'dir.md'))).toBe('INVALID')
+    expect(codeOf(() => existingNotePath(memory, 'missing.md'))).toBe('NOT_FOUND')
+    expect(codeOf(() => existingNotePath(memory, '../x.md'))).toBe('INVALID')
   })
 })

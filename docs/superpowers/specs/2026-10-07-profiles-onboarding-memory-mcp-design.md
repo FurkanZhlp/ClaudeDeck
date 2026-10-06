@@ -86,10 +86,31 @@ again, open profile folder in Finder.
 
 ## 4. Project notes
 
-- Memory dir for a project = `<accountConfigDir>/projects/<encode(project.path)>/memory/`.
-- When a project's account or path changes, ClaudeDeck moves the memory dir to the new location
-  before any new tab starts. If the destination already has files, files are merged and
-  conflicting names get a `-moved-<timestamp>` suffix; nothing is deleted.
+- Memory dir for a project = `<accountConfigDir>/projects/<encode(key)>/memory/`, where `key` is
+  the memory key Claude Code uses (verified on 2.1.282): the `realpath` of the project folder,
+  then the nearest ancestor (or itself) that contains a `.git` entry, directory or file, so
+  worktrees and submodules count. Outside a repository the key is the realpath itself. A
+  project at `<repo>/packages/web` therefore shares memory with every project inside `<repo>`.
+- `encode(key)`: every non-alphanumeric character becomes `-`. If the result is longer than 200
+  characters it becomes `encoded.slice(0, 200) + '-' + Math.abs(javaHash(key)).toString(36)`,
+  where `javaHash` is `h = (h << 5) - h + charCode; h |= 0` over the raw (unencoded) key.
+- When a project's account or path changes and the memory dir differs, ClaudeDeck moves it to
+  the new location. If the destination already has files, files are merged and conflicting
+  names get a `-moved-<timestamp>` suffix; identical duplicates are dropped; nothing is lost.
+  - If the project has a running terminal the move is deferred (Claude may still write to the
+    old folder) and applied the next time the project is prepared while nothing runs. The
+    pending source is kept in memory only.
+  - If another project of the old account resolves to the same key, the notes are copied, not
+    moved, so that project keeps its memory.
+- Stateless merge: before every Claude tab starts, and whenever the notes panel lists or
+  watches a project, ClaudeDeck prepares the project's memory: it applies a deferred move and
+  merges notes left under the same key in other accounts' config dirs into the current one,
+  but only from accounts that have no project with that key. Nothing happens while the project
+  runs.
+- Safety: notes are only opened when they are regular `.md` files whose realpath stays inside
+  the memory dir. Writes and relocations refuse (INVALID) when the memory dir, its key folder
+  or the destination is a symlink or resolves outside the account's `projects/` folder. A
+  symlinked source memory folder is the user's own setup and is never moved.
 - Notes panel (right side, toggled from the session tab bar) lists `MEMORY.md` first, then other
   `.md` files by name; renders Markdown (react-markdown + remark-gfm, no raw HTML); live updates
   via a file watcher; "Open in editor" and "Show in Finder".
@@ -97,15 +118,36 @@ again, open profile folder in Finder.
 ## 5. ClaudeDeck MCP server
 
 - Streamable HTTP MCP server in the main process on `127.0.0.1`, preferred port 47821 with
-  fallback to a random free port, bearer token generated once and stored in `config.json`.
-- Registered as `mcpServers.claudedeck` (`type: "http"`, url, `Authorization` header) in every
-  account's `.claude.json` on app start and before every Claude tab.
-- Tools:
-  - read: `list_accounts`, `list_projects`, `get_project` (by id or by path, so Claude can find
-    the project for its cwd), `list_sessions`, `list_notes`, `read_note`
-  - write: `write_note`, `create_project`, `open_session`
-  - no deletion tools.
-- Requests without the token, or from a non-loopback address, are rejected.
+  fallback to a random free port. Stateless per request.
+- Registered as `mcpServers.claudedeck` in every account's `.claude.json`:
+  `{ "type": "http", "url": ..., "headers": { "Authorization": "Bearer ${CLAUDEDECK_MCP_TOKEN}" } }`.
+  The header is a literal placeholder that Claude Code expands from the claude process env, so no
+  secret is ever written to disk. `unregisterMcpInConfig` removes the entry again.
+- Per-session scoped tokens: when a Claude tab starts, the main process issues a fresh token
+  (32 random bytes, hex) bound to `{ sessionId, projectId, accountId }` and passes it only to that
+  claude process as `CLAUDEDECK_MCP_TOKEN`. Tokens live in memory only; restarting a tab replaces
+  its token, closing it revokes it, quitting the app revokes all. Shell tabs get no token.
+- Scoping (enforced in the tools, per token):
+  - `list_accounts`: only the caller's own account `{ id, name }`, no emails.
+  - `list_projects`, `get_project` (by id or by path, so Claude can find the project for its
+    cwd): only projects of the caller's account.
+  - `list_sessions`, `list_notes`, `read_note`, `write_note`: `projectId` is optional and defaults
+    to the tab's own project; any other project is refused with "Not allowed".
+  - Note quota: at most 200 notes and 5 MB in total per project, 1 MB per note.
+- Confirmation: `create_project` and `open_session` change the app, so they ask the user first
+  (a confirmation request names the requesting tab). Declining, closing the prompt or a timeout
+  returns "The user declined." as a normal result. One pending request per tab.
+  - `create_project`: the account is always the caller's; the path must exist and be a
+    directory, it is stored as its realpath, and `/`, the home folder itself and system folders
+    (`/System`, `/Library`, `/bin`, `/sbin`, `/usr`, `/etc`, `/private/etc`, `/Applications`)
+    are refused.
+  - `open_session`: the project must belong to the caller's account; the new tab is selected in
+    the UI but not started.
+- No deletion tools.
+- Request guards: non-loopback peers and any request with an `Origin` header get 403 (browsers
+  always send Origin, Claude Code does not), `OPTIONS` gets 405, a missing or unknown token gets
+  401, and the SDK's DNS rebinding protection checks `Host`. Tool calls are rate limited to 60 per
+  minute per tab.
 
 ## Testing
 

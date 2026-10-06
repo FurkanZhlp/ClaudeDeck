@@ -154,10 +154,8 @@ export const useApp = create<AppStore>((set, get) => {
         window.api.update.onAvailable((update) => set({ update })),
         // Changes made by the main process itself, e.g. through the ClaudeDeck MCP server.
         window.api.state.onChanged((data) => set({ data })),
-        window.api.sessions.onOpenRequest((sessionId) => {
-          get().selectSession(sessionId)
-          if (!get().running[sessionId]) get().startSession(sessionId, false)
-        }),
+        // Claude asked (and the user approved) to open a tab; it waits for a click to start.
+        window.api.sessions.onOpenRequest((sessionId) => get().selectSession(sessionId)),
         window.api.profile.onGuidelinesUpdated((update) => {
           const account = get().data?.accounts.find((a) => a.id === update.accountId)
           set({
@@ -180,6 +178,18 @@ export const useApp = create<AppStore>((set, get) => {
       void window.api.system.claudeAvailable().then((claudeAvailable) => set({ claudeAvailable }))
       data.accounts.forEach((account) => void get().refreshStatus(account.id))
       void window.api.update.check().then((update) => update?.available && set({ update }))
+      void window.api.profile.takeGuidelineUpdates().then((updates) => {
+        const update = updates.at(-1)
+        const account = data.accounts.find((a) => a.id === update?.accountId)
+        if (update && account) {
+          set({
+            notice: i18n.t('notices.guidelinesUpdated', {
+              account: account.name,
+              version: update.to
+            })
+          })
+        }
+      })
     },
 
     setError: (error) => set({ error }),

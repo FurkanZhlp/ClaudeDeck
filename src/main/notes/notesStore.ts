@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmdirSync,
   statSync,
@@ -12,7 +13,7 @@ import {
   writeFileSync,
   type Stats
 } from 'node:fs'
-import { basename, dirname, extname, join, resolve } from 'node:path'
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { DomainError } from '../../shared/errors'
 import type { NoteFile } from '../../shared/types'
 
@@ -37,6 +38,59 @@ export function isValidNoteName(name: unknown): name is string {
     !/[/\\\0]/.test(name) &&
     basename(name) === name
   )
+}
+
+/** Real path of `path`, resolving only the part of it that exists. */
+function realpathOfExisting(path: string): string {
+  const missing: string[] = []
+  let current = resolve(path)
+  for (;;) {
+    try {
+      return join(realpathSync(current), ...missing.reverse())
+    } catch {
+      const parent = dirname(current)
+      if (parent === current) return resolve(path)
+      missing.push(basename(current))
+      current = parent
+    }
+  }
+}
+
+function isInside(root: string, path: string): boolean {
+  const rel = relative(root, path)
+  return rel !== '' && !rel.startsWith(`..${sep}`) && rel !== '..' && !rel.startsWith(sep)
+}
+
+/**
+ * A memory dir is `<configDir>/projects/<key>/memory`. Neither it nor its key folder may be a
+ * symlink, and it must resolve inside the account's `projects/` folder.
+ */
+export function isSafeMemoryDir(dir: string): boolean {
+  const memory = resolve(dir)
+  const keyDir = dirname(memory)
+  const projectsDir = dirname(keyDir)
+  for (const path of [memory, keyDir]) {
+    const stats = lstatOrNull(path)
+    if (stats && !stats.isDirectory()) return false
+  }
+  return isInside(realpathOfExisting(projectsDir), realpathOfExisting(memory))
+}
+
+function assertSafeMemoryDir(dir: string): void {
+  if (!isSafeMemoryDir(dir)) throw new DomainError('INVALID')
+}
+
+/** Path of a note that is a regular `.md` file whose real path stays inside the memory dir. */
+export function existingNotePath(dir: string, name: unknown): string {
+  const path = notePath(dir, name)
+  const stats = lstatOrNull(path)
+  if (!stats) throw new DomainError('NOT_FOUND')
+  if (!stats.isFile()) throw new DomainError('INVALID')
+  const real = realpathSync(path)
+  if (!real.endsWith(NOTE_EXT) || !isInside(realpathSync(dir), real)) {
+    throw new DomainError('INVALID')
+  }
+  return path
 }
 
 function notePath(dir: string, name: unknown): string {
@@ -73,6 +127,9 @@ export function readNote(dir: string, name: string): string {
 
 export function writeNote(dir: string, name: string, content: string): void {
   const path = notePath(dir, name)
+  assertSafeMemoryDir(dir)
+  const existing = lstatOrNull(path)
+  if (existing && !existing.isFile()) throw new DomainError('INVALID')
   mkdirSync(dir, { recursive: true })
   const tmp = join(dir, `.${name}.${randomUUID()}.tmp`)
   try {
@@ -115,14 +172,18 @@ function freeConflictName(toDir: string, name: string, now: number): string {
   return candidate
 }
 
+export type RelocateMode = 'move' | 'copy'
+
 /**
- * Moves a project's memory folder to its new location. Merges into an existing destination
- * without overwriting: conflicting files are renamed, identical duplicates are dropped.
+ * Moves (or copies, leaving the source intact) a project's memory folder to its new location.
+ * Merges into an existing destination without overwriting: conflicting files are renamed,
+ * identical duplicates are dropped. Throws INVALID when either side is not a safe memory dir.
  */
 export function relocateMemory(
   fromDir: string,
   toDir: string,
-  now = Date.now()
+  now = Date.now(),
+  mode: RelocateMode = 'move'
 ): { moved: number; renamed: number } {
   const result = { moved: 0, renamed: 0 }
   const from = resolve(fromDir)
@@ -131,8 +192,11 @@ export function relocateMemory(
   const fromStats = lstatOrNull(from)
   // A symlinked memory folder is the user's own setup; never follow or move it.
   if (!fromStats?.isDirectory()) return result
+  assertSafeMemoryDir(from)
+  assertSafeMemoryDir(to)
+  const copy = mode === 'copy'
 
-  if (!lstatOrNull(to)) {
+  if (!copy && !lstatOrNull(to)) {
     const count = readdirSync(from).length
     mkdirSync(dirname(to), { recursive: true })
     try {
@@ -141,30 +205,35 @@ export function relocateMemory(
       return result
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error
-      mkdirSync(to)
     }
   }
+  mkdirSync(to, { recursive: true })
+
+  const transfer = (source: string, target: string): void =>
+    copy ? copyFileSync(source, target) : moveEntry(source, target)
 
   for (const entry of readdirSync(from, { withFileTypes: true })) {
+    // Copies only carry plain files; moves carry everything that has no counterpart.
+    if (copy && !entry.isFile()) continue
     const source = join(from, entry.name)
     const target = join(to, entry.name)
     const existing = lstatOrNull(target)
     if (!existing) {
-      moveEntry(source, target)
+      transfer(source, target)
       result.moved++
       continue
     }
     // Only plain files can be compared or renamed safely; leave anything else in place.
     if (!entry.isFile() || !existing.isFile()) continue
     if (sameContent(source, target)) {
-      unlinkSync(source)
+      if (!copy) unlinkSync(source)
       continue
     }
-    moveEntry(source, join(to, freeConflictName(to, entry.name, now)))
+    transfer(source, join(to, freeConflictName(to, entry.name, now)))
     result.moved++
     result.renamed++
   }
 
-  if (readdirSync(from).length === 0) rmdirSync(from)
+  if (!copy && readdirSync(from).length === 0) rmdirSync(from)
   return result
 }
