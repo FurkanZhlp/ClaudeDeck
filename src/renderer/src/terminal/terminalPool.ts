@@ -20,7 +20,9 @@ const THEME: ITheme = {
   selectionBackground: '#d9775755'
 }
 
-const entries = new Map<string, Entry>()
+// Kept on globalThis so a hot reload of this module in development reuses the live terminals.
+const globalPool = globalThis as typeof globalThis & { __claudedeckTerminals?: Map<string, Entry> }
+const entries = (globalPool.__claudedeckTerminals ??= new Map<string, Entry>())
 
 function create(id: string): Entry {
   const term = new Terminal({

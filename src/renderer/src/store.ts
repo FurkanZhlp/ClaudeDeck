@@ -58,6 +58,13 @@ interface AppStore {
 }
 
 let initialized = false
+const subscriptions: Array<() => void> = []
+
+// In development a hot-reloaded store would otherwise add a second set of IPC listeners,
+// writing every byte of terminal output twice.
+import.meta.hot?.dispose(() => {
+  subscriptions.splice(0).forEach((unsubscribe) => unsubscribe())
+})
 // Aynı hesap için çakışan durum sorgularında yalnızca en sonuncusu uygulanır.
 const statusRequests: Record<string, number> = {}
 
@@ -133,13 +140,15 @@ export const useApp = create<AppStore>((set, get) => {
     async init() {
       if (initialized) return
       initialized = true
-      window.api.pty.onData((id, data) => pool.write(id, data))
-      window.api.pty.onExit((id, exitCode) => {
-        const run = get().running[id]
-        if (run) set({ running: { ...get().running, [id]: { ...run, exitCode } } })
-      })
-      window.api.system.onOpenSettings(() => set({ settingsOpen: true }))
-      window.api.update.onAvailable((update) => set({ update }))
+      subscriptions.push(
+        window.api.pty.onData((id, data) => pool.write(id, data)),
+        window.api.pty.onExit((id, exitCode) => {
+          const run = get().running[id]
+          if (run) set({ running: { ...get().running, [id]: { ...run, exitCode } } })
+        }),
+        window.api.system.onOpenSettings(() => set({ settingsOpen: true })),
+        window.api.update.onAvailable((update) => set({ update }))
+      )
 
       const data = await guard(() => window.api.state.get())
       if (!data) {
