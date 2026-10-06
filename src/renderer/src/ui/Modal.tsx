@@ -48,6 +48,7 @@ export function Modal({
           <button
             type="button"
             aria-label={t('common.close')}
+            data-tooltip={t('common.close')}
             className="rounded p-1 text-muted hover:bg-panel hover:text-fg"
             onClick={onClose}
           >

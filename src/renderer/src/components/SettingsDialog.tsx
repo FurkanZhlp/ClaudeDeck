@@ -125,7 +125,7 @@ function AccountRow({ account }: { account: Account }): React.JSX.Element {
         <Button
           variant="ghost"
           aria-label={t('settings.refresh')}
-          title={t('settings.refresh')}
+          data-tooltip={t('settings.refresh')}
           onClick={() => void refreshStatus(account.id)}
         >
           <RotateCw size={14} />
@@ -133,7 +133,7 @@ function AccountRow({ account }: { account: Account }): React.JSX.Element {
         <Button
           variant="ghost"
           aria-label={t('settings.edit')}
-          title={t('settings.edit')}
+          data-tooltip={t('settings.edit')}
           onClick={() => {
             setConfirming(false)
             setEditing(true)
@@ -148,7 +148,7 @@ function AccountRow({ account }: { account: Account }): React.JSX.Element {
         <Button
           variant="ghost"
           aria-label={t('settings.remove')}
-          title={t('settings.remove')}
+          data-tooltip={t('settings.remove')}
           onClick={() => (inUse ? setError('ACCOUNT_IN_USE') : setConfirming(true))}
         >
           <Trash2 size={14} />

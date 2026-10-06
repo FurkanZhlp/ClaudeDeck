@@ -50,7 +50,10 @@
     "startAnyway": "Yine de başlat",
     "pathMissing": "Proje klasörü bulunamadı: {{path}}",
     "noSessions": "Bu projede oturum yok. Yukarıdan yeni bir Claude veya Terminal sekmesi açın.",
-    "accountLabel": "Hesap: {{name}}"
+    "accountLabel": "Hesap: {{name}}",
+    "closeTab": "Sekmeyi kapat",
+    "newClaudeHint": "Bu projede yeni Claude oturumu aç",
+    "newShellHint": "Bu projede yeni terminal aç"
   },
   "settings": {
     "title": "Ayarlar",

@@ -46,13 +46,14 @@ export function SessionTabs({ projectId }: { projectId: string }): React.JSX.Ele
               <span className="truncate">{session.title}</span>
               <StatusDot run={run} />
               {stale && (
-                <span title={t('session.staleAccount')} className="text-warn">
+                <span data-tooltip={t('session.staleAccount')} className="text-warn">
                   <AlertTriangle size={12} />
                 </span>
               )}
               <button
                 type="button"
-                aria-label={t('session.close')}
+                aria-label={t('session.closeTab')}
+                data-tooltip={t('session.closeTab')}
                 className="rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-panel focus:opacity-100"
                 onClick={(event) => {
                   event.stopPropagation()
@@ -66,11 +67,19 @@ export function SessionTabs({ projectId }: { projectId: string }): React.JSX.Ele
         })}
       </div>
       <div className="no-drag flex shrink-0 items-center gap-1 pb-1.5">
-        <Button variant="ghost" onClick={() => void createSession('claude')}>
+        <Button
+          variant="ghost"
+          data-tooltip={t('session.newClaudeHint')}
+          onClick={() => void createSession('claude')}
+        >
           <Plus size={14} />
           {t('session.newClaude')}
         </Button>
-        <Button variant="ghost" onClick={() => void createSession('shell')}>
+        <Button
+          variant="ghost"
+          data-tooltip={t('session.newShellHint')}
+          onClick={() => void createSession('shell')}
+        >
           <Plus size={14} />
           {t('session.newShell')}
         </Button>

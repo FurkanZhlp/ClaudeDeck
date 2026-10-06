@@ -15,6 +15,7 @@ export function ColorPicker({ value, onChange, label }: Props): React.JSX.Elemen
           type="button"
           role="radio"
           aria-label={color}
+          data-tooltip={color}
           aria-checked={value === color}
           onClick={() => onChange(color)}
           className={`size-5 rounded-full ring-offset-2 ring-offset-elevated transition-transform hover:scale-110 ${value === color ? 'ring-2 ring-fg' : ''}`}

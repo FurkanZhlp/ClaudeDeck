@@ -26,6 +26,7 @@ export function ErrorToast(): React.JSX.Element | null {
       <button
         type="button"
         aria-label={t('common.close')}
+        data-tooltip={t('common.close')}
         className="text-muted hover:text-fg"
         onClick={() => setError(null)}
       >

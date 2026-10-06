@@ -133,9 +133,25 @@ textarea {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-screen-in,
+  .animate-tooltip-in,
   .animate-pop-in,
   .animate-fade-up,
   .animate-spin {
     animation: none;
   }
+}
+
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-tooltip-in {
+  animation: tooltip-in 120ms ease-out both;
 }

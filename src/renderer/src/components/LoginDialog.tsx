@@ -63,6 +63,7 @@ function LoginContent({ accountId }: { accountId: string }): React.JSX.Element |
         <button
           type="button"
           aria-label={t('common.close')}
+          data-tooltip={t('common.close')}
           className="no-drag rounded-md p-1.5 text-muted hover:bg-panel hover:text-fg"
           onClick={close}
         >
@@ -188,7 +189,7 @@ function LoginFlow({ accountId, onClose, onRetry }: FlowProps): React.JSX.Elemen
                 <ExternalLink size={14} />
                 {t('login.reopen')}
               </Button>
-              <Button variant="ghost" onClick={copyUrl}>
+              <Button variant="ghost" data-tooltip={progress.url ?? undefined} onClick={copyUrl}>
                 {copied ? <Check size={14} /> : <Copy size={14} />}
                 {copied ? t('login.copied') : t('login.copyLink')}
               </Button>

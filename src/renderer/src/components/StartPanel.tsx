@@ -43,7 +43,7 @@ export function StartPanel({ session }: { session: Session }): React.JSX.Element
           {session.title}
         </div>
         <div className="space-y-1 text-muted">
-          <div className="truncate" title={project.path}>
+          <div className="truncate" data-tooltip={project.path}>
             {project.path}
           </div>
           <div className="flex items-center gap-2">

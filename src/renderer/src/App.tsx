@@ -6,6 +6,7 @@ import { ProjectDialog } from './components/ProjectDialog'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { UpdateBanner } from './components/UpdateBanner'
+import { TooltipLayer } from './ui/TooltipLayer'
 import { Workspace } from './components/Workspace'
 import { useApp } from './store'
 
@@ -31,6 +32,7 @@ export default function App(): React.JSX.Element {
       <SettingsDialog />
       <LoginDialog />
       <ErrorToast />
+      <TooltipLayer />
     </div>
   )
 }

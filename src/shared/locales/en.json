@@ -50,7 +50,10 @@
     "startAnyway": "Start anyway",
     "pathMissing": "Project folder not found: {{path}}",
     "noSessions": "No sessions in this project. Open a new Claude or Terminal tab above.",
-    "accountLabel": "Account: {{name}}"
+    "accountLabel": "Account: {{name}}",
+    "closeTab": "Close tab",
+    "newClaudeHint": "Open a new Claude session in this project",
+    "newShellHint": "Open a new terminal in this project"
   },
   "settings": {
     "title": "Settings",

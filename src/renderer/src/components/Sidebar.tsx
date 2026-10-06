@@ -26,7 +26,7 @@ export function Sidebar(): React.JSX.Element | null {
         <button
           type="button"
           aria-label={t('sidebar.newProject')}
-          title={t('sidebar.newProject')}
+          data-tooltip={t('sidebar.newProject')}
           className="no-drag rounded p-1 text-muted hover:bg-elevated hover:text-fg"
           onClick={() => setProjectDialog({ mode: 'create' })}
         >
@@ -64,7 +64,7 @@ export function Sidebar(): React.JSX.Element | null {
                 <button
                   type="button"
                   aria-label={t('sidebar.editProject')}
-                  title={t('sidebar.editProject')}
+                  data-tooltip={t('sidebar.editProject')}
                   className="rounded p-1 text-muted opacity-0 group-hover:opacity-100 hover:text-fg focus:opacity-100"
                   onClick={(event) => {
                     event.stopPropagation()
