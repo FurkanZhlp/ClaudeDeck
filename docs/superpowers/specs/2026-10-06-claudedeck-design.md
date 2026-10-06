@@ -53,7 +53,7 @@ type Session = {
 - Proje oluştur/düzenle diyaloğu: klasör seç, isim, hesap seç.
 - Görünür olmayan sekmelerin PTY'si çalışmaya devam eder; yalnızca görünüm değişir. Her oturumun
   xterm örneği bellekte tutulur ve DOM'a takılıp çıkarılır.
-- Arayüz dili Türkçe.
+- Çoklu arayüz dili: `tr` ve `en` (bkz. Bölüm 4a).
 
 ## 4. Mimari
 
@@ -79,6 +79,14 @@ Komutlar:
   oturum yeniden başlatılırken, kullanıcı seçerse).
 - Shell oturumu: kullanıcının `$SHELL`'i, aynı env ile.
 
+## 4a. Çoklu dil
+
+- `i18next` + `react-i18next`. Çeviriler `src/renderer/src/locales/{tr,en}.json`, tek namespace.
+- Varsayılan dil: `app.getLocale()` `tr` ile başlıyorsa `tr`, değilse `en`. Ayarlar ekranından
+  değiştirilebilir, seçim store'da (`settings.language`) saklanır.
+- Native menü ve diyaloglar (main süreç) da aynı JSON dosyalarından çevrilir.
+- Kural: arayüzde sabit metin yok, tüm metinler anahtar üzerinden. Yeni dil eklemek = yeni JSON.
+
 ## 5. Hata durumları
 
 - `claude` PATH'te bulunamazsa: uyarı ekranı ve kurulum yönergesi.
@@ -95,7 +103,7 @@ Windows/Linux, notarization (public sürümden önce ele alınacak).
 
 ## 7. Test
 
-- Vitest birim testleri: `buildSessionEnv`, store CRUD ve kurallar (bağlı projesi olan hesabın
+- Vitest birim testleri: tr ve en dosyalarında anahtar eşitliği, `buildSessionEnv`, store CRUD ve kurallar (bağlı projesi olan hesabın
   silinememesi), `claude auth status` çıktı ayrıştırma.
 - Elle uçtan uca: iki hesap, iki proje; her projede açılan Claude sekmesinde `/status` farklı
   e-posta göstermeli.
