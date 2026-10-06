@@ -35,7 +35,12 @@ function create(id: string): Entry {
   })
   const fit = new FitAddon()
   term.loadAddon(fit)
-  term.loadAddon(new WebLinksAddon((_event, uri) => window.open(uri)))
+  // Yanlışlıkla tıklamayı önlemek için linkler yalnızca Cmd+tık ile açılır (iTerm/Terminal gibi).
+  term.loadAddon(
+    new WebLinksAddon((event, uri) => {
+      if (event.metaKey) window.open(uri)
+    })
+  )
   term.onData((data) => window.api.pty.write(id, data))
   const host = document.createElement('div')
   host.style.width = '100%'
@@ -51,7 +56,8 @@ function ensure(id: string): Entry {
 
 export function requestStart(id: string, resume: boolean): void {
   const entry = ensure(id)
-  if (entry.opened) entry.term.write('\r\n')
+  // Önceki süreçten kalan modlar (alternate screen, mouse tracking) yeni sürece taşınmasın.
+  if (entry.opened) entry.term.reset()
   entry.pending = { resume }
 }
 

@@ -52,6 +52,7 @@ function LoginContent({ accountId }: { accountId: string }): React.JSX.Element |
       onClose={close}
       width="max-w-3xl"
       closeOnEscape={false}
+      closeOnBackdrop={false}
     >
       <p className="mb-3 text-muted">{done ? t('login.done') : t('login.hint')}</p>
       <div className="h-80 overflow-hidden rounded-md border border-border">

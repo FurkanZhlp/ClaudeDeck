@@ -22,7 +22,7 @@ export class JsonStore<T extends object> {
   save(data: T): void {
     mkdirSync(dirname(this.file), { recursive: true })
     const tmp = `${this.file}.tmp`
-    writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8')
+    writeFileSync(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 })
     renameSync(tmp, this.file)
   }
 }

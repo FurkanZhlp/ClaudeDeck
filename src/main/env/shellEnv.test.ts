@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buildSessionEnv, parseEnvOutput, sanitizeEnv, withFallbackPath } from './shellEnv'
+import {
+  buildSessionEnv,
+  claudeCommand,
+  parseEnvOutput,
+  sanitizeEnv,
+  withFallbackPath
+} from './shellEnv'
 
 describe('parseEnvOutput', () => {
   it('işaretçiden sonraki NUL ayrımlı değişkenleri okur', () => {
@@ -14,7 +20,13 @@ describe('parseEnvOutput', () => {
 describe('sanitizeEnv', () => {
   it('tanımsızları ve Claude Code iç değişkenlerini atar', () => {
     expect(
-      sanitizeEnv({ PATH: '/bin', CLAUDECODE: '1', CLAUDE_CONFIG_DIR: '/x', U: undefined })
+      sanitizeEnv({
+        PATH: '/bin',
+        CLAUDECODE: '1',
+        CLAUDE_CONFIG_DIR: '/x',
+        ANTHROPIC_API_KEY: 'k',
+        U: undefined
+      })
     ).toEqual({ PATH: '/bin' })
   })
 })
@@ -40,5 +52,14 @@ describe('buildSessionEnv', () => {
   })
   it('mevcut LANG değerini korur', () => {
     expect(buildSessionEnv({ LANG: 'tr_TR.UTF-8' }, { configDir: '/a' }).LANG).toBe('tr_TR.UTF-8')
+  })
+})
+
+describe('claudeCommand', () => {
+  it('kimlik değişkenlerini kaldırır, config klasörünü ve argümanları tırnaklar', () => {
+    expect(claudeCommand("/a/b c'd", ['--resume', 'x'])).toBe(
+      'exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN ' +
+        "CLAUDE_CONFIG_DIR='/a/b c'\\''d' claude '--resume' 'x'"
+    )
   })
 })

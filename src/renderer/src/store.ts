@@ -51,6 +51,8 @@ interface AppStore {
 }
 
 let initialized = false
+// Aynı hesap için çakışan durum sorgularında yalnızca en sonuncusu uygulanır.
+const statusRequests: Record<string, number> = {}
 
 function applyLanguage(state: AppState): void {
   const language = resolveLanguage(state.settings.language, navigator.language)
@@ -100,7 +102,11 @@ export const useApp = create<AppStore>((set, get) => {
       })
       window.api.system.onOpenSettings(() => set({ settingsOpen: true }))
 
-      const data = await window.api.state.get()
+      const data = await guard(() => window.api.state.get())
+      if (!data) {
+        initialized = false
+        return
+      }
       applyLanguage(data)
       const selectedProjectId = data.projects[0]?.id ?? null
       set({ data, selectedProjectId, selectedSessionId: firstSessionOf(data, selectedProjectId) })
@@ -118,8 +124,11 @@ export const useApp = create<AppStore>((set, get) => {
     },
 
     async refreshStatus(accountId) {
+      const request = (statusRequests[accountId] ?? 0) + 1
+      statusRequests[accountId] = request
       set({ statuses: { ...get().statuses, [accountId]: 'checking' } })
       const result = await guard(() => window.api.accounts.status(accountId))
+      if (statusRequests[accountId] !== request) return
       const statuses = { ...get().statuses }
       if (result) {
         statuses[accountId] = result.status
@@ -172,6 +181,10 @@ export const useApp = create<AppStore>((set, get) => {
       for (const session of before.sessions.filter((s) => s.projectId === id)) {
         pool.dispose(session.id)
         delete running[session.id]
+      }
+      if (get().selectedProjectId !== id) {
+        set({ data, running, projectDialog: null })
+        return
       }
       const selectedProjectId = data.projects[0]?.id ?? null
       set({

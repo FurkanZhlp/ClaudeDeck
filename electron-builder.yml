@@ -24,3 +24,12 @@ mac:
 dmg:
   artifactName: ${name}-${version}-${arch}.${ext}
 npmRebuild: true
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  # file:// ile asar içinden yükleme için gerekli; app:// protokolüne geçince false yapılabilir.
+  grantFileProtocolExtraPrivileges: true

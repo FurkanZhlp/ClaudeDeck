@@ -79,6 +79,7 @@
   },
   "errors": {
     "ACCOUNT_IN_USE": "Bu hesap bir veya daha fazla projeye atanmış. Önce o projelerin hesabını değiştirin.",
+    "ACCOUNT_RUNNING": "Bu hesapla çalışan oturumlar var. Önce o oturumları kapatın.",
     "NOT_FOUND": "Kayıt bulunamadı.",
     "INVALID": "Eksik veya geçersiz bilgi.",
     "PATH_MISSING": "Proje klasörü bulunamadı.",
@@ -104,5 +105,9 @@
     "devTools": "Geliştirici araçları",
     "fullscreen": "Tam ekran",
     "window": "Pencere"
+  },
+  "link": {
+    "open": "Aç",
+    "confirm": "{{host}} adresi tarayıcıda açılsın mı?"
   }
 }

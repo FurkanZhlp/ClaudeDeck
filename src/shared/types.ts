@@ -22,6 +22,8 @@ export interface Session {
   title: string
   kind: SessionKind
   createdAt: number
+  /** claude oturumunun --session-id değeri; "kaldığı yerden" bu sekmenin konuşmasını açar */
+  claudeSessionId?: string
 }
 
 export interface Settings {

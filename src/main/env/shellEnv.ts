@@ -6,7 +6,11 @@ type Env = Record<string, string>
 
 const MARKER = '__CLAUDEDECK_ENV__'
 // Uygulama bir Claude Code oturumundan başlatılmışsa bu değişkenler alt süreçlere sızmasın.
+// Kimlik değişkenleri Keychain oturumunu ezer ve tüm hesapları aynı kimliğe bağlar.
+const CREDENTIAL_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']
 const STRIPPED = new Set([
+  ...CREDENTIAL_VARS,
+  'NODE_OPTIONS',
   'CLAUDECODE',
   'CLAUDE_CODE_ENTRYPOINT',
   'CLAUDE_CONFIG_DIR',
@@ -50,6 +54,21 @@ export function buildSessionEnv(base: Env, account: Pick<Account, 'configDir'>):
     TERM_PROGRAM: 'ClaudeDeck',
     LANG: base.LANG || 'en_US.UTF-8'
   }
+}
+
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+/** Login shell rc dosyaları env'i ezebilir; hesap değişkenleri komut satırında yeniden basılır. */
+export function claudeCommand(configDir: string, args: string[]): string {
+  return [
+    'exec env',
+    ...CREDENTIAL_VARS.map((name) => `-u ${name}`),
+    `CLAUDE_CONFIG_DIR=${shellQuote(configDir)}`,
+    'claude',
+    ...args.map(shellQuote)
+  ].join(' ')
 }
 
 export function defaultShell(env: Env): string {

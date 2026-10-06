@@ -1,9 +1,9 @@
-import { app, BrowserWindow, Menu, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, session, shell } from 'electron'
 import { join } from 'node:path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { IPC } from '../shared/ipc'
 import { resolveLanguage } from '../shared/language'
-import { createTranslator } from '../shared/translate'
+import { createTranslator, type Translate } from '../shared/translate'
 import { AccountService } from './accounts/accountService'
 import { resolveShellEnv } from './env/shellEnv'
 import { registerIpc } from './ipc'
@@ -28,11 +28,39 @@ const ptys = new PtyManager({
   exit: (id, exitCode) => send(IPC.ptyExit, id, exitCode)
 })
 
+const translator = (): Translate =>
+  createTranslator(resolveLanguage(repo.get().settings.language, app.getLocale()))
+
 function applyMenu(): void {
-  const t = createTranslator(resolveLanguage(repo.get().settings.language, app.getLocale()))
+  const t = translator()
   Menu.setApplicationMenu(
     buildMenu(t, { dev: is.dev, openSettings: () => send(IPC.menuOpenSettings) })
   )
+}
+
+/** Terminal çıktısındaki linkler aldatıcı olabilir; tam adresi gösterip onay alır. */
+async function confirmOpenExternal(raw: string): Promise<void> {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return
+  }
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return
+  if (raw.length > 2048) return
+  const t = translator()
+  const options = {
+    type: 'question' as const,
+    buttons: [t('link.open'), t('common.cancel')],
+    defaultId: 0,
+    cancelId: 1,
+    message: t('link.confirm', { host: url.host }),
+    detail: url.toString()
+  }
+  const { response } = mainWindow
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options)
+  if (response === 0) await shell.openExternal(url.toString())
 }
 
 function createWindow(): void {
@@ -58,7 +86,7 @@ function createWindow(): void {
     mainWindow = null
   })
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url)
+    void confirmOpenExternal(url)
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (event, url) => {
@@ -77,6 +105,12 @@ function createWindow(): void {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.furkanzhlp.claudedeck')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
+
+  // Kamera, mikrofon, bildirim gibi izinlere ihtiyaç yok.
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) =>
+    callback(false)
+  )
+  session.defaultSession.setPermissionCheckHandler(() => false)
 
   registerIpc({ repo, accounts, ptys, getWindow: () => mainWindow, onLanguageChange: applyMenu })
   applyMenu()

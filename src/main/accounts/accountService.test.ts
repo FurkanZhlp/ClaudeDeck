@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isInside, parseAuthStatus } from './accountService'
+import { accountDir, parseAuthStatus } from './accountService'
 
 describe('parseAuthStatus', () => {
   it('giriş durumunu ve e-postayı okur', () => {
@@ -21,11 +21,13 @@ describe('parseAuthStatus', () => {
   })
 })
 
-describe('isInside', () => {
-  it('yalnızca kökün altındaki yolları kabul eder', () => {
-    expect(isInside('/a/accounts', '/a/accounts/1')).toBe(true)
-    expect(isInside('/a/accounts', '/a/accounts')).toBe(false)
-    expect(isInside('/a/accounts', '/a/other')).toBe(false)
-    expect(isInside('/a/accounts', '/a/accounts/../x')).toBe(false)
+describe('accountDir', () => {
+  it('UUID kimlikten hesap klasörünü türetir', () => {
+    const id = '5ef4bfc8-45fe-43c9-b57e-20b2397975b7'
+    expect(accountDir('/a/accounts', id)).toBe(`/a/accounts/${id}`)
+  })
+  it('UUID olmayan kimliği reddeder', () => {
+    expect(() => accountDir('/a/accounts', '../x')).toThrowError('INVALID')
+    expect(() => accountDir('/a/accounts', '')).toThrowError('INVALID')
   })
 })

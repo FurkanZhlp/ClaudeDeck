@@ -45,6 +45,21 @@ describe('Repository', () => {
     expect(() => make().createAccount({ name: '  ', color: '#000' })).toThrowError('INVALID')
   })
 
+  it('göreli proje yolunu reddeder', () => {
+    const repo = make()
+    const { account } = repo.createAccount({ name: 'A', color: '#000' })
+    expect(() =>
+      repo.createProject({ name: 'P', path: 'tmp', accountId: account.id })
+    ).toThrowError('INVALID')
+  })
+
+  it('e-postayı açıkça temizleyebilir', () => {
+    const repo = make()
+    const { account } = repo.createAccount({ name: 'A', color: '#000' })
+    repo.updateAccount(account.id, { email: 'a@b.co' })
+    expect(repo.updateAccount(account.id, { email: undefined }).accounts[0].email).toBeUndefined()
+  })
+
   it('olmayan hesapla proje oluşturmayı reddeder', () => {
     expect(() => make().createProject({ name: 'P', path: '/tmp', accountId: 'yok' })).toThrowError(
       'NOT_FOUND'

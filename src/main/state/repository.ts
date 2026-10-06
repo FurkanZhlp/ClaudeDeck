@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { DomainError } from '../../shared/errors'
 import { LANGUAGES } from '../../shared/language'
 import type {
@@ -20,6 +20,12 @@ export const emptyState = (): AppState => ({
   sessions: [],
   settings: { language: null }
 })
+
+function requirePath(value: unknown): string {
+  const path = requireText(value)
+  if (!isAbsolute(path)) throw new DomainError('INVALID')
+  return path
+}
 
 function requireText(value: unknown): string {
   if (typeof value !== 'string' || !value.trim()) throw new DomainError('INVALID')
@@ -70,7 +76,7 @@ export class Repository {
     const clean: Partial<Account> = {}
     if (patch.name !== undefined) clean.name = requireText(patch.name)
     if (patch.color !== undefined) clean.color = requireText(patch.color)
-    if (patch.email !== undefined) clean.email = patch.email
+    if ('email' in patch) clean.email = patch.email
     return this.commit({
       ...this.state,
       accounts: this.state.accounts.map((a) => (a.id === id ? { ...a, ...clean } : a))
@@ -87,7 +93,7 @@ export class Repository {
     const project: Project = {
       id: this.newId(),
       name: requireText(input.name),
-      path: requireText(input.path),
+      path: requirePath(input.path),
       accountId: this.account(input.accountId).id
     }
     return this.commit({ ...this.state, projects: [...this.state.projects, project] })
@@ -97,7 +103,7 @@ export class Repository {
     this.project(id)
     const clean: Partial<Project> = {}
     if (patch.name !== undefined) clean.name = requireText(patch.name)
-    if (patch.path !== undefined) clean.path = requireText(patch.path)
+    if (patch.path !== undefined) clean.path = requirePath(patch.path)
     if (patch.accountId !== undefined) clean.accountId = this.account(patch.accountId).id
     return this.commit({
       ...this.state,
@@ -140,6 +146,14 @@ export class Repository {
     return this.commit({
       ...this.state,
       sessions: this.state.sessions.map((s) => (s.id === id ? { ...s, title: clean } : s))
+    })
+  }
+
+  setClaudeSessionId(id: string, claudeSessionId: string): AppState {
+    this.session(id)
+    return this.commit({
+      ...this.state,
+      sessions: this.state.sessions.map((s) => (s.id === id ? { ...s, claudeSessionId } : s))
     })
   }
 

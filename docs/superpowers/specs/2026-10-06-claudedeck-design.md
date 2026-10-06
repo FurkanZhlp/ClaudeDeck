@@ -87,6 +87,19 @@ Komutlar:
 - Native menü ve diyaloglar (main süreç) da aynı JSON dosyalarından çevrilir.
 - Kural: arayüzde sabit metin yok, tüm metinler anahtar üzerinden. Yeni dil eklemek = yeni JSON.
 
+## 4b. İnceleme sonrası eklenenler
+
+- Login shell rc dosyaları env'i ezebildiği için Claude komutu
+  `exec env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CONFIG_DIR='<dir>' claude ...`
+  biçiminde kurulur. Düz Terminal sekmelerinde rc'nin `CLAUDE_CONFIG_DIR` değerini ezmesi engellenmez.
+- Her Claude sekmesi kendi konuşmasını taşır: yeni başlatmada `--session-id <uuid>` (Session.claudeSessionId),
+  "kaldığı yerden" seçilince `--resume <uuid>`. Kayıt yoksa `--continue`.
+- O hesapla çalışan PTY varken hesap silinemez (`ACCOUNT_RUNNING`).
+- Terminal linkleri yalnızca Cmd+tık ile, tam adres gösterilen onay penceresinden sonra açılır.
+- PTY başlatma biletli: başlatma beklerken sekme kapatılırsa süreç açılmaz.
+- Paket: Electron fuse'ları (runAsNode, NODE_OPTIONS, inspect kapalı; asar bütünlüğü açık), daraltılmış entitlement'lar,
+  izin istekleri reddedilir, IPC yalnızca ana pencereden kabul edilir.
+
 ## 5. Hata durumları
 
 - `claude` PATH'te bulunamazsa: uyarı ekranı ve kurulum yönergesi.

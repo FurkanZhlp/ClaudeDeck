@@ -79,6 +79,7 @@
   },
   "errors": {
     "ACCOUNT_IN_USE": "This account is assigned to one or more projects. Change those projects' account first.",
+    "ACCOUNT_RUNNING": "Sessions are still running with this account. Close them first.",
     "NOT_FOUND": "Record not found.",
     "INVALID": "Missing or invalid information.",
     "PATH_MISSING": "Project folder not found.",
@@ -104,5 +105,9 @@
     "devTools": "Developer Tools",
     "fullscreen": "Toggle Full Screen",
     "window": "Window"
+  },
+  "link": {
+    "open": "Open",
+    "confirm": "Open {{host}} in your browser?"
   }
 }

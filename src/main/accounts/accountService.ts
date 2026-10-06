@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { mkdirSync, rmSync } from 'node:fs'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { join } from 'node:path'
 import { DomainError } from '../../shared/errors'
 import type { Account, AccountStatus } from '../../shared/types'
 import { buildSessionEnv } from '../env/shellEnv'
@@ -21,9 +21,12 @@ export function parseAuthStatus(stdout: string): AccountStatus {
   }
 }
 
-export function isInside(root: string, target: string): boolean {
-  const rel = relative(resolve(root), resolve(target))
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+/** Silinecek klasör saklanan yoldan değil, hesap kimliğinden türetilir. */
+export function accountDir(root: string, id: string): string {
+  if (!UUID.test(id)) throw new DomainError('INVALID')
+  return join(root, id)
 }
 
 function run(args: string[], env: Env): Promise<string> {
@@ -52,9 +55,9 @@ export class AccountService {
 
   /** Keychain'deki oturumu temizler, sonra config klasörünü siler. */
   async destroy(account: Account): Promise<void> {
-    if (!isInside(this.accountsRoot, account.configDir)) throw new DomainError('UNKNOWN')
-    await run(['auth', 'logout'], buildSessionEnv(await this.baseEnv(), account))
-    rmSync(account.configDir, { recursive: true, force: true })
+    const configDir = accountDir(this.accountsRoot, account.id)
+    await run(['auth', 'logout'], buildSessionEnv(await this.baseEnv(), { configDir }))
+    rmSync(configDir, { recursive: true, force: true })
   }
 
   async claudeAvailable(): Promise<boolean> {

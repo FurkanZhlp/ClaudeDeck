@@ -1,11 +1,19 @@
+import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
+import {
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+  type OpenDialogOptions
+} from 'electron'
 import { DomainError } from '../shared/errors'
 import { IPC, loginPtyId, type IpcResult } from '../shared/ipc'
 import type { AccountInput, Language, ProjectInput, SessionKind } from '../shared/types'
 import type { AccountService } from './accounts/accountService'
-import { buildSessionEnv, defaultShell, resolveShellEnv } from './env/shellEnv'
+import { buildSessionEnv, claudeCommand, defaultShell, resolveShellEnv } from './env/shellEnv'
 import type { PtyManager } from './pty/ptyManager'
 import type { Repository } from './state/repository'
 
@@ -17,23 +25,28 @@ interface Deps {
   onLanguageChange: () => void
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function handle(channel: string, fn: (...args: any[]) => unknown): void {
-  ipcMain.handle(channel, async (_event, ...args): Promise<IpcResult<unknown>> => {
-    try {
-      return { ok: true, data: await fn(...args) }
-    } catch (error) {
-      if (error instanceof DomainError) return { ok: false, code: error.code }
-      console.error(`[ipc] ${channel}`, error)
-      return { ok: false, code: 'UNKNOWN' }
-    }
-  })
-}
-
 const isText = (v: unknown): v is string => typeof v === 'string'
 const isSize = (v: unknown): v is number => Number.isInteger(v) && (v as number) > 0
 
 export function registerIpc({ repo, accounts, ptys, getWindow, onLanguageChange }: Deps): void {
+  // Yalnızca uygulamanın kendi penceresinden gelen mesajlar kabul edilir.
+  const trusted = (event: IpcMainEvent | IpcMainInvokeEvent): boolean =>
+    event.sender === getWindow()?.webContents
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handle = (channel: string, fn: (...args: any[]) => unknown): void => {
+    ipcMain.handle(channel, async (event, ...args): Promise<IpcResult<unknown>> => {
+      if (!trusted(event)) return { ok: false, code: 'UNKNOWN' }
+      try {
+        return { ok: true, data: await fn(...args) }
+      } catch (error) {
+        if (error instanceof DomainError) return { ok: false, code: error.code }
+        console.error(`[ipc] ${channel}`, error)
+        return { ok: false, code: 'UNKNOWN' }
+      }
+    })
+  }
+
   handle(IPC.stateGet, () => repo.get())
 
   handle(IPC.accountCreate, (input: AccountInput) => {
@@ -46,18 +59,24 @@ export function registerIpc({ repo, accounts, ptys, getWindow, onLanguageChange 
   )
   handle(IPC.accountRemove, async (id: string, deleteFiles: boolean) => {
     const account = repo.account(id)
-    const state = repo.removeAccount(id)
     ptys.kill(loginPtyId(id))
-    if (deleteFiles === true) await accounts.destroy(account)
+    // Proje başka hesaba geçmiş ama eski hesapla çalışan oturum olabilir.
+    if (ptys.hasAccount(id)) throw new DomainError('ACCOUNT_RUNNING')
+    const state = repo.removeAccount(id)
+    if (deleteFiles === true) {
+      try {
+        await accounts.destroy(account)
+      } catch (error) {
+        console.error('[ipc] hesap dosyaları silinemedi', error)
+      }
+    }
     return state
   })
   handle(IPC.accountStatus, async (id: string) => {
     const account = repo.account(id)
     const status = await accounts.status(account)
-    const state =
-      status.email && status.email !== account.email
-        ? repo.updateAccount(id, { email: status.email })
-        : repo.get()
+    const email = status.loggedIn ? status.email : undefined
+    const state = email !== account.email ? repo.updateAccount(id, { email }) : repo.get()
     return { status, state }
   })
 
@@ -92,50 +111,81 @@ export function registerIpc({ repo, accounts, ptys, getWindow, onLanguageChange 
     IPC.ptyStartSession,
     async (sessionId: string, resume: boolean, cols: number, rows: number) => {
       if (!isSize(cols) || !isSize(rows)) throw new DomainError('INVALID')
+      const ticket = ptys.ticket(sessionId)
+      const kind = repo.session(sessionId).kind
+      if (kind === 'claude' && !(await accounts.claudeAvailable())) {
+        throw new DomainError('CLAUDE_NOT_FOUND')
+      }
+      const base = await resolveShellEnv()
+
+      // Beklerken oturum, proje ya da hesap değişmiş olabilir; güncel kayıtları oku.
       const session = repo.session(sessionId)
       const project = repo.project(session.projectId)
       const account = repo.account(project.accountId)
       if (!existsSync(project.path)) throw new DomainError('PATH_MISSING')
-      if (session.kind === 'claude' && !(await accounts.claudeAvailable())) {
-        throw new DomainError('CLAUDE_NOT_FOUND')
-      }
       accounts.ensureConfigDir(account)
-      const base = await resolveShellEnv()
-      const command = resume === true ? 'claude --continue' : 'claude'
-      ptys.spawn(sessionId, {
-        file: defaultShell(base),
-        args: session.kind === 'claude' ? ['-ilc', command] : ['-il'],
-        cwd: project.path,
-        env: buildSessionEnv(base, account),
-        cols,
-        rows
-      })
+
+      let args = ['-il']
+      if (session.kind === 'claude') {
+        let claudeArgs: string[]
+        if (resume === true) {
+          claudeArgs = session.claudeSessionId
+            ? ['--resume', session.claudeSessionId]
+            : ['--continue']
+        } else {
+          const claudeSessionId = randomUUID()
+          repo.setClaudeSessionId(session.id, claudeSessionId)
+          claudeArgs = ['--session-id', claudeSessionId]
+        }
+        args = ['-ilc', claudeCommand(account.configDir, claudeArgs)]
+      }
+      ptys.spawn(
+        sessionId,
+        {
+          file: defaultShell(base),
+          args,
+          cwd: project.path,
+          env: buildSessionEnv(base, account),
+          cols,
+          rows,
+          accountId: account.id
+        },
+        ticket
+      )
       return { accountId: account.id }
     }
   )
 
   handle(IPC.ptyStartLogin, async (accountId: string, cols: number, rows: number) => {
     if (!isSize(cols) || !isSize(rows)) throw new DomainError('INVALID')
-    const account = repo.account(accountId)
+    const id = loginPtyId(accountId)
+    const ticket = ptys.ticket(id)
+    repo.account(accountId)
     if (!(await accounts.claudeAvailable())) throw new DomainError('CLAUDE_NOT_FOUND')
-    accounts.ensureConfigDir(account)
     const base = await resolveShellEnv()
-    ptys.spawn(loginPtyId(accountId), {
-      file: defaultShell(base),
-      args: ['-ilc', 'claude auth login'],
-      cwd: homedir(),
-      env: buildSessionEnv(base, account),
-      cols,
-      rows
-    })
+    const account = repo.account(accountId)
+    accounts.ensureConfigDir(account)
+    ptys.spawn(
+      id,
+      {
+        file: defaultShell(base),
+        args: ['-ilc', claudeCommand(account.configDir, ['auth', 'login'])],
+        cwd: homedir(),
+        env: buildSessionEnv(base, account),
+        cols,
+        rows,
+        accountId: account.id
+      },
+      ticket
+    )
     return null
   })
 
-  ipcMain.on(IPC.ptyWrite, (_event, id: unknown, data: unknown) => {
-    if (isText(id) && isText(data)) ptys.write(id, data)
+  ipcMain.on(IPC.ptyWrite, (event, id: unknown, data: unknown) => {
+    if (trusted(event) && isText(id) && isText(data)) ptys.write(id, data)
   })
-  ipcMain.on(IPC.ptyResize, (_event, id: unknown, cols: unknown, rows: unknown) => {
-    if (isText(id) && isSize(cols) && isSize(rows)) ptys.resize(id, cols, rows)
+  ipcMain.on(IPC.ptyResize, (event, id: unknown, cols: unknown, rows: unknown) => {
+    if (trusted(event) && isText(id) && isSize(cols) && isSize(rows)) ptys.resize(id, cols, rows)
   })
   handle(IPC.ptyKill, (id: string) => {
     if (isText(id)) ptys.kill(id)

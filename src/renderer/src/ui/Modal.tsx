@@ -8,6 +8,7 @@ interface Props {
   children: ReactNode
   width?: string
   closeOnEscape?: boolean
+  closeOnBackdrop?: boolean
 }
 
 export function Modal({
@@ -15,7 +16,8 @@ export function Modal({
   onClose,
   children,
   width = 'max-w-lg',
-  closeOnEscape = true
+  closeOnEscape = true,
+  closeOnBackdrop = true
 }: Props): React.JSX.Element {
   const { t } = useTranslation()
 
@@ -32,7 +34,7 @@ export function Modal({
     <div
       className="no-drag fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
+        if (closeOnBackdrop && event.target === event.currentTarget) onClose()
       }}
     >
       <div

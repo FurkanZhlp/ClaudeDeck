@@ -13,7 +13,7 @@ describe('çeviriler', () => {
     expect(keys(tr).sort()).toEqual(keys(en).sort())
   })
   it('uzun tire içermez', () => {
-    expect(JSON.stringify([tr, en])).not.toMatch(/[–—]/)
+    expect(JSON.stringify([tr, en])).not.toMatch(/[\u2013\u2014]/)
   })
   it('createTranslator değişkenleri yerleştirir', () => {
     expect(createTranslator('tr')('session.claudeTitle', { n: 2 })).toBe('Claude 2')
