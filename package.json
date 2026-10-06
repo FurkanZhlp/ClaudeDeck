@@ -49,6 +49,7 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "i18next": "^26.4.2",
     "lucide-react": "^1.52.0",
+    "motion": "^14.0.0",
     "prettier": "^3.7.4",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
