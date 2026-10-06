@@ -13,6 +13,9 @@ import { useApp } from './store'
 export default function App(): React.JSX.Element {
   const init = useApp((s) => s.init)
   const ready = useApp((s) => s.data !== null)
+  const accent = useApp(
+    (s) => s.data?.accounts.find((a) => a.id === s.selectedAccountId)?.color ?? null
+  )
 
   useEffect(() => {
     void init()
@@ -21,7 +24,10 @@ export default function App(): React.JSX.Element {
   if (!ready) return <div className="drag h-full" />
 
   return (
-    <div className="flex h-full">
+    <div
+      className="flex h-full"
+      style={accent ? ({ '--account': accent } as React.CSSProperties) : undefined}
+    >
       <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col">
         <UpdateBanner />

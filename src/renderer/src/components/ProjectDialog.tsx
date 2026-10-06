@@ -24,11 +24,14 @@ function ProjectForm({
   const setSettingsOpen = useApp((s) => s.setSettingsOpen)
   const saveProject = useApp((s) => s.saveProject)
   const removeProject = useApp((s) => s.removeProject)
+  const selectedAccountId = useApp((s) => s.selectedAccountId)
   const editing =
     dialog.mode === 'edit' ? data?.projects.find((p) => p.id === dialog.projectId) : undefined
   const [name, setName] = useState(editing?.name ?? '')
   const [path, setPath] = useState(editing?.path ?? '')
-  const [accountId, setAccountId] = useState(editing?.accountId ?? data?.accounts[0]?.id ?? '')
+  const [accountId, setAccountId] = useState(
+    editing?.accountId ?? selectedAccountId ?? data?.accounts[0]?.id ?? ''
+  )
   if (!data) return null
 
   const close = (): void => setProjectDialog(null)

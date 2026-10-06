@@ -10,7 +10,12 @@
     "newProject": "New project",
     "editProject": "Edit project",
     "settings": "Settings",
-    "noProjects": "No projects yet."
+    "noProjects": "No projects yet.",
+    "accounts": "Accounts",
+    "addAccount": "Add account",
+    "noProjectsForAccount": "No projects for this account yet.",
+    "running_one": "{{count}} running session",
+    "running_other": "{{count}} running sessions"
   },
   "welcome": {
     "title": "Welcome to ClaudeDeck",
@@ -142,5 +147,9 @@
     "download": "Download",
     "upToDate": "ClaudeDeck is up to date (v{{version}}).",
     "failed": "Could not check for updates. Check your internet connection."
+  },
+  "workspace": {
+    "emptyTitle": "No projects for {{name}}",
+    "emptyHint": "Pick a folder to create the first project for this account."
   }
 }

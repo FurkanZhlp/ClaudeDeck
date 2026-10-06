@@ -13,3 +13,7 @@ export const ACCOUNT_COLORS = [
   '#db2777',
   '#64748b'
 ]
+
+/** Translucent version of an account colour for backgrounds and soft borders. */
+export const tint = (color: string, percent: number): string =>
+  `color-mix(in srgb, ${color} ${percent}%, transparent)`

@@ -26,7 +26,10 @@ export function SessionTabs({ projectId }: { projectId: string }): React.JSX.Ele
   }
 
   return (
-    <div className="drag flex h-11 shrink-0 items-end gap-2 border-b border-border bg-panel px-2">
+    <div
+      className="drag flex h-11 shrink-0 items-end gap-2 border-b bg-panel px-2 transition-colors duration-300"
+      style={{ borderBottomColor: 'color-mix(in srgb, var(--account) 45%, transparent)' }}
+    >
       <div role="tablist" className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto">
         {sessions.map((session) => {
           const run = running[session.id]
@@ -39,6 +42,7 @@ export function SessionTabs({ projectId }: { projectId: string }): React.JSX.Ele
               tabIndex={0}
               aria-selected={active}
               className={`no-drag group flex h-8 max-w-52 shrink-0 cursor-default items-center gap-1.5 rounded-t-md border border-b-0 px-2.5 ${active ? 'border-border bg-bg text-fg' : 'border-transparent text-muted hover:text-fg'}`}
+              style={active ? { boxShadow: 'inset 0 2px 0 var(--account)' } : undefined}
               onClick={() => selectSession(session.id)}
               onKeyDown={(event) => event.key === 'Enter' && selectSession(session.id)}
             >

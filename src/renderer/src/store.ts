@@ -23,6 +23,8 @@ interface AppStore {
   data: AppState | null
   statuses: Record<string, StatusEntry>
   claudeAvailable: boolean | null
+  selectedAccountId: string | null
+  lastProject: Record<string, string>
   selectedProjectId: string | null
   selectedSessionId: string | null
   lastSession: Record<string, string>
@@ -45,6 +47,7 @@ interface AppStore {
   setLoginAccount: (accountId: string | null) => void
   saveProject: (input: ProjectInput, editId?: string) => Promise<void>
   removeProject: (id: string) => Promise<void>
+  selectAccount: (id: string) => void
   selectProject: (id: string) => void
   selectSession: (id: string) => void
   createSession: (kind: SessionKind) => Promise<void>
@@ -62,6 +65,34 @@ function applyLanguage(state: AppState): void {
   const language = resolveLanguage(state.settings.language, navigator.language)
   void i18n.changeLanguage(language)
   document.documentElement.lang = language
+}
+
+type Selection = Pick<AppStore, 'selectedAccountId' | 'selectedProjectId' | 'selectedSessionId'>
+
+function lastOrFirst(remembered: string | undefined, ids: string[]): string | null {
+  return remembered && ids.includes(remembered) ? remembered : (ids[0] ?? null)
+}
+
+/** Selection after switching to an account: its last used project and that project's last tab. */
+function focusAccount(
+  state: AppState,
+  accountId: string | null,
+  lastProject: Record<string, string>,
+  lastSession: Record<string, string>
+): Selection {
+  if (!accountId)
+    return { selectedAccountId: null, selectedProjectId: null, selectedSessionId: null }
+  const projectIds = state.projects.filter((p) => p.accountId === accountId).map((p) => p.id)
+  const projectId = lastOrFirst(lastProject[accountId], projectIds)
+  const sessionIds = state.sessions
+    .filter((s) => s.projectId === projectId)
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map((s) => s.id)
+  return {
+    selectedAccountId: accountId,
+    selectedProjectId: projectId,
+    selectedSessionId: projectId ? lastOrFirst(lastSession[projectId], sessionIds) : null
+  }
 }
 
 function firstSessionOf(state: AppState, projectId: string | null): string | null {
@@ -87,6 +118,8 @@ export const useApp = create<AppStore>((set, get) => {
     data: null,
     statuses: {},
     claudeAvailable: null,
+    selectedAccountId: null,
+    lastProject: {},
     selectedProjectId: null,
     selectedSessionId: null,
     lastSession: {},
@@ -114,8 +147,8 @@ export const useApp = create<AppStore>((set, get) => {
         return
       }
       applyLanguage(data)
-      const selectedProjectId = data.projects[0]?.id ?? null
-      set({ data, selectedProjectId, selectedSessionId: firstSessionOf(data, selectedProjectId) })
+      const accountId = data.projects[0]?.accountId ?? data.accounts[0]?.id ?? null
+      set({ data, ...focusAccount(data, accountId, {}, {}) })
       void window.api.system.claudeAvailable().then((claudeAvailable) => set({ claudeAvailable }))
       data.accounts.forEach((account) => void get().refreshStatus(account.id))
       void window.api.update.check().then((update) => update?.available && set({ update }))
@@ -148,7 +181,12 @@ export const useApp = create<AppStore>((set, get) => {
 
     async createAccount(input) {
       const result = await guard(() => window.api.accounts.create(input))
-      if (result) set({ data: result.state, loginAccountId: result.account.id })
+      if (!result) return
+      set({
+        data: result.state,
+        loginAccountId: result.account.id,
+        ...focusAccount(result.state, result.account.id, get().lastProject, get().lastSession)
+      })
     },
 
     async updateAccount(id, patch) {
@@ -162,7 +200,12 @@ export const useApp = create<AppStore>((set, get) => {
       if (!data) return
       const statuses = { ...get().statuses }
       delete statuses[id]
-      set({ data, statuses })
+      const { selectedAccountId, lastProject, lastSession } = get()
+      const selection =
+        selectedAccountId === id
+          ? focusAccount(data, data.accounts[0]?.id ?? null, lastProject, lastSession)
+          : {}
+      set({ data, statuses, ...selection })
     },
 
     setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
@@ -174,15 +217,20 @@ export const useApp = create<AppStore>((set, get) => {
         editId ? window.api.projects.update(editId, input) : window.api.projects.create(input)
       )
       if (!data) return
-      if (editId) {
-        set({ data, projectDialog: null })
-      } else {
+      const projectId = editId ?? data.projects.at(-1)?.id
+      const project = data.projects.find((p) => p.id === projectId)
+      // A new project, or the selected one moved to another account, takes the selection along.
+      if (project && (!editId || get().selectedProjectId === editId)) {
         set({
           data,
           projectDialog: null,
-          selectedProjectId: data.projects.at(-1)?.id ?? null,
-          selectedSessionId: null
+          selectedAccountId: project.accountId,
+          selectedProjectId: project.id,
+          selectedSessionId: editId ? get().selectedSessionId : null,
+          lastProject: { ...get().lastProject, [project.accountId]: project.id }
         })
+      } else {
+        set({ data, projectDialog: null })
       }
     },
 
@@ -199,14 +247,18 @@ export const useApp = create<AppStore>((set, get) => {
         set({ data, running, projectDialog: null })
         return
       }
-      const selectedProjectId = data.projects[0]?.id ?? null
+      const { selectedAccountId, lastProject, lastSession } = get()
       set({
         data,
         running,
         projectDialog: null,
-        selectedProjectId,
-        selectedSessionId: firstSessionOf(data, selectedProjectId)
+        ...focusAccount(data, selectedAccountId, lastProject, lastSession)
       })
+    },
+
+    selectAccount(id) {
+      const { data, lastProject, lastSession } = get()
+      if (data) set(focusAccount(data, id, lastProject, lastSession))
     },
 
     selectProject(id) {
@@ -214,16 +266,24 @@ export const useApp = create<AppStore>((set, get) => {
       if (!data) return
       const remembered = lastSession[id]
       const valid = remembered && data.sessions.some((s) => s.id === remembered)
+      const project = data.projects.find((p) => p.id === id)
+      if (!project) return
       set({
+        selectedAccountId: project.accountId,
         selectedProjectId: id,
-        selectedSessionId: valid ? remembered : firstSessionOf(data, id)
+        selectedSessionId: valid ? remembered : firstSessionOf(data, id),
+        lastProject: { ...get().lastProject, [project.accountId]: id }
       })
     },
 
     selectSession(id) {
-      const session = get().data?.sessions.find((s) => s.id === id)
-      if (!session) return
+      const data = get().data
+      const session = data?.sessions.find((s) => s.id === id)
+      const project = data?.projects.find((p) => p.id === session?.projectId)
+      if (!session || !project) return
       set({
+        selectedAccountId: project.accountId,
+        lastProject: { ...get().lastProject, [project.accountId]: project.id },
         selectedProjectId: session.projectId,
         selectedSessionId: id,
         lastSession: { ...get().lastSession, [session.projectId]: id }

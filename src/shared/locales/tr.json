@@ -10,7 +10,12 @@
     "newProject": "Yeni proje",
     "editProject": "Projeyi düzenle",
     "settings": "Ayarlar",
-    "noProjects": "Henüz proje yok."
+    "noProjects": "Henüz proje yok.",
+    "accounts": "Hesaplar",
+    "addAccount": "Hesap ekle",
+    "noProjectsForAccount": "Bu hesapta henüz proje yok.",
+    "running_one": "{{count}} çalışan oturum",
+    "running_other": "{{count}} çalışan oturum"
   },
   "welcome": {
     "title": "ClaudeDeck'e hoş geldiniz",
@@ -142,5 +147,9 @@
     "download": "İndir",
     "upToDate": "ClaudeDeck güncel (v{{version}}).",
     "failed": "Güncellemeler denetlenemedi. İnternet bağlantınızı kontrol edin."
+  },
+  "workspace": {
+    "emptyTitle": "{{name}} hesabında proje yok",
+    "emptyHint": "Bir klasör seçip bu hesaba bağlı ilk projeyi oluşturun."
   }
 }

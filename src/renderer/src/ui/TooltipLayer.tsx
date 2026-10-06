@@ -8,6 +8,7 @@ const EDGE = 8
 interface Tip {
   label: string
   anchor: DOMRect
+  side: 'right' | 'auto'
 }
 
 /**
@@ -28,7 +29,8 @@ export function TooltipLayer(): React.JSX.Element | null {
       const label = el.dataset.tooltip
       if (!label || !el.isConnected) return
       visible = true
-      setTip({ label, anchor: el.getBoundingClientRect() })
+      const side = el.dataset.tooltipSide === 'right' ? 'right' : 'auto'
+      setTip({ label, anchor: el.getBoundingClientRect(), side })
     }
     const hide = (): void => {
       clearTimeout(timer)
@@ -75,12 +77,19 @@ export function TooltipLayer(): React.JSX.Element | null {
     }
   }, [])
 
-  // Measure, then place above the anchor (or below if there is no room) inside the window.
+  // Measure, then place next to the anchor while staying inside the window.
   useLayoutEffect(() => {
     const el = ref.current
     if (!tip || !el) return setPosition(null)
     const { width, height } = el.getBoundingClientRect()
     const { anchor } = tip
+    if (tip.side === 'right' && anchor.right + GAP + width <= window.innerWidth - EDGE) {
+      const top = Math.min(
+        Math.max(anchor.top + anchor.height / 2 - height / 2, EDGE),
+        window.innerHeight - height - EDGE
+      )
+      return setPosition({ left: anchor.right + GAP, top })
+    }
     const above = anchor.top - GAP - height >= EDGE
     const left = Math.min(
       Math.max(anchor.left + anchor.width / 2 - width / 2, EDGE),
