@@ -151,5 +151,147 @@
   "workspace": {
     "emptyTitle": "{{name}} hesabında proje yok",
     "emptyHint": "Bir klasör seçip bu hesaba bağlı ilk projeyi oluşturun."
+  },
+  "notes": {
+    "title": "Notlar",
+    "show": "Proje notlarını göster",
+    "hide": "Proje notlarını gizle",
+    "count_one": "{{count}} not",
+    "count_other": "{{count}} not",
+    "openInEditor": "Düzenleyicide aç",
+    "reveal": "Finder'da göster",
+    "close": "Notları kapat",
+    "listLabel": "Bu projedeki notlar",
+    "updated": "Son güncelleme: {{time}}",
+    "emptyNote": "Bu not boş.",
+    "emptyTitle": "Henüz not yok",
+    "emptyBody": "Claude bu projede çalıştıkça öğrendiklerini buraya yazar: alınan kararlar, uyulan kurallar ve hatırlanması gerekenler.",
+    "emptyAccounts": "Notlar projeye aittir; projeyi başka bir hesaba taşıdığınızda notlar da onunla birlikte gelir."
+  },
+  "notices": {
+    "guidelinesUpdated": "{{account}} hesabının ClaudeDeck yönergeleri v{{version}} sürümüne güncellendi."
+  },
+  "onboarding": {
+    "title": "ClaudeDeck kurulumu",
+    "progress": "Kurulum adımları, adım {{current}} / {{total}}",
+    "back": "Geri",
+    "skip": "Atla",
+    "continue": "Devam et",
+    "steps": {
+      "welcome": "Hoş geldiniz",
+      "account": "Hesap",
+      "signIn": "Giriş",
+      "import": "Aktarma",
+      "optimize": "Optimizasyon",
+      "done": "Tamam"
+    },
+    "welcome": {
+      "title": "ClaudeDeck'e hoş geldiniz",
+      "subtitle": "Birden fazla Claude Code hesabını tek pencereden, birbirine karışmadan yönetin.",
+      "accounts": {
+        "title": "Hesaplar",
+        "body": "Her hesap kendi ayarları, ajanları ve oturumuyla ayrı bir Claude Code profili olarak çalışır."
+      },
+      "projects": {
+        "title": "Projeler",
+        "body": "Her projeye bir klasör ve bir hesap atarsınız; o projede açılan sekmeler bu hesabı kullanır."
+      },
+      "tabs": {
+        "title": "Sekmeler",
+        "body": "Bir projede yan yana Claude ve terminal sekmeleri açıp kaldığınız yerden devam edebilirsiniz."
+      },
+      "start": "Başlayalım"
+    },
+    "account": {
+      "title": "İlk hesabınızı oluşturun",
+      "subtitle": "Hesabı tanımanızı kolaylaştıracak bir ad ve renk seçin.",
+      "name": "Hesap adı",
+      "namePlaceholder": "ör. Kişisel, İş",
+      "color": "Renk",
+      "previewEmpty": "Hesap adı",
+      "create": "Hesabı oluştur",
+      "creating": "Oluşturuluyor..."
+    },
+    "signIn": {
+      "title": "{{name}} için giriş",
+      "subtitle": "Claude Code bu hesap için yetkilendiriliyor.",
+      "laterHint": "Girişi daha sonra Ayarlar'dan da yapabilirsiniz."
+    },
+    "import": {
+      "title": "Claude ayarlarınızı aktarın",
+      "subtitle": "Mevcut talimatlarınızı, ajanlarınızı ve eklentilerinizi bu hesabın profiline kopyalayın. Kaynak dosyalar değiştirilmez.",
+      "source": "Kaynak",
+      "global": "Kendi Claude kurulumunuz",
+      "globalHint": "~/.claude klasöründeki ayarlarınız",
+      "accountHint": "Başka bir ClaudeDeck hesabı",
+      "categories": "Aktarılacaklar",
+      "loading": "Kaynak inceleniyor...",
+      "nothing": "Bu kaynakta aktarılacak bir içerik bulunamadı.",
+      "replaceHint": "Bu hesabın profilinde zaten içerik var. Değişecek dosyaların önceki sürümleri aktarmadan önce yedeklenir.",
+      "diff": "{{added}} yeni, {{changed}} değişen, {{removed}} kaldırılan",
+      "items_one": "{{count}} öğe",
+      "items_other": "{{count}} öğe",
+      "unavailable": "Bulunamadı",
+      "import": "Aktar",
+      "importing": "Aktarılıyor...",
+      "done_one": "{{count}} bölüm aktarıldı",
+      "done_other": "{{count}} bölüm aktarıldı",
+      "backup": "Önceki sürümler şu klasöre yedeklendi:"
+    },
+    "optimize": {
+      "title": "Profili optimize edin",
+      "subtitle": "Claude, bu hesabın profilini ClaudeDeck'in önerdiği yapıya göre düzenleyebilir.",
+      "intro": "Bu adımda kendi Claude hesabınız, bu hesabın profilini ClaudeDeck'in önerdiği kurulumla inceler ve yeniden düzenler.",
+      "points": {
+        "review": {
+          "title": "İnceleme ve düzenleme",
+          "body": "Talimatlar, ajanlar ve beceriler gözden geçirilir; tekrar eden veya dağınık kısımlar için öneriler sunulur."
+        },
+        "approve": {
+          "title": "Her değişiklik için onay",
+          "body": "Claude, bir dosyayı değiştirmeden önce her seferinde sizden izin ister."
+        },
+        "backup": {
+          "title": "Önce yedek",
+          "body": "Değiştirilecek dosyalar düzenlenmeden önce yedeklenir."
+        }
+      },
+      "start": "Optimize et",
+      "starting": "Claude başlatılıyor...",
+      "running": "Claude çalışıyor. Önerileri terminalde onaylayabilir veya reddedebilirsiniz.",
+      "runningHint": "Claude'un sorularını aşağıdaki terminalde yanıtlayın. İşiniz bittiğinde Bitir'e basın.",
+      "exited": "Oturum sona erdi (çıkış kodu {{code}}).",
+      "terminalLabel": "Optimizasyon oturumu",
+      "finish": "Bitir"
+    },
+    "done": {
+      "title": "Her şey hazır",
+      "subtitle": "Hesabınız ClaudeDeck'te kullanıma hazır.",
+      "signedIn": "{{name}} hesabında {{email}} ile giriş yapıldı.",
+      "signedOut": "{{name}} hesabında henüz giriş yapılmadı.",
+      "imported": "Aktarılanlar: {{list}}",
+      "importSkipped": "Ayar aktarma atlandı.",
+      "optimized": "Optimizasyon oturumu çalıştırıldı.",
+      "optimizeSkipped": "Optimizasyon atlandı.",
+      "later": "Aktarma ve optimizasyonu daha sonra Ayarlar'daki hesap satırından yeniden çalıştırabilirsiniz.",
+      "open": "ClaudeDeck'i aç",
+      "finish": "Tamam"
+    },
+    "categories": {
+      "instructions": "Talimatlar (CLAUDE.md)",
+      "agents": "Ajanlar",
+      "skills": "Beceriler",
+      "commands": "Komutlar",
+      "outputStyles": "Çıktı stilleri",
+      "settings": "Ayarlar (settings.json)",
+      "plugins": "Eklentiler"
+    },
+    "profile": {
+      "title": "Profil",
+      "hint": "Talimatlar, ajanlar, beceriler ve eklentiler bu hesabın profilinde tutulur.",
+      "import": "Claude ayarlarından aktar",
+      "optimize": "ClaudeDeck ile optimize et",
+      "openFolder": "Profil klasörünü aç"
+    }
   }
 }

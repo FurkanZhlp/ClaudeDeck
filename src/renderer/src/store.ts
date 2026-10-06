@@ -33,13 +33,16 @@ interface AppStore {
   projectDialog: ProjectDialogState
   loginAccountId: string | null
   error: string | null
+  notice: string | null
   update: UpdateInfo | null
 
   init: () => Promise<void>
   setError: (code: string | null) => void
+  setNotice: (message: string | null) => void
   setLanguage: (language: Language | null) => Promise<void>
   refreshStatus: (accountId: string) => Promise<void>
-  createAccount: (input: AccountInput) => Promise<void>
+  /** Creates the account and selects it; returns its id so the caller can start onboarding. */
+  createAccount: (input: AccountInput) => Promise<string | null>
   updateAccount: (id: string, patch: Partial<AccountInput>) => Promise<boolean>
   removeAccount: (id: string, deleteFiles: boolean) => Promise<void>
   setSettingsOpen: (open: boolean) => void
@@ -135,6 +138,7 @@ export const useApp = create<AppStore>((set, get) => {
     projectDialog: null,
     loginAccountId: null,
     error: null,
+    notice: null,
     update: null,
 
     async init() {
@@ -147,7 +151,22 @@ export const useApp = create<AppStore>((set, get) => {
           if (run) set({ running: { ...get().running, [id]: { ...run, exitCode } } })
         }),
         window.api.system.onOpenSettings(() => set({ settingsOpen: true })),
-        window.api.update.onAvailable((update) => set({ update }))
+        window.api.update.onAvailable((update) => set({ update })),
+        // Changes made by the main process itself, e.g. through the ClaudeDeck MCP server.
+        window.api.state.onChanged((data) => set({ data })),
+        window.api.sessions.onOpenRequest((sessionId) => {
+          get().selectSession(sessionId)
+          if (!get().running[sessionId]) get().startSession(sessionId, false)
+        }),
+        window.api.profile.onGuidelinesUpdated((update) => {
+          const account = get().data?.accounts.find((a) => a.id === update.accountId)
+          set({
+            notice: i18n.t('notices.guidelinesUpdated', {
+              account: account?.name ?? '',
+              version: update.to
+            })
+          })
+        })
       )
 
       const data = await guard(() => window.api.state.get())
@@ -164,6 +183,7 @@ export const useApp = create<AppStore>((set, get) => {
     },
 
     setError: (error) => set({ error }),
+    setNotice: (notice) => set({ notice }),
 
     async setLanguage(language) {
       const data = await guard(() => window.api.settings.setLanguage(language))
@@ -190,12 +210,13 @@ export const useApp = create<AppStore>((set, get) => {
 
     async createAccount(input) {
       const result = await guard(() => window.api.accounts.create(input))
-      if (!result) return
+      if (!result) return null
       set({
         data: result.state,
-        loginAccountId: result.account.id,
         ...focusAccount(result.state, result.account.id, get().lastProject, get().lastSession)
       })
+      void get().refreshStatus(result.account.id)
+      return result.account.id
     },
 
     async updateAccount(id, patch) {

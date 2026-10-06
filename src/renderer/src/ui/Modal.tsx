@@ -24,7 +24,8 @@ export function Modal({
   useEffect(() => {
     if (!closeOnEscape) return
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose()
+      // A full-window screen (sign-in, onboarding) above this modal handles its own keys.
+      if (event.key === 'Escape' && !document.querySelector('[data-screen]')) onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

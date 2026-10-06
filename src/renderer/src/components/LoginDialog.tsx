@@ -1,5 +1,13 @@
 import { Check, ChevronDown, Copy, ExternalLink, Loader2, RotateCw, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { loginPtyId } from '@shared/ipc'
 import { parseLoginOutput, type LoginStage } from '@shared/loginProgress'
@@ -56,6 +64,7 @@ function LoginContent({ accountId }: { accountId: string }): React.JSX.Element |
     <div
       role="dialog"
       aria-modal="true"
+      data-screen
       aria-label={t('login.title', { name: account.name })}
       className="animate-screen-in fixed inset-0 z-[70] flex flex-col bg-bg"
     >
@@ -96,9 +105,16 @@ interface FlowProps {
   accountId: string
   onClose: () => void
   onRetry: () => void
+  /** Called once when the flow reaches its finished state (all steps done). */
+  onSuccess?: () => void
 }
 
-function LoginFlow({ accountId, onClose, onRetry }: FlowProps): React.JSX.Element {
+export function LoginFlow({
+  accountId,
+  onClose,
+  onRetry,
+  onSuccess
+}: FlowProps): React.JSX.Element {
   const { t } = useTranslation()
   const setError = useApp((s) => s.setError)
   const refreshStatus = useApp((s) => s.refreshStatus)
@@ -146,6 +162,17 @@ function LoginFlow({ accountId, onClose, onRetry }: FlowProps): React.JSX.Elemen
   useEffect(() => {
     if (progress.stage === 'success') void refreshStatus(accountId)
   }, [progress.stage, accountId, refreshStatus])
+
+  const onSuccessRef = useRef(onSuccess)
+  const succeeded = useRef(false)
+  useEffect(() => {
+    onSuccessRef.current = onSuccess
+  })
+  useEffect(() => {
+    if (!finished || succeeded.current) return
+    succeeded.current = true
+    onSuccessRef.current?.()
+  }, [finished])
 
   const stateOf = (index: number): StepState => {
     if (failed && index === Math.min(shown, STEPS.length - 1)) return 'failed'

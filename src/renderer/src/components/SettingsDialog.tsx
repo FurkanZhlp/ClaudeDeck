@@ -2,6 +2,8 @@ import { LogIn, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Account, Language } from '@shared/types'
+import { ProfileSection } from '../onboarding/ProfileSection'
+import { useOnboarding } from '../onboarding/onboardingStore'
 import { useApp } from '../store'
 import { AccountDot } from '../ui/AccountDot'
 import { Button } from '../ui/Button'
@@ -28,7 +30,10 @@ function SettingsContent(): React.JSX.Element | null {
   const add = (event: FormEvent): void => {
     event.preventDefault()
     if (!name.trim()) return
-    void createAccount({ name, color }).then(() => setName(''))
+    void createAccount({ name, color }).then((accountId) => {
+      setName('')
+      if (accountId) useOnboarding.getState().startForAccount(accountId, { startAt: 'signIn' })
+    })
   }
 
   return (
@@ -153,6 +158,9 @@ function AccountRow({ account }: { account: Account }): React.JSX.Element {
         >
           <Trash2 size={14} />
         </Button>
+      </div>
+      <div className="mt-3 border-t border-border pt-3">
+        <ProfileSection accountId={account.id} />
       </div>
       {confirming && (
         <div className="mt-3 space-y-2 border-t border-border pt-3">

@@ -1,6 +1,9 @@
 import { useEffect } from 'react'
 import { ClaudeBanner } from './components/ClaudeBanner'
 import { ErrorToast } from './components/ErrorToast'
+import { NoticeToast } from './components/NoticeToast'
+import { OnboardingFlow } from './onboarding/OnboardingFlow'
+import { useOnboarding } from './onboarding/onboardingStore'
 import { LoginDialog } from './components/LoginDialog'
 import { ProjectDialog } from './components/ProjectDialog'
 import { SettingsDialog } from './components/SettingsDialog'
@@ -18,7 +21,10 @@ export default function App(): React.JSX.Element {
   )
 
   useEffect(() => {
-    void init()
+    void init().then(() => {
+      // First run: no accounts yet, so walk the user through setting one up.
+      if (useApp.getState().data?.accounts.length === 0) useOnboarding.getState().startFirstRun()
+    })
   }, [init])
 
   if (!ready) return <div className="drag h-full" />
@@ -37,7 +43,9 @@ export default function App(): React.JSX.Element {
       <ProjectDialog />
       <SettingsDialog />
       <LoginDialog />
+      <OnboardingFlow />
       <ErrorToast />
+      <NoticeToast />
       <TooltipLayer />
     </div>
   )

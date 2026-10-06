@@ -1,4 +1,6 @@
 import { useTranslation } from 'react-i18next'
+import { NotesPanel } from '../notes/NotesPanel'
+import { useNotes } from '../notes/notesStore'
 import { useApp } from '../store'
 import { AccountEmpty } from './AccountEmpty'
 import { SessionPane } from './SessionPane'
@@ -11,6 +13,7 @@ export function Workspace(): React.JSX.Element {
   const sessionId = useApp((s) => s.selectedSessionId)
   const projectExists = useApp((s) => !!s.data?.projects.some((p) => p.id === s.selectedProjectId))
   const account = useApp((s) => s.data?.accounts.find((a) => a.id === s.selectedAccountId))
+  const notesOpen = useNotes((s) => s.open)
 
   if (!account) return <Welcome />
   if (!projectId || !projectExists) return <AccountEmpty account={account} />
@@ -18,13 +21,18 @@ export function Workspace(): React.JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <SessionTabs projectId={projectId} />
-      {sessionId ? (
-        <SessionPane key={sessionId} sessionId={sessionId} />
-      ) : (
-        <div className="flex flex-1 items-center justify-center p-8 text-center text-muted">
-          {t('session.noSessions')}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          {sessionId ? (
+            <SessionPane key={sessionId} sessionId={sessionId} />
+          ) : (
+            <div className="flex flex-1 items-center justify-center p-8 text-center text-muted">
+              {t('session.noSessions')}
+            </div>
+          )}
         </div>
-      )}
+        {notesOpen && <NotesPanel key={projectId} projectId={projectId} />}
+      </div>
     </div>
   )
 }

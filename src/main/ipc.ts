@@ -4,7 +4,14 @@ import { homedir } from 'node:os'
 import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import { DomainError } from '../shared/errors'
 import { IPC, loginPtyId } from '../shared/ipc'
-import type { AccountInput, Language, ProjectInput, SessionKind, UpdateInfo } from '../shared/types'
+import type {
+  Account,
+  AccountInput,
+  Language,
+  ProjectInput,
+  SessionKind,
+  UpdateInfo
+} from '../shared/types'
 import {
   hasConversation,
   markOnboardingComplete,
@@ -23,6 +30,13 @@ interface Deps {
   onLanguageChange: () => void
   checkUpdate: () => Promise<UpdateInfo | null>
   openUpdate: () => Promise<void>
+  /** Account-level setup (guidelines, MCP registration) before Claude runs for an account. */
+  prepareAccount: (account: Account) => void
+  /** A project's account or folder changed; its notes must follow. */
+  onProjectMoved: (
+    before: { configDir: string; path: string },
+    after: { configDir: string; path: string }
+  ) => void
 }
 
 function completeOnboarding(configDir: string): void {
@@ -40,7 +54,9 @@ export function registerIpc({
   getWindow,
   onLanguageChange,
   checkUpdate,
-  openUpdate
+  openUpdate,
+  prepareAccount,
+  onProjectMoved
 }: Deps): void {
   const { handle, trusted } = createIpcTools(getWindow)
 
@@ -49,6 +65,7 @@ export function registerIpc({
   handle(IPC.accountCreate, (input: AccountInput) => {
     const result = repo.createAccount({ name: input?.name, color: input?.color })
     accounts.ensureConfigDir(result.account)
+    prepareAccount(result.account)
     return result
   })
   handle(IPC.accountUpdate, (id: string, patch: Partial<AccountInput>) =>
@@ -81,9 +98,23 @@ export function registerIpc({
   handle(IPC.projectCreate, (input: ProjectInput) =>
     repo.createProject({ name: input?.name, path: input?.path, accountId: input?.accountId })
   )
-  handle(IPC.projectUpdate, (id: string, patch: Partial<ProjectInput>) =>
-    repo.updateProject(id, { name: patch?.name, path: patch?.path, accountId: patch?.accountId })
-  )
+  handle(IPC.projectUpdate, (id: string, patch: Partial<ProjectInput>) => {
+    const location = (projectId: string): { configDir: string; path: string } => {
+      const project = repo.project(projectId)
+      return { configDir: repo.account(project.accountId).configDir, path: project.path }
+    }
+    const before = location(id)
+    const state = repo.updateProject(id, {
+      name: patch?.name,
+      path: patch?.path,
+      accountId: patch?.accountId
+    })
+    const after = location(id)
+    if (before.configDir !== after.configDir || before.path !== after.path) {
+      onProjectMoved(before, after)
+    }
+    return state
+  })
   handle(IPC.projectRemove, (id: string) => {
     const { state, removedSessionIds } = repo.removeProject(id)
     removedSessionIds.forEach((sessionId) => ptys.kill(sessionId))
@@ -122,7 +153,10 @@ export function registerIpc({
       const account = repo.account(project.accountId)
       if (!existsSync(project.path)) throw new DomainError('PATH_MISSING')
       accounts.ensureConfigDir(account)
-      if (session.kind === 'claude') completeOnboarding(account.configDir)
+      if (session.kind === 'claude') {
+        completeOnboarding(account.configDir)
+        prepareAccount(account)
+      }
 
       let args = ['-il']
       if (session.kind === 'claude') {

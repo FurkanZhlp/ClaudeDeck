@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, Menu, net, session, shell } from 'electron'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { IPC } from '../shared/ipc'
@@ -12,8 +13,19 @@ import { PtyManager } from './pty/ptyManager'
 import { JsonStore } from './state/jsonStore'
 import { emptyState, Repository } from './state/repository'
 import { checkForUpdate, RELEASES_URL } from './updates/updateChecker'
-import type { UpdateInfo } from '../shared/types'
+import type { Account, GuidelinesUpdate, McpInfo, UpdateInfo } from '../shared/types'
 import icon from '../../resources/icon.png?asset'
+import guidelinesText from '../../resources/claudedeck/guidelines.md?raw'
+import optimizePrompt from '../../resources/claudedeck/optimize-prompt.md?raw'
+import { createIpcTools } from './ipcUtil'
+import { registerMcpInConfig } from './mcp/register'
+import { registerMcpIpc } from './mcp/mcpIpc'
+import { startMcpServer } from './mcp/server'
+import { createTools } from './mcp/tools'
+import { registerNotesIpc, type NotesIpc } from './notes/notesIpc'
+import { listNotes, readNote, writeNote } from './notes/notesStore'
+import { ensureGuidelines } from './profile/guidelines'
+import { registerProfileIpc } from './profile/profileIpc'
 
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000
 
@@ -23,6 +35,10 @@ const repo = new Repository(new JsonStore(join(userData, 'config.json'), emptySt
 const accounts = new AccountService(accountsRoot, resolveShellEnv)
 
 let mainWindow: BrowserWindow | null = null
+let notes: NotesIpc | null = null
+let mcp: { url: string; token: string; stop: () => Promise<void> } | null = null
+// Guideline upgrades found before the window loaded; shown once the renderer is ready.
+let pendingGuidelineUpdates: GuidelinesUpdate[] = []
 
 function send(channel: string, ...args: unknown[]): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args)
@@ -35,6 +51,46 @@ const ptys = new PtyManager({
 
 const translator = (): Translate =>
   createTranslator(resolveLanguage(repo.get().settings.language, app.getLocale()))
+
+/** Installs the bundled guidelines and the ClaudeDeck MCP entry into an account's profile. */
+function prepareAccount(account: Account): void {
+  try {
+    const upgrade = ensureGuidelines(account.configDir, guidelinesText)
+    if (upgrade && upgrade.from !== null) {
+      const update: GuidelinesUpdate = { accountId: account.id, ...upgrade }
+      if (mainWindow?.webContents.isLoading() === false) send(IPC.profileGuidelinesUpdated, update)
+      else pendingGuidelineUpdates.push(update)
+    }
+  } catch (error) {
+    console.warn('[profile] guidelines', account.id, error)
+  }
+  if (!mcp) return
+  try {
+    registerMcpInConfig(account.configDir, mcp.url, mcp.token)
+  } catch (error) {
+    console.warn('[mcp] could not register for account', account.id, error)
+  }
+}
+
+async function startMcp(): Promise<void> {
+  const tools = createTools({
+    repo,
+    notes: { list: listNotes, read: readNote, write: writeNote },
+    requestOpenSession: (sessionId) => send(IPC.sessionOpenRequest, sessionId),
+    notifyStateChanged: () => send(IPC.stateChanged, repo.get())
+  })
+  try {
+    mcp = await startMcpServer({
+      tools,
+      tokenFile: join(userData, 'mcp.json'),
+      version: app.getVersion()
+    })
+  } catch (error) {
+    console.error('[mcp] server did not start', error)
+    mcp = null
+  }
+  repo.get().accounts.forEach(prepareAccount)
+}
 
 function applyMenu(): void {
   const t = translator()
@@ -159,7 +215,11 @@ function createWindow(): void {
     if (url !== win.webContents.getURL()) event.preventDefault()
   })
   // Renderer yeniden yüklenince terminal görünümleri kaybolur; sahipsiz süreç bırakma.
-  win.webContents.on('did-finish-load', () => ptys.killAll())
+  win.webContents.on('did-finish-load', () => {
+    ptys.killAll()
+    pendingGuidelineUpdates.forEach((update) => send(IPC.profileGuidelinesUpdated, update))
+    pendingGuidelineUpdates = []
+  })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -188,8 +248,33 @@ app.whenReady().then(() => {
     getWindow: () => mainWindow,
     onLanguageChange: applyMenu,
     checkUpdate: checkUpdateQuietly,
-    openUpdate: openUpdatePage
+    openUpdate: openUpdatePage,
+    prepareAccount,
+    onProjectMoved: (before, after) => {
+      try {
+        notes?.relocateForProjectChange(before, after)
+      } catch (error) {
+        console.error('[notes] could not move project notes', error)
+      }
+    }
   })
+  const ipcTools = createIpcTools(() => mainWindow)
+  notes = registerNotesIpc({ handle: ipcTools.handle, repo, send })
+  registerProfileIpc({
+    handle: ipcTools.handle,
+    repo,
+    ptys,
+    accounts,
+    send,
+    globalDir: join(homedir(), '.claude'),
+    guidelinesText,
+    optimizePrompt
+  })
+  registerMcpIpc({
+    handle: ipcTools.handle,
+    getInfo: (): McpInfo => ({ running: mcp !== null, url: mcp?.url ?? null })
+  })
+  void startMcp()
   applyMenu()
   void resolveShellEnv()
   createWindow()
@@ -203,4 +288,8 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => app.quit())
-app.on('before-quit', () => ptys.killAll())
+app.on('before-quit', () => {
+  ptys.killAll()
+  notes?.dispose()
+  void mcp?.stop()
+})

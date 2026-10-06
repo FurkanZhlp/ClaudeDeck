@@ -1,6 +1,7 @@
 import { AlertTriangle, Plus, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
+import { NotesToggle } from '../notes/NotesToggle'
 import { useApp } from '../store'
 import { Button } from '../ui/Button'
 import { SessionIcon, StatusDot } from '../ui/SessionIcon'
@@ -87,6 +88,7 @@ export function SessionTabs({ projectId }: { projectId: string }): React.JSX.Ele
           <Plus size={14} />
           {t('session.newShell')}
         </Button>
+        <NotesToggle projectId={projectId} />
       </div>
     </div>
   )

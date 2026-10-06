@@ -151,5 +151,147 @@
   "workspace": {
     "emptyTitle": "No projects for {{name}}",
     "emptyHint": "Pick a folder to create the first project for this account."
+  },
+  "notes": {
+    "title": "Notes",
+    "show": "Show project notes",
+    "hide": "Hide project notes",
+    "count_one": "{{count}} note",
+    "count_other": "{{count}} notes",
+    "openInEditor": "Open in editor",
+    "reveal": "Show in Finder",
+    "close": "Close notes",
+    "listLabel": "Notes in this project",
+    "updated": "Updated {{time}}",
+    "emptyNote": "This note is empty.",
+    "emptyTitle": "No notes yet",
+    "emptyBody": "As Claude works on this project, it writes down what it learns here: decisions, conventions and things worth remembering.",
+    "emptyAccounts": "Notes belong to the project, so they follow it when you switch it to another account."
+  },
+  "notices": {
+    "guidelinesUpdated": "ClaudeDeck guidelines for {{account}} were updated to v{{version}}."
+  },
+  "onboarding": {
+    "title": "ClaudeDeck setup",
+    "progress": "Setup steps, step {{current}} of {{total}}",
+    "back": "Back",
+    "skip": "Skip",
+    "continue": "Continue",
+    "steps": {
+      "welcome": "Welcome",
+      "account": "Account",
+      "signIn": "Sign in",
+      "import": "Import",
+      "optimize": "Optimize",
+      "done": "Done"
+    },
+    "welcome": {
+      "title": "Welcome to ClaudeDeck",
+      "subtitle": "Manage several Claude Code accounts from one window, each kept fully separate.",
+      "accounts": {
+        "title": "Accounts",
+        "body": "Each account runs as its own Claude Code profile, with its own settings, agents and sign-in."
+      },
+      "projects": {
+        "title": "Projects",
+        "body": "Give each project a folder and an account; tabs opened in that project use that account."
+      },
+      "tabs": {
+        "title": "Tabs",
+        "body": "Open Claude and terminal tabs side by side in a project and pick up where you left off."
+      },
+      "start": "Get started"
+    },
+    "account": {
+      "title": "Create your first account",
+      "subtitle": "Pick a name and a color that make the account easy to recognize.",
+      "name": "Account name",
+      "namePlaceholder": "e.g. Personal, Work",
+      "color": "Color",
+      "previewEmpty": "Account name",
+      "create": "Create account",
+      "creating": "Creating..."
+    },
+    "signIn": {
+      "title": "Sign in to {{name}}",
+      "subtitle": "Authorizing Claude Code for this account.",
+      "laterHint": "You can also sign in later from Settings."
+    },
+    "import": {
+      "title": "Bring your Claude setup",
+      "subtitle": "Copy your existing instructions, agents and plugins into this account's profile. The source files are not changed.",
+      "source": "Source",
+      "global": "Your own Claude setup",
+      "globalHint": "Your settings in ~/.claude",
+      "accountHint": "Another ClaudeDeck account",
+      "categories": "What to import",
+      "loading": "Reading the source...",
+      "nothing": "There is nothing to import from this source.",
+      "replaceHint": "This account's profile already has content. Previous versions of files that change are backed up before importing.",
+      "diff": "{{added}} new, {{changed}} changed, {{removed}} removed",
+      "items_one": "{{count}} item",
+      "items_other": "{{count}} items",
+      "unavailable": "Not found",
+      "import": "Import",
+      "importing": "Importing...",
+      "done_one": "{{count}} section imported",
+      "done_other": "{{count}} sections imported",
+      "backup": "Previous versions were backed up to:"
+    },
+    "optimize": {
+      "title": "Optimize the profile",
+      "subtitle": "Claude can restructure this account's profile following the ClaudeDeck recommended setup.",
+      "intro": "In this step your own Claude reviews this account's profile and restructures it with the ClaudeDeck recommended setup.",
+      "points": {
+        "review": {
+          "title": "Review and restructure",
+          "body": "Instructions, agents and skills are reviewed, with suggestions for duplicated or scattered parts."
+        },
+        "approve": {
+          "title": "Approval for every change",
+          "body": "Claude asks for your permission each time before it changes a file."
+        },
+        "backup": {
+          "title": "Backup first",
+          "body": "Files are backed up before they are edited."
+        }
+      },
+      "start": "Optimize",
+      "starting": "Starting Claude...",
+      "running": "Claude is running. Approve or decline its suggestions in the terminal.",
+      "runningHint": "Answer Claude's questions in the terminal below. Press Finish when you are done.",
+      "exited": "The session ended (exit code {{code}}).",
+      "terminalLabel": "Optimize session",
+      "finish": "Finish"
+    },
+    "done": {
+      "title": "You are all set",
+      "subtitle": "Your account is ready to use in ClaudeDeck.",
+      "signedIn": "{{name}} is signed in as {{email}}.",
+      "signedOut": "{{name}} is not signed in yet.",
+      "imported": "Imported: {{list}}",
+      "importSkipped": "Importing was skipped.",
+      "optimized": "The optimize session was run.",
+      "optimizeSkipped": "Optimizing was skipped.",
+      "later": "You can run import and optimize again later from the account row in Settings.",
+      "open": "Open ClaudeDeck",
+      "finish": "Done"
+    },
+    "categories": {
+      "instructions": "Instructions (CLAUDE.md)",
+      "agents": "Agents",
+      "skills": "Skills",
+      "commands": "Commands",
+      "outputStyles": "Output styles",
+      "settings": "Settings (settings.json)",
+      "plugins": "Plugins"
+    },
+    "profile": {
+      "title": "Profile",
+      "hint": "Instructions, agents, skills and plugins live in this account's profile.",
+      "import": "Import from Claude settings",
+      "optimize": "Optimize with ClaudeDeck",
+      "openFolder": "Open profile folder"
+    }
   }
 }
