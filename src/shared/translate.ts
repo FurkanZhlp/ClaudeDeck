@@ -16,6 +16,8 @@ export function createTranslator(language: Language): Translate {
         dictionaries[language]
       )
     const text = typeof value === 'string' ? value : key
-    return vars ? text.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(vars[name] ?? '')) : text
+    return vars
+      ? text.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(vars[name] ?? ''))
+      : text
   }
 }

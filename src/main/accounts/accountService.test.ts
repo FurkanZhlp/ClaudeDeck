@@ -3,9 +3,10 @@ import { isInside, parseAuthStatus } from './accountService'
 
 describe('parseAuthStatus', () => {
   it('giriş durumunu ve e-postayı okur', () => {
-    expect(
-      parseAuthStatus('{"loggedIn":true,"authMethod":"claude.ai","email":"a@b.co"}')
-    ).toEqual({ loggedIn: true, email: 'a@b.co' })
+    expect(parseAuthStatus('{"loggedIn":true,"authMethod":"claude.ai","email":"a@b.co"}')).toEqual({
+      loggedIn: true,
+      email: 'a@b.co'
+    })
   })
   it('giriş yoksa loggedIn false döner', () => {
     expect(parseAuthStatus('{"loggedIn": false, "authMethod": "none"}')).toEqual({

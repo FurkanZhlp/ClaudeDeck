@@ -3,7 +3,7 @@
 import { chmodSync, existsSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-const makeExecutable = (file) => {
+function makeExecutable(file) {
   if (existsSync(file) && statSync(file).isFile()) chmodSync(file, statSync(file).mode | 0o111)
 }
 

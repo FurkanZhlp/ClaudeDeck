@@ -34,7 +34,11 @@ describe('Repository', () => {
 
   it('durumu diske yazar, yeni örnek aynı durumu yükler', () => {
     make().createAccount({ name: 'A', color: '#000' })
-    expect(make().get().accounts.map((a) => a.name)).toEqual(['A'])
+    expect(
+      make()
+        .get()
+        .accounts.map((a) => a.name)
+    ).toEqual(['A'])
   })
 
   it('boş adı reddeder', () => {

@@ -2,7 +2,9 @@ import { app, Menu, type MenuItemConstructorOptions } from 'electron'
 import type { Translate } from '../shared/translate'
 
 export function buildMenu(t: Translate, opts: { dev: boolean; openSettings: () => void }): Menu {
-  const view: MenuItemConstructorOptions[] = [{ role: 'togglefullscreen', label: t('menu.fullscreen') }]
+  const view: MenuItemConstructorOptions[] = [
+    { role: 'togglefullscreen', label: t('menu.fullscreen') }
+  ]
   if (opts.dev) {
     view.unshift(
       { role: 'reload', label: t('menu.reload') },

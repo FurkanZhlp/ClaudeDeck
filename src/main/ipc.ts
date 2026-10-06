@@ -88,28 +88,31 @@ export function registerIpc({ repo, accounts, ptys, getWindow, onLanguageChange 
     return state
   })
 
-  handle(IPC.ptyStartSession, async (sessionId: string, resume: boolean, cols: number, rows: number) => {
-    if (!isSize(cols) || !isSize(rows)) throw new DomainError('INVALID')
-    const session = repo.session(sessionId)
-    const project = repo.project(session.projectId)
-    const account = repo.account(project.accountId)
-    if (!existsSync(project.path)) throw new DomainError('PATH_MISSING')
-    if (session.kind === 'claude' && !(await accounts.claudeAvailable())) {
-      throw new DomainError('CLAUDE_NOT_FOUND')
+  handle(
+    IPC.ptyStartSession,
+    async (sessionId: string, resume: boolean, cols: number, rows: number) => {
+      if (!isSize(cols) || !isSize(rows)) throw new DomainError('INVALID')
+      const session = repo.session(sessionId)
+      const project = repo.project(session.projectId)
+      const account = repo.account(project.accountId)
+      if (!existsSync(project.path)) throw new DomainError('PATH_MISSING')
+      if (session.kind === 'claude' && !(await accounts.claudeAvailable())) {
+        throw new DomainError('CLAUDE_NOT_FOUND')
+      }
+      accounts.ensureConfigDir(account)
+      const base = await resolveShellEnv()
+      const command = resume === true ? 'claude --continue' : 'claude'
+      ptys.spawn(sessionId, {
+        file: defaultShell(base),
+        args: session.kind === 'claude' ? ['-ilc', command] : ['-il'],
+        cwd: project.path,
+        env: buildSessionEnv(base, account),
+        cols,
+        rows
+      })
+      return { accountId: account.id }
     }
-    accounts.ensureConfigDir(account)
-    const base = await resolveShellEnv()
-    const command = resume === true ? 'claude --continue' : 'claude'
-    ptys.spawn(sessionId, {
-      file: defaultShell(base),
-      args: session.kind === 'claude' ? ['-ilc', command] : ['-il'],
-      cwd: project.path,
-      env: buildSessionEnv(base, account),
-      cols,
-      rows
-    })
-    return { accountId: account.id }
-  })
+  )
 
   handle(IPC.ptyStartLogin, async (accountId: string, cols: number, rows: number) => {
     if (!isSize(cols) || !isSize(rows)) throw new DomainError('INVALID')

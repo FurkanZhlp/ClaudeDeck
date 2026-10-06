@@ -29,7 +29,9 @@ export function isInside(root: string, target: string): boolean {
 function run(args: string[], env: Env): Promise<string> {
   return new Promise((done) => {
     // claude giriş yoksa sıfırdan farklı kodla çıkabilir; stdout yine de değerlendirilir.
-    execFile('claude', args, { env, timeout: 15_000 }, (_error, stdout) => done(String(stdout ?? '')))
+    execFile('claude', args, { env, timeout: 15_000 }, (_error, stdout) =>
+      done(String(stdout ?? ''))
+    )
   })
 }
 
