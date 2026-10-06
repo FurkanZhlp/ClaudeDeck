@@ -54,6 +54,11 @@ function ensure(id: string): Entry {
   return entries.get(id) ?? create(id)
 }
 
+/** Creates the terminal up front so output is kept even before it is first shown. */
+export function prepare(id: string): void {
+  ensure(id)
+}
+
 export function requestStart(id: string, resume: boolean): void {
   const entry = ensure(id)
   // Önceki süreçten kalan modlar (alternate screen, mouse tracking) yeni sürece taşınmasın.

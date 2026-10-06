@@ -74,8 +74,28 @@
   },
   "login": {
     "title": "Sign in for {{name}}",
-    "hint": "Sign in on the page that opens in your browser with the Claude user for this account. Close this window when done.",
-    "done": "Sign-in finished. You can close this window."
+    "steps": {
+      "browser": "Opening your browser",
+      "browserHint": "The Claude sign-in page is opening in your default browser.",
+      "signIn": "Sign in to Claude",
+      "signInHint": "In the new tab, sign in with the Claude user for this account and allow access.",
+      "code": "Enter the code if asked",
+      "codeHint": "If the browser shows a verification code, paste it here.",
+      "done": "Signed in",
+      "doneHint": "This account is ready to use."
+    },
+    "reopen": "Open in browser again",
+    "copyLink": "Copy link",
+    "copied": "Copied",
+    "codePlaceholder": "Paste the code",
+    "submit": "Submit",
+    "codeSent": "Code sent, verifying...",
+    "signedInAs": "Signed in as {{email}}.",
+    "failed": "Sign-in did not complete.",
+    "failedHint": "Check the details below and try again.",
+    "retry": "Try again",
+    "showDetails": "Show details",
+    "hideDetails": "Hide details"
   },
   "errors": {
     "ACCOUNT_IN_USE": "This account is assigned to one or more projects. Change those projects' account first.",

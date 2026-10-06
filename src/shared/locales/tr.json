@@ -74,8 +74,28 @@
   },
   "login": {
     "title": "{{name}} için giriş",
-    "hint": "Tarayıcıda açılan sayfadan bu hesaba ait Claude kullanıcısıyla giriş yapın. Tamamlanınca pencereyi kapatın.",
-    "done": "Giriş işlemi bitti. Pencereyi kapatabilirsiniz."
+    "steps": {
+      "browser": "Tarayıcı açılıyor",
+      "browserHint": "Claude giriş sayfası varsayılan tarayıcınızda açılıyor.",
+      "signIn": "Claude'da giriş yapın",
+      "signInHint": "Açılan sekmede bu hesaba ait Claude kullanıcısıyla giriş yapıp erişime izin verin.",
+      "code": "Kod istenirse girin",
+      "codeHint": "Tarayıcı bir doğrulama kodu gösterirse buraya yapıştırın.",
+      "done": "Giriş başarılı",
+      "doneHint": "Bu hesap artık kullanıma hazır."
+    },
+    "reopen": "Tarayıcıda yeniden aç",
+    "copyLink": "Bağlantıyı kopyala",
+    "copied": "Kopyalandı",
+    "codePlaceholder": "Kodu yapıştırın",
+    "submit": "Gönder",
+    "codeSent": "Kod gönderildi, doğrulanıyor...",
+    "signedInAs": "{{email}} olarak giriş yapıldı.",
+    "failed": "Giriş tamamlanamadı.",
+    "failedHint": "Ayrıntılara bakıp yeniden deneyebilirsiniz.",
+    "retry": "Tekrar dene",
+    "showDetails": "Ayrıntıları göster",
+    "hideDetails": "Ayrıntıları gizle"
   },
   "errors": {
     "ACCOUNT_IN_USE": "Bu hesap bir veya daha fazla projeye atanmış. Önce o projelerin hesabını değiştirin.",

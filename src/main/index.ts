@@ -106,6 +106,14 @@ async function confirmOpenExternal(raw: string): Promise<void> {
   }
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return
   if (raw.length > 2048) return
+  // The sign-in flow links to Anthropic's own domains; open those without a prompt.
+  const trusted = ['claude.com', 'claude.ai', 'anthropic.com'].some(
+    (domain) => url.hostname === domain || url.hostname.endsWith(`.${domain}`)
+  )
+  if (trusted && url.protocol === 'https:') {
+    await shell.openExternal(url.toString())
+    return
+  }
   const t = translator()
   const options = {
     type: 'question' as const,
@@ -164,11 +172,14 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.furkanzhlp.claudedeck')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
-  // Kamera, mikrofon, bildirim gibi izinlere ihtiyaç yok.
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) =>
-    callback(false)
+  // Only clipboard writes are needed (copying the sign-in link); deny everything else.
+  const allowed = (permission: string): boolean => permission === 'clipboard-sanitized-write'
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) =>
+    callback(allowed(permission))
   )
-  session.defaultSession.setPermissionCheckHandler(() => false)
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) =>
+    allowed(permission)
+  )
 
   registerIpc({
     repo,
