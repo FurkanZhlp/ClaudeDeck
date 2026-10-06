@@ -45,3 +45,10 @@ export interface AccountStatus {
 
 export type AccountInput = Pick<Account, 'name' | 'color'>
 export type ProjectInput = Pick<Project, 'name' | 'path' | 'accountId'>
+
+export interface UpdateInfo {
+  currentVersion: string
+  latestVersion: string | null
+  available: boolean
+  url: string
+}

@@ -88,6 +88,7 @@
   },
   "menu": {
     "about": "About ClaudeDeck",
+    "checkUpdates": "Check for Updates...",
     "settings": "Settings...",
     "hide": "Hide ClaudeDeck",
     "hideOthers": "Hide Others",
@@ -109,5 +110,12 @@
   "link": {
     "open": "Open",
     "confirm": "Open {{host}} in your browser?"
+  },
+  "update": {
+    "available": "New version available: v{{version}}",
+    "current": "You are using v{{version}}",
+    "download": "Download",
+    "upToDate": "ClaudeDeck is up to date (v{{version}}).",
+    "failed": "Could not check for updates. Check your internet connection."
   }
 }

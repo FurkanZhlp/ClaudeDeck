@@ -48,6 +48,11 @@ const api: Api = {
     pathExists: (path) => call(IPC.systemPathExists, path),
     claudeAvailable: () => call(IPC.systemClaudeAvailable),
     onOpenSettings: (cb) => subscribe(IPC.menuOpenSettings, cb)
+  },
+  update: {
+    check: () => call(IPC.updateCheck),
+    open: () => call(IPC.updateOpen),
+    onAvailable: (cb) => subscribe(IPC.updateAvailable, cb)
   }
 }
 

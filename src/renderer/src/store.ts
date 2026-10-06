@@ -6,7 +6,8 @@ import type {
   AppState,
   Language,
   ProjectInput,
-  SessionKind
+  SessionKind,
+  UpdateInfo
 } from '@shared/types'
 import i18n from './i18n'
 import * as pool from './terminal/terminalPool'
@@ -30,6 +31,7 @@ interface AppStore {
   projectDialog: ProjectDialogState
   loginAccountId: string | null
   error: string | null
+  update: UpdateInfo | null
 
   init: () => Promise<void>
   setError: (code: string | null) => void
@@ -48,6 +50,7 @@ interface AppStore {
   startSession: (id: string, resume: boolean) => void
   spawn: (id: string, resume: boolean, cols: number, rows: number) => Promise<void>
   closeSession: (id: string) => Promise<void>
+  dismissUpdate: () => void
 }
 
 let initialized = false
@@ -91,6 +94,7 @@ export const useApp = create<AppStore>((set, get) => {
     projectDialog: null,
     loginAccountId: null,
     error: null,
+    update: null,
 
     async init() {
       if (initialized) return
@@ -101,6 +105,7 @@ export const useApp = create<AppStore>((set, get) => {
         if (run) set({ running: { ...get().running, [id]: { ...run, exitCode } } })
       })
       window.api.system.onOpenSettings(() => set({ settingsOpen: true }))
+      window.api.update.onAvailable((update) => set({ update }))
 
       const data = await guard(() => window.api.state.get())
       if (!data) {
@@ -112,6 +117,7 @@ export const useApp = create<AppStore>((set, get) => {
       set({ data, selectedProjectId, selectedSessionId: firstSessionOf(data, selectedProjectId) })
       void window.api.system.claudeAvailable().then((claudeAvailable) => set({ claudeAvailable }))
       data.accounts.forEach((account) => void get().refreshStatus(account.id))
+      void window.api.update.check().then((update) => update?.available && set({ update }))
     },
 
     setError: (error) => set({ error }),
@@ -253,6 +259,8 @@ export const useApp = create<AppStore>((set, get) => {
       if (!result) delete running[id]
       set({ running })
     },
+
+    dismissUpdate: () => set({ update: null }),
 
     async closeSession(id) {
       const data = await guard(() => window.api.sessions.remove(id))

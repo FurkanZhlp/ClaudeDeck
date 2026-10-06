@@ -11,7 +11,7 @@ import {
 } from 'electron'
 import { DomainError } from '../shared/errors'
 import { IPC, loginPtyId, type IpcResult } from '../shared/ipc'
-import type { AccountInput, Language, ProjectInput, SessionKind } from '../shared/types'
+import type { AccountInput, Language, ProjectInput, SessionKind, UpdateInfo } from '../shared/types'
 import type { AccountService } from './accounts/accountService'
 import { buildSessionEnv, claudeCommand, defaultShell, resolveShellEnv } from './env/shellEnv'
 import type { PtyManager } from './pty/ptyManager'
@@ -23,12 +23,22 @@ interface Deps {
   ptys: PtyManager
   getWindow: () => BrowserWindow | null
   onLanguageChange: () => void
+  checkUpdate: () => Promise<UpdateInfo | null>
+  openUpdate: () => Promise<void>
 }
 
 const isText = (v: unknown): v is string => typeof v === 'string'
 const isSize = (v: unknown): v is number => Number.isInteger(v) && (v as number) > 0
 
-export function registerIpc({ repo, accounts, ptys, getWindow, onLanguageChange }: Deps): void {
+export function registerIpc({
+  repo,
+  accounts,
+  ptys,
+  getWindow,
+  onLanguageChange,
+  checkUpdate,
+  openUpdate
+}: Deps): void {
   // Yalnızca uygulamanın kendi penceresinden gelen mesajlar kabul edilir.
   const trusted = (event: IpcMainEvent | IpcMainInvokeEvent): boolean =>
     event.sender === getWindow()?.webContents
@@ -202,4 +212,9 @@ export function registerIpc({ repo, accounts, ptys, getWindow, onLanguageChange 
   })
   handle(IPC.systemPathExists, (path: string) => isText(path) && existsSync(path))
   handle(IPC.systemClaudeAvailable, () => accounts.claudeAvailable())
+  handle(IPC.updateCheck, () => checkUpdate())
+  handle(IPC.updateOpen, async () => {
+    await openUpdate()
+    return null
+  })
 }

@@ -88,6 +88,7 @@
   },
   "menu": {
     "about": "ClaudeDeck hakkında",
+    "checkUpdates": "Güncellemeleri denetle...",
     "settings": "Ayarlar...",
     "hide": "ClaudeDeck'i gizle",
     "hideOthers": "Diğerlerini gizle",
@@ -109,5 +110,12 @@
   "link": {
     "open": "Aç",
     "confirm": "{{host}} adresi tarayıcıda açılsın mı?"
+  },
+  "update": {
+    "available": "Yeni sürüm mevcut: v{{version}}",
+    "current": "Kullandığınız sürüm: v{{version}}",
+    "download": "İndir",
+    "upToDate": "ClaudeDeck güncel (v{{version}}).",
+    "failed": "Güncellemeler denetlenemedi. İnternet bağlantınızı kontrol edin."
   }
 }

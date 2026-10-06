@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, net, session, shell } from 'electron'
 import { join } from 'node:path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { IPC } from '../shared/ipc'
@@ -11,6 +11,11 @@ import { buildMenu } from './menu'
 import { PtyManager } from './pty/ptyManager'
 import { JsonStore } from './state/jsonStore'
 import { emptyState, Repository } from './state/repository'
+import { checkForUpdate, RELEASES_URL } from './updates/updateChecker'
+import type { UpdateInfo } from '../shared/types'
+import icon from '../../resources/icon.png?asset'
+
+const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 const userData = app.getPath('userData')
 const accountsRoot = join(userData, 'accounts')
@@ -34,8 +39,61 @@ const translator = (): Translate =>
 function applyMenu(): void {
   const t = translator()
   Menu.setApplicationMenu(
-    buildMenu(t, { dev: is.dev, openSettings: () => send(IPC.menuOpenSettings) })
+    buildMenu(t, {
+      dev: is.dev,
+      openSettings: () => send(IPC.menuOpenSettings),
+      checkUpdates: () => void checkUpdatesManually()
+    })
   )
+}
+
+let lastUpdate: UpdateInfo | null = null
+
+async function fetchUpdate(): Promise<UpdateInfo> {
+  lastUpdate = await checkForUpdate(app.getVersion(), net.fetch as typeof fetch)
+  return lastUpdate
+}
+
+/** Arka plan denetimi: yalnızca paketlenmiş sürümde, hatalar sessizce yutulur. */
+async function checkUpdateQuietly(): Promise<UpdateInfo | null> {
+  if (!app.isPackaged) return null
+  try {
+    const info = await fetchUpdate()
+    if (info.available) send(IPC.updateAvailable, info)
+    return info
+  } catch (error) {
+    console.warn('[update]', error)
+    return null
+  }
+}
+
+async function openUpdatePage(): Promise<void> {
+  await shell.openExternal(lastUpdate?.url ?? RELEASES_URL)
+}
+
+async function checkUpdatesManually(): Promise<void> {
+  const t = translator()
+  const show = (options: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> =>
+    mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options)
+  try {
+    const info = await fetchUpdate()
+    if (!info.available) {
+      await show({ type: 'info', message: t('update.upToDate', { version: info.currentVersion }) })
+      return
+    }
+    send(IPC.updateAvailable, info)
+    const { response } = await show({
+      type: 'info',
+      buttons: [t('update.download'), t('common.cancel')],
+      defaultId: 0,
+      cancelId: 1,
+      message: t('update.available', { version: info.latestVersion ?? '' }),
+      detail: t('update.current', { version: info.currentVersion })
+    })
+    if (response === 0) await openUpdatePage()
+  } catch {
+    await show({ type: 'warning', message: t('update.failed') })
+  }
 }
 
 /** Terminal çıktısındaki linkler aldatıcı olabilir; tam adresi gösterip onay alır. */
@@ -112,10 +170,21 @@ app.whenReady().then(() => {
   )
   session.defaultSession.setPermissionCheckHandler(() => false)
 
-  registerIpc({ repo, accounts, ptys, getWindow: () => mainWindow, onLanguageChange: applyMenu })
+  registerIpc({
+    repo,
+    accounts,
+    ptys,
+    getWindow: () => mainWindow,
+    onLanguageChange: applyMenu,
+    checkUpdate: checkUpdateQuietly,
+    openUpdate: openUpdatePage
+  })
   applyMenu()
   void resolveShellEnv()
   createWindow()
+  setInterval(() => void checkUpdateQuietly(), UPDATE_INTERVAL_MS)
+  // Geliştirme modunda Dock'ta Electron yerine uygulama ikonu görünsün.
+  if (is.dev) app.dock?.setIcon(icon)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -21,7 +21,10 @@ export const IPC = {
   systemPickFolder: 'system:pickFolder',
   systemPathExists: 'system:pathExists',
   systemClaudeAvailable: 'system:claudeAvailable',
-  menuOpenSettings: 'menu:openSettings'
+  menuOpenSettings: 'menu:openSettings',
+  updateCheck: 'update:check',
+  updateOpen: 'update:open',
+  updateAvailable: 'update:available'
 } as const
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; code: string }

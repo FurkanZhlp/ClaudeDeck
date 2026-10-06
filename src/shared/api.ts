@@ -6,7 +6,8 @@ import type {
   Language,
   ProjectInput,
   Session,
-  SessionKind
+  SessionKind,
+  UpdateInfo
 } from './types'
 
 type Unsubscribe = () => void
@@ -53,5 +54,11 @@ export interface Api {
     pathExists(path: string): Promise<boolean>
     claudeAvailable(): Promise<boolean>
     onOpenSettings(cb: () => void): Unsubscribe
+  }
+  update: {
+    /** Paketlenmemiş (geliştirme) sürümde ya da hata durumunda null döner. */
+    check(): Promise<UpdateInfo | null>
+    open(): Promise<null>
+    onAvailable(cb: (info: UpdateInfo) => void): Unsubscribe
   }
 }

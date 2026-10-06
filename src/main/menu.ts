@@ -1,7 +1,10 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron'
 import type { Translate } from '../shared/translate'
 
-export function buildMenu(t: Translate, opts: { dev: boolean; openSettings: () => void }): Menu {
+export function buildMenu(
+  t: Translate,
+  opts: { dev: boolean; openSettings: () => void; checkUpdates: () => void }
+): Menu {
   const view: MenuItemConstructorOptions[] = [
     { role: 'togglefullscreen', label: t('menu.fullscreen') }
   ]
@@ -18,6 +21,8 @@ export function buildMenu(t: Translate, opts: { dev: boolean; openSettings: () =
       label: app.name,
       submenu: [
         { role: 'about', label: t('menu.about') },
+        { type: 'separator' },
+        { label: t('menu.checkUpdates'), click: opts.checkUpdates },
         { type: 'separator' },
         { label: t('menu.settings'), accelerator: 'CmdOrCtrl+,', click: opts.openSettings },
         { type: 'separator' },

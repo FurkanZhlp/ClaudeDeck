@@ -5,6 +5,7 @@ import { LoginDialog } from './components/LoginDialog'
 import { ProjectDialog } from './components/ProjectDialog'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
+import { UpdateBanner } from './components/UpdateBanner'
 import { Workspace } from './components/Workspace'
 import { useApp } from './store'
 
@@ -22,6 +23,7 @@ export default function App(): React.JSX.Element {
     <div className="flex h-full">
       <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col">
+        <UpdateBanner />
         <ClaudeBanner />
         <Workspace />
       </main>
