@@ -77,7 +77,17 @@ const api: Api = {
     open: (projectId, name) => call(IPC.notesOpen, projectId, name),
     reveal: (projectId) => call(IPC.notesReveal, projectId)
   },
-  mcp: { info: () => call(IPC.mcpInfo) }
+  mcp: { info: () => call(IPC.mcpInfo) },
+  optimize: {
+    start: (accountId) => call(IPC.optimizeStart, accountId),
+    get: (accountId) => call(IPC.optimizeGet, accountId),
+    list: () => call(IPC.optimizeList),
+    answer: (accountId, questionId, decision, note) =>
+      call(IPC.optimizeAnswer, accountId, questionId, decision, note),
+    cancel: (accountId) => call(IPC.optimizeCancel, accountId),
+    revert: (accountId) => call(IPC.optimizeRevert, accountId),
+    onUpdate: (cb) => subscribe(IPC.optimizeUpdate, cb)
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

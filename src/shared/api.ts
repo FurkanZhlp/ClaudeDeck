@@ -14,6 +14,8 @@ import type {
   ProfileDiffEntry,
   ProfileImportResult,
   ProfileSource,
+  OptimizeDecision,
+  OptimizeState,
   SessionKind,
   UpdateInfo
 } from './types'
@@ -103,4 +105,20 @@ export interface Api {
     reveal(projectId: string): Promise<null>
   }
   mcp: { info(): Promise<McpInfo> }
+  /** Headless profile optimization driven by Claude through ClaudeDeck MCP tools. */
+  optimize: {
+    start(accountId: string): Promise<OptimizeState>
+    get(accountId: string): Promise<OptimizeState>
+    list(): Promise<OptimizeState[]>
+    answer(
+      accountId: string,
+      questionId: string,
+      decision: OptimizeDecision,
+      note?: string
+    ): Promise<OptimizeState>
+    cancel(accountId: string): Promise<OptimizeState>
+    /** Restores the snapshot taken before the run (current files are backed up first). */
+    revert(accountId: string): Promise<OptimizeState>
+    onUpdate(cb: (state: OptimizeState) => void): Unsubscribe
+  }
 }

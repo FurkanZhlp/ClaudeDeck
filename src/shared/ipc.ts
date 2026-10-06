@@ -41,7 +41,14 @@ export const IPC = {
   notesReveal: 'notes:reveal',
   mcpInfo: 'mcp:info',
   stateChanged: 'state:changed',
-  sessionOpenRequest: 'session:openRequest'
+  sessionOpenRequest: 'session:openRequest',
+  optimizeStart: 'optimize:start',
+  optimizeGet: 'optimize:get',
+  optimizeList: 'optimize:list',
+  optimizeAnswer: 'optimize:answer',
+  optimizeCancel: 'optimize:cancel',
+  optimizeRevert: 'optimize:revert',
+  optimizeUpdate: 'optimize:update'
 } as const
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; code: string }

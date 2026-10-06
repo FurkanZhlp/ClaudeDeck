@@ -97,3 +97,51 @@ export interface McpInfo {
   running: boolean
   url: string | null
 }
+
+export type OptimizeStatus =
+  'idle' | 'starting' | 'running' | 'waiting' | 'finished' | 'failed' | 'cancelled'
+
+/** One proposal Claude asks the user about during profile optimization. */
+export interface OptimizeQuestion {
+  id: string
+  title: string
+  /** Why Claude proposes it (Markdown). */
+  rationale: string
+  /** Profile-relative paths the change would touch. */
+  files: string[]
+  /** Optional Markdown preview of the change (e.g. a diff block). */
+  preview?: string
+  askedAt: number
+}
+
+export type OptimizeDecision = 'apply' | 'skip' | 'modify'
+
+export interface OptimizeAnswer {
+  questionId: string
+  decision: OptimizeDecision
+  /** Instructions from the user when decision is 'modify'. */
+  note?: string
+  answeredAt: number
+}
+
+export type OptimizeEvent =
+  | { type: 'status'; message: string; at: number }
+  | { type: 'activity'; tool: string; target?: string; at: number }
+  | { type: 'findings'; summary: string; strengths: string[]; issues: string[]; at: number }
+  | { type: 'question'; question: OptimizeQuestion; at: number }
+  | { type: 'answer'; answer: OptimizeAnswer; at: number }
+  | { type: 'finish'; summary: string; changes: string[]; at: number }
+  | { type: 'error'; message: string; at: number }
+
+export interface OptimizeState {
+  accountId: string
+  status: OptimizeStatus
+  startedAt: number | null
+  finishedAt: number | null
+  /** Snapshot of the profile taken by ClaudeDeck before Claude started. */
+  backupDir: string | null
+  events: OptimizeEvent[]
+  /** Proposal waiting for the user's answer, if any. */
+  pending: OptimizeQuestion | null
+  reverted: boolean
+}
