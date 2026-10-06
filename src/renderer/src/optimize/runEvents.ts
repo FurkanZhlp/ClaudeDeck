@@ -1,6 +1,5 @@
 import type { OptimizeDecision, OptimizeEvent, OptimizeQuestion } from '@shared/types'
 
-export type ActivityEvent = Extract<OptimizeEvent, { type: 'activity' }>
 export type FindingsEvent = Extract<OptimizeEvent, { type: 'findings' }>
 export type FinishEvent = Extract<OptimizeEvent, { type: 'finish' }>
 /** The most recent thing Claude reported: a status line or a tool call. */
@@ -12,12 +11,10 @@ export interface AnsweredQuestion {
   note?: string
 }
 
-/** How many activity rows the run view keeps; older ones are dropped. */
-export const ACTIVITY_LIMIT = 30
-
 export interface RunSummary {
   latest: LiveEvent | null
-  activities: ActivityEvent[]
+  /** 1-based position of each proposal in the run, by question id. */
+  numbers: Record<string, number>
   findings: FindingsEvent | null
   answered: AnsweredQuestion[]
   finish: FinishEvent | null
@@ -29,7 +26,7 @@ export function summarize(events: OptimizeEvent[]): RunSummary {
   const questions = new Map<string, OptimizeQuestion>()
   const summary: RunSummary = {
     latest: null,
-    activities: [],
+    numbers: {},
     findings: null,
     answered: [],
     finish: null,
@@ -38,17 +35,15 @@ export function summarize(events: OptimizeEvent[]): RunSummary {
   for (const event of events) {
     switch (event.type) {
       case 'status':
-        summary.latest = event
-        break
       case 'activity':
         summary.latest = event
-        summary.activities.push(event)
         break
       case 'findings':
         summary.findings = event
         break
       case 'question':
         questions.set(event.question.id, event.question)
+        summary.numbers[event.question.id] ??= Object.keys(summary.numbers).length + 1
         break
       case 'answer': {
         const question = questions.get(event.answer.questionId)
@@ -69,14 +64,7 @@ export function summarize(events: OptimizeEvent[]): RunSummary {
         break
     }
   }
-  summary.activities = summary.activities.slice(-ACTIVITY_LIMIT).reverse()
   return summary
-}
-
-/** Translation key suffix for a tool name; unknown tools fall back to a generic line. */
-export function toolKey(tool: string): string {
-  const name = tool.toLowerCase()
-  return ['read', 'write', 'edit', 'glob', 'grep', 'bash', 'ls'].includes(name) ? name : 'other'
 }
 
 /** "1:05" or "1:02:05" for a duration in milliseconds. */

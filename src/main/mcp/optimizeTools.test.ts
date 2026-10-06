@@ -82,10 +82,24 @@ describe('optimize tools', () => {
     expect((await tools.optimize_ask.call({ ...proposal, files: manyFiles }, run)).isError).toBe(
       true
     )
+    const longStatus = await tools.optimize_status.call(
+      { message: 'x'.repeat(LIMITS.message + 1) },
+      run
+    )
+    expect(longStatus.isError).toBe(true)
+    expect(textOf(longStatus)).toMatch(/Shorten it/)
+    const longIssue = 'x'.repeat(LIMITS.item + 1)
+    const findings = { summary: 'Ok', strengths: [], issues: [longIssue] }
+    expect((await tools.optimize_findings.call(findings, run)).isError).toBe(true)
+    const longRationale = 'x'.repeat(LIMITS.rationale + 1)
+    expect(
+      (await tools.optimize_ask.call({ ...proposal, rationale: longRationale }, run)).isError
+    ).toBe(true)
     expect((await tools.optimize_status.call({ message: '' }, run)).isError).toBe(true)
     expect((await tools.optimize_status.call({ message: 'a', extra: 1 }, run)).isError).toBe(true)
     expect(port.ask).not.toHaveBeenCalled()
     expect(port.status).not.toHaveBeenCalled()
+    expect(port.findings).not.toHaveBeenCalled()
   })
 
   it('reports port rejections as tool errors with their message', async () => {

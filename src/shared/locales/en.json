@@ -308,48 +308,58 @@
       "cancelled": "Stopped"
     },
     "live": {
-      "starting": "Starting Claude...",
-      "working": "Claude is reviewing the profile...",
-      "waiting": "Claude is waiting for your answer.",
-      "elapsed": "Elapsed time {{time}}",
-      "hint": "You can close this; Claude keeps working and the account badge shows when it needs you.",
+      "elapsed": "{{time}}",
       "stop": "Stop",
       "stopConfirm": "Stop the optimization? Changes that were already applied stay in place.",
       "background": "Continue in background"
     },
-    "activity": {
-      "title": "Activity",
-      "empty": "No file activity yet.",
-      "tools": {
-        "read": "Reading {{target}}",
-        "write": "Writing {{target}}",
-        "edit": "Editing {{target}}",
-        "glob": "Searching for files {{target}}",
-        "grep": "Searching in files {{target}}",
-        "bash": "Running a command {{target}}",
-        "ls": "Listing {{target}}",
-        "other": "{{tool}} {{target}}"
-      }
+    "thinking": {
+      "title": "Claude is thinking",
+      "titleStarting": "Claude is getting ready",
+      "titleWaiting": "Claude needs your answer",
+      "starting": "Opening your profile",
+      "working": "Looking at your profile",
+      "waiting": "A suggestion is waiting for you",
+      "read": "Reading your {{name}}",
+      "search": "Searching your profile",
+      "edit": "Applying the change to your {{name}}",
+      "editGeneric": "Applying the change"
+    },
+    "names": {
+      "agent": "{{name}} agent",
+      "skill": "{{name}} skill",
+      "command": "{{name}} command",
+      "outputStyle": "{{name}} output style",
+      "instruction": "{{name}} instructions",
+      "instructions": "instructions",
+      "guidelines": "ClaudeDeck guidelines",
+      "settings": "settings",
+      "file": "{{name}}",
+      "profile": "profile"
     },
     "findings": {
       "title": "What Claude found",
-      "strengths": "Working well",
-      "issues": "Can be improved"
+      "good_one": "{{count}} thing already looks good",
+      "good_other": "{{count}} things already look good",
+      "skip": "Skip"
     },
     "proposal": {
-      "label": "Proposal",
+      "counter": "Suggestion {{number}}",
       "files": "Files",
-      "preview": "Preview",
+      "showChange": "Show change",
+      "hideChange": "Hide change",
+      "more": "More",
+      "less": "Less",
       "apply": "Apply",
       "skip": "Skip",
-      "modify": "Change and apply",
+      "modify": "Change",
       "noteLabel": "What should Claude change?",
-      "notePlaceholder": "For example: keep the existing rules and only merge the duplicated ones.",
-      "submitNote": "Apply with note",
-      "shortcut": "Cmd+Enter sends the note"
+      "notePlaceholder": "For example: only merge the duplicated rules.",
+      "submitNote": "Send",
+      "shortcut": "Cmd+Enter sends"
     },
     "history": {
-      "title": "Answered",
+      "title": "Your answers",
       "decision": {
         "apply": "Applied",
         "skip": "Skipped",
@@ -357,27 +367,57 @@
       }
     },
     "finished": {
-      "title": "Optimization finished",
-      "changes": "Changes",
-      "noChanges": "No files were changed.",
-      "backup": "A backup of the profile was taken before the run: {{path}}",
+      "applied_one": "{{count}} change applied",
+      "applied_other": "{{count}} changes applied",
+      "none": "Your profile needs no changes",
+      "details": "Details",
+      "hideDetails": "Hide details",
+      "backup": "Backup taken before the run: {{path}}",
       "done": "Done",
       "revert": "Undo all",
       "revertConfirm": "Undo every change from this run and restore the profile from the backup? The current files are backed up first.",
-      "reverted": "All changes were undone. The profile is back to how it was before the run."
+      "reverted": "All changes were undone."
     },
     "failed": {
-      "title": "The optimization could not be completed",
+      "title": "Optimization could not finish",
       "unknown": "Claude stopped unexpectedly.",
       "retry": "Try again"
     },
     "cancelled": {
-      "title": "The optimization was stopped",
-      "body": "Changes that were already applied stay in place. You can start again at any time."
+      "title": "Optimization stopped",
+      "body": "Applied changes stay in place."
     },
     "badge": {
       "running": "Optimizing the profile",
       "waiting": "Claude is waiting for your answer"
+    }
+  },
+  "usage": {
+    "title": "Usage",
+    "fiveHour": "5 h",
+    "sevenDay": "Weekly",
+    "fiveHourLong": "5 hour session",
+    "sevenDayLong": "Weekly limit",
+    "reset": "reset",
+    "noWindow": "no data",
+    "empty": "Usage appears once Claude runs with this account",
+    "staleTooltip": "Last reported {{time}}. Usage only updates while Claude runs with this account.",
+    "tooltip": {
+      "active": "{{window}}: {{percent}} used. Resets {{at}} (in {{in}})",
+      "reset": "The {{window}} window ended and usage was reset. New numbers arrive the next time Claude runs.",
+      "empty": "No data yet for the {{window}}"
+    },
+    "forecast": {
+      "runsOut": "At this pace it runs out in ~{{time}}",
+      "over": "~{{percent}} over the limit by reset",
+      "under": "~{{percent}} under the limit by reset",
+      "runsOutDetail": "{{window}}: at this pace you would go ~{{percent}} over the limit by reset",
+      "basis": "{{window}}: estimate assuming the pace so far holds until reset"
+    },
+    "unit": {
+      "day": "{{count}}d",
+      "hour": "{{count}}h",
+      "minute": "{{count}}m"
     }
   }
 }

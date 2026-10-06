@@ -24,6 +24,8 @@ import { createSessionTokens } from './mcp/sessionTokens'
 import { createOptimizeTools } from './mcp/optimizeTools'
 import { OptimizeManager } from './optimize/optimizeManager'
 import { registerOptimizeIpc } from './optimize/optimizeIpc'
+import { registerUsageIpc } from './usage/usageIpc'
+import { createUsageService } from './usage/usageWatcher'
 import { registerMcpIpc } from './mcp/mcpIpc'
 import { startMcpServer } from './mcp/server'
 import { createTools, type ConfirmRequest } from './mcp/tools'
@@ -38,6 +40,8 @@ const userData = app.getPath('userData')
 const accountsRoot = join(userData, 'accounts')
 const repo = new Repository(new JsonStore(join(userData, 'config.json'), emptyState), accountsRoot)
 const accounts = new AccountService(accountsRoot, resolveShellEnv)
+// Plan usage reported by Claude Code through a statusline hook installed per account.
+const usage = createUsageService({ repo, userDataDir: userData, send })
 
 let mainWindow: BrowserWindow | null = null
 let notes: NotesIpc | null = null
@@ -94,6 +98,11 @@ function prepareAccount(account: Account): void {
     else unregisterMcpInConfig(account.configDir)
   } catch (error) {
     console.warn('[mcp] could not update registration for account', account.id, error)
+  }
+  try {
+    usage.prepareAccount(account)
+  } catch (error) {
+    console.warn('[usage] could not prepare account', account.id, error)
   }
 }
 
@@ -368,6 +377,7 @@ app.whenReady().then(() => {
     }
   })
   registerOptimizeIpc({ handle: ipcTools.handle, manager: optimize })
+  registerUsageIpc({ handle: ipcTools.handle, service: usage })
   registerMcpIpc({
     handle: ipcTools.handle,
     getInfo: (): McpInfo => ({ running: mcp !== null, url: mcp?.url ?? null })
@@ -389,6 +399,7 @@ app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
   ptys.killAll()
   optimize.disposeAll()
+  usage.dispose()
   mcpTokens.revokeAll()
   notes?.dispose()
   void mcp?.stop()

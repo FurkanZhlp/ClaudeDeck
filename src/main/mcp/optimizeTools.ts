@@ -40,22 +40,33 @@ export type OptimizeToolName =
 
 export type OptimizeTools = Record<OptimizeToolName, Tool>
 
+/**
+ * Input limits. Text limits are in characters and leave some slack over the brevity the tool
+ * descriptions ask for; the user reads these texts at a glance in the app.
+ */
 export const LIMITS = {
-  title: 200,
   id: 100,
-  message: 2000,
-  itemChars: 2000,
+  /** optimize_status message. */
+  message: 100,
+  /** Findings and finish summary. */
+  summary: 300,
+  /** One strength, issue or applied change. */
+  item: 160,
   items: 50,
-  rationaleBytes: 8 * 1024,
-  summaryBytes: 8 * 1024,
+  title: 100,
+  rationale: 600,
   previewBytes: 32 * 1024,
   path: 1024
 } as const
 
+const tooLong = (max: number): string =>
+  `Too long: at most ${max} characters. Shorten it to a brief, plain sentence and call again.`
+
 const bytes = (max: number): z.ZodString =>
   z.string().refine((v) => Buffer.byteLength(v, 'utf8') <= max, `Must be at most ${max} bytes`)
 
-const line = (max: number): z.ZodString => z.string().trim().min(1).max(max)
+const text = (max: number): z.ZodString => z.string().trim().max(max, tooLong(max))
+const line = (max: number): z.ZodString => text(max).min(1)
 const list = (max: number): z.ZodArray<z.ZodString> => z.array(line(max)).max(LIMITS.items)
 
 const RECORDED = new TextReply('Recorded.')
@@ -64,7 +75,9 @@ export function createOptimizeTools(port: OptimizePort): OptimizeTools {
   return {
     optimize_status: defineTool(
       'optimize',
-      'Tell the user in one short sentence what you are doing right now.',
+      'Tell the user what you are doing right now: a short, friendly, non-technical phrase in ' +
+        'the user\'s language (max ~60 characters), e.g. "Looking at your agents". No file ' +
+        'paths, patterns or tool names.',
       { message: line(LIMITS.message) },
       (args, scope) => {
         port.status(scope, args.message)
@@ -74,11 +87,12 @@ export function createOptimizeTools(port: OptimizePort): OptimizeTools {
 
     optimize_findings: defineTool(
       'optimize',
-      'Report what you found in the profile, once, before proposing changes.',
+      'Report what you found in the profile, once, before proposing changes. summary: one ' +
+        'sentence (max ~20 words). Each strength and issue: one short phrase (max ~12 words).',
       {
-        summary: bytes(LIMITS.summaryBytes),
-        strengths: list(LIMITS.itemChars),
-        issues: list(LIMITS.itemChars)
+        summary: text(LIMITS.summary),
+        strengths: list(LIMITS.item),
+        issues: list(LIMITS.item)
       },
       (args, scope) => {
         port.findings(scope, args)
@@ -89,11 +103,13 @@ export function createOptimizeTools(port: OptimizePort): OptimizeTools {
     optimize_ask: defineTool(
       'optimize',
       'Propose ONE change and wait for the user. Returns "Decision: apply", "Decision: skip" or ' +
-        '"Decision: modify. User note: ...". Never edit files without an apply or modify answer.',
+        '"Decision: modify. User note: ...". Never edit files without an apply or modify answer. ' +
+        'title: max ~8 words. rationale: one plain sentence (max ~25 words); put details in ' +
+        'preview, not in the rationale.',
       {
         id: line(LIMITS.id),
         title: line(LIMITS.title),
-        rationale: bytes(LIMITS.rationaleBytes),
+        rationale: text(LIMITS.rationale),
         files: list(LIMITS.path),
         preview: bytes(LIMITS.previewBytes).optional()
       },
@@ -102,8 +118,9 @@ export function createOptimizeTools(port: OptimizePort): OptimizeTools {
 
     optimize_finish: defineTool(
       'optimize',
-      'End the optimization with a short summary and the list of changes you applied.',
-      { summary: bytes(LIMITS.summaryBytes), changes: list(LIMITS.itemChars) },
+      'End the optimization: summary in one sentence (max ~20 words) and the changes you ' +
+        'applied, one short phrase each (max ~12 words).',
+      { summary: text(LIMITS.summary), changes: list(LIMITS.item) },
       (args, scope) => {
         port.finish(scope, args)
         return new TextReply('Finished. Stop now.')

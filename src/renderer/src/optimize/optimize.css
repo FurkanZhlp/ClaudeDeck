@@ -42,8 +42,82 @@
   animation: optimize-ring 900ms linear infinite;
 }
 
+/*
+ * "Claude is thinking" orb: a breathing halo, a slowly orbiting arc and a softly pulsing core.
+ * Only transform and opacity animate, so the loops stay on the compositor.
+ */
+.optimize-orb {
+  --orb-size: 128px;
+  position: relative;
+  width: var(--orb-size);
+  height: var(--orb-size);
+}
+
+.optimize-orb > span {
+  position: absolute;
+  border-radius: 9999px;
+}
+
+.optimize-orb-halo {
+  inset: 0;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--accent) 34%, transparent) 0%,
+    color-mix(in srgb, var(--accent) 10%, transparent) 45%,
+    transparent 70%
+  );
+  animation: optimize-breathe 3.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.optimize-orb-arc {
+  inset: 16%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0turn,
+    transparent 0.55turn,
+    color-mix(in srgb, var(--accent) 80%, transparent) 1turn
+  );
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  animation: optimize-ring 2.8s linear infinite;
+}
+
+.optimize-orb-core {
+  inset: 30%;
+  background: radial-gradient(
+    circle at 34% 30%,
+    color-mix(in srgb, #fff 42%, var(--accent)) 0%,
+    var(--accent) 58%,
+    color-mix(in srgb, #000 12%, var(--accent)) 100%
+  );
+  box-shadow: 0 8px 24px -8px color-mix(in srgb, var(--accent) 70%, transparent);
+  animation: optimize-pulse 3.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes optimize-breathe {
+  0%,
+  100% {
+    transform: scale(0.86);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes optimize-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .optimize-ring {
+  .optimize-ring,
+  .optimize-orb > span {
     animation: none;
   }
 }

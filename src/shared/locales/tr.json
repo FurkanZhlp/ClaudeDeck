@@ -308,48 +308,58 @@
       "cancelled": "Durduruldu"
     },
     "live": {
-      "starting": "Claude başlatılıyor...",
-      "working": "Claude profili inceliyor...",
-      "waiting": "Claude yanıtınızı bekliyor.",
-      "elapsed": "Geçen süre {{time}}",
-      "hint": "Bu ekranı kapatabilirsiniz; Claude çalışmaya devam eder ve size ihtiyaç duyduğunda hesap rozetinde gösterilir.",
+      "elapsed": "{{time}}",
       "stop": "Durdur",
       "stopConfirm": "Optimizasyon durdurulsun mu? Uygulanmış değişiklikler yerinde kalır.",
       "background": "Arka planda devam et"
     },
-    "activity": {
-      "title": "Etkinlik",
-      "empty": "Henüz dosya etkinliği yok.",
-      "tools": {
-        "read": "{{target}} okunuyor",
-        "write": "{{target}} yazılıyor",
-        "edit": "{{target}} düzenleniyor",
-        "glob": "Dosyalar aranıyor {{target}}",
-        "grep": "Dosyalarda aranıyor {{target}}",
-        "bash": "Komut çalıştırılıyor {{target}}",
-        "ls": "{{target}} listeleniyor",
-        "other": "{{tool}} {{target}}"
-      }
+    "thinking": {
+      "title": "Claude düşünüyor",
+      "titleStarting": "Claude hazırlanıyor",
+      "titleWaiting": "Claude yanıtınızı bekliyor",
+      "starting": "Profiliniz açılıyor",
+      "working": "Profilinize bakılıyor",
+      "waiting": "Sizi bekleyen bir öneri var",
+      "read": "{{name}} okunuyor",
+      "search": "Profiliniz taranıyor",
+      "edit": "{{name}} güncelleniyor",
+      "editGeneric": "Değişiklik uygulanıyor"
+    },
+    "names": {
+      "agent": "{{name}} ajanı",
+      "skill": "{{name}} becerisi",
+      "command": "{{name}} komutu",
+      "outputStyle": "{{name}} çıktı stili",
+      "instruction": "{{name}} talimatları",
+      "instructions": "Talimatlar",
+      "guidelines": "ClaudeDeck yönergeleri",
+      "settings": "Ayarlar",
+      "file": "{{name}}",
+      "profile": "Profil"
     },
     "findings": {
       "title": "Claude'un tespitleri",
-      "strengths": "İyi durumda olanlar",
-      "issues": "İyileştirilebilecekler"
+      "good_one": "{{count}} konu zaten iyi durumda",
+      "good_other": "{{count}} konu zaten iyi durumda",
+      "skip": "Geç"
     },
     "proposal": {
-      "label": "Öneri",
+      "counter": "Öneri {{number}}",
       "files": "Dosyalar",
-      "preview": "Önizleme",
+      "showChange": "Değişikliği göster",
+      "hideChange": "Değişikliği gizle",
+      "more": "Devamı",
+      "less": "Daha az",
       "apply": "Uygula",
       "skip": "Atla",
-      "modify": "Değiştirip uygula",
+      "modify": "Değiştir",
       "noteLabel": "Claude neyi değiştirsin?",
-      "notePlaceholder": "Örneğin: mevcut kuralları koru, yalnızca tekrar edenleri birleştir.",
-      "submitNote": "Notla uygula",
-      "shortcut": "Cmd+Enter notu gönderir"
+      "notePlaceholder": "Örneğin: yalnızca tekrar eden kuralları birleştir.",
+      "submitNote": "Gönder",
+      "shortcut": "Cmd+Enter gönderir"
     },
     "history": {
-      "title": "Yanıtlananlar",
+      "title": "Yanıtlarınız",
       "decision": {
         "apply": "Uygulandı",
         "skip": "Atlandı",
@@ -357,14 +367,16 @@
       }
     },
     "finished": {
-      "title": "Optimizasyon tamamlandı",
-      "changes": "Değişiklikler",
-      "noChanges": "Hiçbir dosya değiştirilmedi.",
-      "backup": "Başlamadan önce profilin yedeği alındı: {{path}}",
+      "applied_one": "{{count}} değişiklik uygulandı",
+      "applied_other": "{{count}} değişiklik uygulandı",
+      "none": "Profilinizde değişiklik gerekmedi",
+      "details": "Ayrıntılar",
+      "hideDetails": "Ayrıntıları gizle",
+      "backup": "Başlamadan önce alınan yedek: {{path}}",
       "done": "Tamam",
       "revert": "Tümünü geri al",
       "revertConfirm": "Bu çalışmadaki tüm değişiklikler geri alınıp profil yedekten geri yüklensin mi? Mevcut dosyalar önce yedeklenir.",
-      "reverted": "Tüm değişiklikler geri alındı. Profil, çalışmadan önceki hâline döndü."
+      "reverted": "Tüm değişiklikler geri alındı."
     },
     "failed": {
       "title": "Optimizasyon tamamlanamadı",
@@ -373,11 +385,39 @@
     },
     "cancelled": {
       "title": "Optimizasyon durduruldu",
-      "body": "Uygulanmış değişiklikler yerinde kalır. İstediğiniz zaman yeniden başlatabilirsiniz."
+      "body": "Uygulanmış değişiklikler yerinde kalır."
     },
     "badge": {
       "running": "Profil optimize ediliyor",
       "waiting": "Claude yanıtınızı bekliyor"
+    }
+  },
+  "usage": {
+    "title": "Kullanım",
+    "fiveHour": "5 sa",
+    "sevenDay": "Haftalık",
+    "fiveHourLong": "5 saatlik oturum",
+    "sevenDayLong": "Haftalık limit",
+    "reset": "sıfırlandı",
+    "noWindow": "veri yok",
+    "empty": "Kullanım, bu hesapla Claude çalıştığında görünür",
+    "staleTooltip": "Son bildirim {{time}}. Kullanım yalnızca bu hesapla Claude çalışırken güncellenir.",
+    "tooltip": {
+      "active": "{{window}}: {{percent}} kullanıldı. Sıfırlanma: {{at}} ({{in}} sonra)",
+      "reset": "{{window}} süresi doldu, kullanım sıfırlandı. Yeni değer Claude bir sonraki çalışmasında gelir.",
+      "empty": "{{window}} için henüz veri yok"
+    },
+    "forecast": {
+      "runsOut": "Bu hızla ~{{time}} içinde dolar",
+      "over": "Resete kadar ~{{percent}} fazla kullanım",
+      "under": "Resete kadar ~{{percent}} daha az kullanım",
+      "runsOutDetail": "{{window}}: bu hız sürerse resete kadar limitin ~{{percent}} üzerine çıkılır",
+      "basis": "{{window}}: şimdiye kadarki kullanım hızı resete kadar sürerse yapılan tahmin"
+    },
+    "unit": {
+      "day": "{{count}} g",
+      "hour": "{{count}} sa",
+      "minute": "{{count}} dk"
     }
   }
 }

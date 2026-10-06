@@ -5,6 +5,7 @@ import { NoticeToast } from './components/NoticeToast'
 import { OnboardingFlow } from './onboarding/OnboardingFlow'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { useOptimize } from './optimize/optimizeStore'
+import { useUsage } from './usage/usageStore'
 import { LoginDialog } from './components/LoginDialog'
 import { ProjectDialog } from './components/ProjectDialog'
 import { SettingsDialog } from './components/SettingsDialog'
@@ -31,6 +32,14 @@ export default function App(): React.JSX.Element {
   // Optimization runs live in the main process and survive this view; mirror them here.
   useEffect(() => {
     const { hydrate, subscribe } = useOptimize.getState()
+    const unsubscribe = subscribe()
+    void hydrate()
+    return unsubscribe
+  }, [])
+
+  // Plan usage arrives from each account's statusline hook while Claude runs.
+  useEffect(() => {
+    const { hydrate, subscribe } = useUsage.getState()
     const unsubscribe = subscribe()
     void hydrate()
     return unsubscribe

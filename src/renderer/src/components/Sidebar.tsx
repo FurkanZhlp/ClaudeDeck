@@ -1,11 +1,11 @@
-import { Folder, Pencil, Plus, Settings } from 'lucide-react'
+import { Folder, Pencil, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Account } from '@shared/types'
 import { useOnboarding } from '../onboarding/onboardingStore'
 import { OptimizeBadge } from '../optimize/OptimizeBadge'
 import { useOptimizeBadgeState } from '../optimize/optimizeStore'
+import { UsagePanel } from '../usage/UsagePanel'
 import { useApp } from '../store'
-import { Button } from '../ui/Button'
 import { SessionIcon, StatusDot } from '../ui/SessionIcon'
 import { sectionTitleClass, tint } from '../ui/styles'
 
@@ -19,7 +19,6 @@ export function Sidebar(): React.JSX.Element | null {
   const selectProject = useApp((s) => s.selectProject)
   const selectSession = useApp((s) => s.selectSession)
   const setProjectDialog = useApp((s) => s.setProjectDialog)
-  const setSettingsOpen = useApp((s) => s.setSettingsOpen)
   if (!data) return null
 
   const account = data.accounts.find((a) => a.id === selectedAccountId)
@@ -125,16 +124,7 @@ export function Sidebar(): React.JSX.Element | null {
               })}
           </nav>
 
-          <div className="border-t border-border p-2">
-            <Button
-              variant="ghost"
-              className="w-full justify-start"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Settings size={14} />
-              {t('sidebar.settings')}
-            </Button>
-          </div>
+          <UsagePanel />
         </aside>
       </div>
     </div>
