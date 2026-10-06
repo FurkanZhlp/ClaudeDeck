@@ -1,5 +1,6 @@
-import { Download, FolderOpen, ListChecks } from 'lucide-react'
+import { Download, FolderOpen, ListChecks, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useOptimizeBadgeState, useOptimizeRun } from '../optimize/optimizeStore'
 import { errorCode, useApp } from '../store'
 import { Button } from '../ui/Button'
 import { useOnboarding } from './onboardingStore'
@@ -8,6 +9,9 @@ import { useOnboarding } from './onboardingStore'
 export function ProfileSection({ accountId }: { accountId: string }): React.JSX.Element {
   const { t } = useTranslation()
   const startForAccount = useOnboarding((s) => s.startForAccount)
+  const run = useOptimizeRun(accountId)
+  const hasRun = run !== undefined && run.status !== 'idle'
+  const activity = useOptimizeBadgeState(accountId)
 
   const openFolder = (): void => {
     window.api.profile
@@ -27,8 +31,19 @@ export function ProfileSection({ accountId }: { accountId: string }): React.JSX.
           {t('onboarding.profile.import')}
         </Button>
         <Button onClick={() => startForAccount(accountId, { startAt: 'optimize' })}>
-          <ListChecks size={14} />
-          {t('onboarding.profile.optimize')}
+          {activity === 'running' ? (
+            <Loader2 size={14} className="animate-spin" aria-hidden />
+          ) : (
+            <ListChecks size={14} />
+          )}
+          {hasRun ? t('optimize.open') : t('onboarding.profile.optimize')}
+          {hasRun && (
+            <span
+              className={`ml-1 rounded-full px-1.5 py-px text-[10.5px] font-medium ${activity === 'waiting' ? 'bg-warn/15 text-warn' : 'bg-panel text-muted'}`}
+            >
+              {t(`optimize.status.${run.status}`)}
+            </span>
+          )}
         </Button>
         <Button variant="ghost" onClick={openFolder}>
           <FolderOpen size={14} />

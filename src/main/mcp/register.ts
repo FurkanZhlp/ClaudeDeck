@@ -5,7 +5,18 @@ import { MCP_TOKEN_ENV } from './sessionTokens'
 export const MCP_SERVER_NAME = 'claudedeck'
 
 // Literal placeholder: Claude Code expands it from the claude process env, so no token is stored.
-const AUTH_HEADER = `Bearer \${${MCP_TOKEN_ENV}}`
+export const AUTH_HEADER = `Bearer \${${MCP_TOKEN_ENV}}`
+
+const serverEntry = (url: string): Record<string, unknown> => ({
+  type: 'http',
+  url,
+  headers: { Authorization: AUTH_HEADER }
+})
+
+/** JSON for `claude --mcp-config` with only the ClaudeDeck server; carries no token. */
+export function inlineMcpConfig(url: string): string {
+  return JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: serverEntry(url) } })
+}
 
 type Json = Record<string, unknown>
 
@@ -33,7 +44,7 @@ function writeConfig(configDir: string, file: string, json: Json): void {
 export function registerMcpInConfig(configDir: string, url: string): boolean {
   const file = join(configDir, '.claude.json')
   const json = readConfig(file)
-  const entry = { type: 'http', url, headers: { Authorization: AUTH_HEADER } }
+  const entry = serverEntry(url)
   const servers = serversOf(json)
   if (JSON.stringify(servers[MCP_SERVER_NAME]) === JSON.stringify(entry)) return false
 

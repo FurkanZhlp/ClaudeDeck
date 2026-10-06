@@ -7,7 +7,7 @@ import type { AppState, NoteFile } from '../../shared/types'
 import { memoryDir } from '../notes/memoryPath'
 import { JsonStore } from '../state/jsonStore'
 import { emptyState, Repository } from '../state/repository'
-import type { McpScope } from './sessionTokens'
+import type { SessionScope } from './sessionTokens'
 import {
   createTools,
   findProjectByPath,
@@ -25,7 +25,7 @@ const requestOpenSession = vi.fn()
 const confirm = vi.fn<(req: ConfirmRequest) => Promise<boolean>>()
 
 // Account id1 owns projects id2 (App) and id3 (Web); account id4 owns project id5 (Secret).
-const scope: McpScope = { sessionId: 's1', projectId: 'id2', accountId: 'id1' }
+const scope: SessionScope = { kind: 'session', sessionId: 's1', projectId: 'id2', accountId: 'id1' }
 
 const notes = {
   list: (d: string): NoteFile[] =>
@@ -78,7 +78,12 @@ describe('MCP tools: reading', () => {
       { id: 'id2', name: 'App', path: '/code/app', accountId: 'id1', accountName: 'Work' },
       { id: 'id3', name: 'Web', path: '/code/app/web', accountId: 'id1', accountName: 'Work' }
     ])
-    const other = { sessionId: 's9', projectId: 'id5', accountId: 'id4' }
+    const other: SessionScope = {
+      kind: 'session',
+      sessionId: 's9',
+      projectId: 'id5',
+      accountId: 'id4'
+    }
     expect(data(await tools.list_projects.call({}, other))).toMatchObject([{ id: 'id5' }])
   })
 

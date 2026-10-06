@@ -44,6 +44,8 @@ interface Deps {
   /** Token that limits a Claude tab's ClaudeDeck MCP access to its own project. */
   issueMcpToken: (scope: { sessionId: string; projectId: string; accountId: string }) => string
   revokeMcpTokens: (sessionIds: string[]) => void
+  /** Stops a running profile optimization before its account goes away. */
+  cancelOptimize: (accountId: string) => void
 }
 
 function completeOnboarding(configDir: string): void {
@@ -66,7 +68,8 @@ export function registerIpc({
   onProjectMoved,
   prepareProjectMemory,
   issueMcpToken,
-  revokeMcpTokens
+  revokeMcpTokens,
+  cancelOptimize
 }: Deps): void {
   const { handle, trusted } = createIpcTools(getWindow)
 
@@ -86,6 +89,7 @@ export function registerIpc({
     ptys.kill(loginPtyId(id))
     // Proje başka hesaba geçmiş ama eski hesapla çalışan oturum olabilir.
     if (ptys.hasAccount(id)) throw new DomainError('ACCOUNT_RUNNING')
+    cancelOptimize(id)
     const state = repo.removeAccount(id)
     if (deleteFiles === true) {
       try {

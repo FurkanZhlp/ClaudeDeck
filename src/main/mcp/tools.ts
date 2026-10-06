@@ -6,7 +6,7 @@ import { DomainError } from '../../shared/errors'
 import type { NoteFile, Project, SessionKind } from '../../shared/types'
 import { memoryDir } from '../notes/memoryPath'
 import type { Repository } from '../state/repository'
-import type { McpScope } from './sessionTokens'
+import type { McpScope, McpScopeKind, SessionScope } from './sessionTokens'
 
 export interface NotesAccess {
   list(dir: string): NoteFile[]
@@ -21,14 +21,14 @@ export type ConfirmRequest =
       name: string
       path: string
       accountId: string
-      requestedBy: McpScope
+      requestedBy: SessionScope
     }
   | {
       kind: 'open_session'
       projectId: string
       sessionKind: SessionKind
       title: string
-      requestedBy: McpScope
+      requestedBy: SessionScope
     }
 
 export interface ToolDeps {
@@ -50,6 +50,8 @@ export interface ToolResult {
 }
 
 export interface Tool {
+  /** Only tokens of this scope kind see and may call the tool. */
+  scopeKind: McpScopeKind
   description: string
   inputSchema: z.ZodRawShape
   call(args: unknown, scope: McpScope): Promise<ToolResult>
@@ -102,7 +104,12 @@ const ERROR_MESSAGES: Record<string, string> = {
 }
 
 /** Error whose message is safe to show to the MCP client as is. */
-class ToolError extends Error {}
+export class ToolError extends Error {}
+
+/** Handler result sent to the client as plain text instead of JSON. */
+export class TextReply {
+  constructor(readonly text: string) {}
+}
 
 const notAllowed = (): ToolError => new ToolError('Not allowed')
 
@@ -117,21 +124,28 @@ const text = (message: string): ToolResult => ({ content: [{ type: 'text', text:
 
 const fail = (message: string): ToolResult => ({ ...text(message), isError: true })
 
-function define<S extends z.ZodRawShape>(
+type ScopeOf<K extends McpScopeKind> = Extract<McpScope, { kind: K }>
+
+/** A zod-validated tool that only callers of scope kind `kind` may use. */
+export function defineTool<K extends McpScopeKind, S extends z.ZodRawShape>(
+  kind: K,
   description: string,
   inputSchema: S,
-  run: (args: z.infer<z.ZodObject<S>>, scope: McpScope) => unknown
+  run: (args: z.infer<z.ZodObject<S>>, scope: ScopeOf<K>) => unknown
 ): Tool {
   const schema = z.object(inputSchema).strict()
   return {
+    scopeKind: kind,
     description,
     inputSchema,
     async call(raw, scope) {
+      if (scope.kind !== kind) return fail('Not allowed')
       const parsed = schema.safeParse(raw ?? {})
       if (!parsed.success) return fail(`Invalid input: ${z.prettifyError(parsed.error)}`)
       try {
-        const result = await run(parsed.data, scope)
-        return result === DECLINED ? text(DECLINED_TEXT) : ok(result)
+        const result = await run(parsed.data, scope as ScopeOf<K>)
+        if (result === DECLINED) return text(DECLINED_TEXT)
+        return result instanceof TextReply ? text(result.text) : ok(result)
       } catch (error) {
         if (error instanceof ToolError) return fail(error.message)
         if (error instanceof DomainError) return fail(ERROR_MESSAGES[error.code] ?? error.code)
@@ -141,6 +155,13 @@ function define<S extends z.ZodRawShape>(
     }
   }
 }
+
+/** Project and notes tools: Claude tabs only. */
+const define = <S extends z.ZodRawShape>(
+  description: string,
+  inputSchema: S,
+  run: (args: z.infer<z.ZodObject<S>>, scope: SessionScope) => unknown
+): Tool => defineTool('session', description, inputSchema, run)
 
 /** Project whose folder equals or contains `path`; the deepest one wins. */
 export function findProjectByPath(projects: Project[], path: string): Project | undefined {
@@ -191,18 +212,18 @@ export function createTools(deps: ToolDeps): Tools {
     accountName: repo.get().accounts.find((a) => a.id === p.accountId)?.name ?? ''
   })
 
-  const accountProjects = (scope: McpScope): Project[] =>
+  const accountProjects = (scope: SessionScope): Project[] =>
     repo.get().projects.filter((p) => p.accountId === scope.accountId)
 
   /** A project of the caller's account. */
-  const ownAccountProject = (scope: McpScope, projectId: string): Project => {
+  const ownAccountProject = (scope: SessionScope, projectId: string): Project => {
     const project = accountProjects(scope).find((p) => p.id === projectId)
     if (!project) throw notAllowed()
     return project
   }
 
   /** The caller's own project; any other id is refused. */
-  const ownProjectId = (scope: McpScope, projectId: string | undefined): string => {
+  const ownProjectId = (scope: SessionScope, projectId: string | undefined): string => {
     const target = projectId ?? scope.projectId
     if (target !== scope.projectId) throw notAllowed()
     repo.project(target)

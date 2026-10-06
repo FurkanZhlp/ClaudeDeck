@@ -1,6 +1,9 @@
 import { Folder, Pencil, Plus, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Account } from '@shared/types'
+import { useOnboarding } from '../onboarding/onboardingStore'
+import { OptimizeBadge } from '../optimize/OptimizeBadge'
+import { useOptimizeBadgeState } from '../optimize/optimizeStore'
 import { useApp } from '../store'
 import { Button } from '../ui/Button'
 import { SessionIcon, StatusDot } from '../ui/SessionIcon'
@@ -226,10 +229,12 @@ function RailItem({
         ? status.email
         : t('settings.loggedOut')
       : undefined
+  const optimize = useOptimizeBadgeState(account.id)
   const tooltip = [
     account.name,
     detail,
-    runningCount > 0 ? t('sidebar.running', { count: runningCount }) : undefined
+    runningCount > 0 ? t('sidebar.running', { count: runningCount }) : undefined,
+    optimize ? t(`optimize.badge.${optimize}`) : undefined
   ]
     .filter(Boolean)
     .join(' · ')
@@ -243,7 +248,13 @@ function RailItem({
         aria-label={account.name}
         data-tooltip={tooltip}
         data-tooltip-side="right"
-        onClick={onSelect}
+        onClick={() => {
+          onSelect()
+          // A proposal is waiting for an answer: take the user straight to it.
+          if (optimize === 'waiting') {
+            useOnboarding.getState().startForAccount(account.id, { startAt: 'optimize' })
+          }
+        }}
         className={`no-drag relative flex size-10 items-center justify-center rounded-xl text-[15px] font-semibold text-white transition-[opacity,box-shadow,filter] duration-200 ${active ? '' : 'opacity-55 saturate-[0.85] hover:opacity-100 hover:saturate-100'}`}
         style={{
           background: account.color,
@@ -258,6 +269,7 @@ function RailItem({
             className="absolute -right-1 -top-1 size-3 rounded-full border-2 border-panel bg-ok"
           />
         )}
+        <OptimizeBadge accountId={account.id} />
       </button>
     </div>
   )

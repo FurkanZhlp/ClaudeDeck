@@ -256,13 +256,7 @@
           "body": "Değiştirilecek dosyalar düzenlenmeden önce yedeklenir."
         }
       },
-      "start": "Optimize et",
-      "starting": "Claude başlatılıyor...",
-      "running": "Claude çalışıyor. Önerileri terminalde onaylayabilir veya reddedebilirsiniz.",
-      "runningHint": "Claude'un sorularını aşağıdaki terminalde yanıtlayın. İşiniz bittiğinde Bitir'e basın.",
-      "exited": "Oturum sona erdi (çıkış kodu {{code}}).",
-      "terminalLabel": "Optimizasyon oturumu",
-      "finish": "Bitir"
+      "start": "Optimize et"
     },
     "done": {
       "title": "Her şey hazır",
@@ -300,5 +294,90 @@
     "confirmOpenClaude": "Claude, \"{{project}}\" projesinde yeni bir Claude sekmesi açmak istiyor.",
     "confirmOpenShell": "Claude, \"{{project}}\" projesinde yeni bir terminal sekmesi açmak istiyor.",
     "requestedBy": "İsteyen: {{project}} projesindeki Claude ({{account}} hesabı). Açılan sekme siz başlatana kadar çalışmaz."
+  },
+  "optimize": {
+    "start": "Optimize et",
+    "open": "Optimizasyonu aç",
+    "status": {
+      "idle": "Başlatılmadı",
+      "starting": "Başlatılıyor",
+      "running": "Çalışıyor",
+      "waiting": "Yanıtınızı bekliyor",
+      "finished": "Tamamlandı",
+      "failed": "Başarısız",
+      "cancelled": "Durduruldu"
+    },
+    "live": {
+      "starting": "Claude başlatılıyor...",
+      "working": "Claude profili inceliyor...",
+      "waiting": "Claude yanıtınızı bekliyor.",
+      "elapsed": "Geçen süre {{time}}",
+      "hint": "Bu ekranı kapatabilirsiniz; Claude çalışmaya devam eder ve size ihtiyaç duyduğunda hesap rozetinde gösterilir.",
+      "stop": "Durdur",
+      "stopConfirm": "Optimizasyon durdurulsun mu? Uygulanmış değişiklikler yerinde kalır.",
+      "background": "Arka planda devam et"
+    },
+    "activity": {
+      "title": "Etkinlik",
+      "empty": "Henüz dosya etkinliği yok.",
+      "tools": {
+        "read": "{{target}} okunuyor",
+        "write": "{{target}} yazılıyor",
+        "edit": "{{target}} düzenleniyor",
+        "glob": "Dosyalar aranıyor {{target}}",
+        "grep": "Dosyalarda aranıyor {{target}}",
+        "bash": "Komut çalıştırılıyor {{target}}",
+        "ls": "{{target}} listeleniyor",
+        "other": "{{tool}} {{target}}"
+      }
+    },
+    "findings": {
+      "title": "Claude'un tespitleri",
+      "strengths": "İyi durumda olanlar",
+      "issues": "İyileştirilebilecekler"
+    },
+    "proposal": {
+      "label": "Öneri",
+      "files": "Dosyalar",
+      "preview": "Önizleme",
+      "apply": "Uygula",
+      "skip": "Atla",
+      "modify": "Değiştirip uygula",
+      "noteLabel": "Claude neyi değiştirsin?",
+      "notePlaceholder": "Örneğin: mevcut kuralları koru, yalnızca tekrar edenleri birleştir.",
+      "submitNote": "Notla uygula",
+      "shortcut": "Cmd+Enter notu gönderir"
+    },
+    "history": {
+      "title": "Yanıtlananlar",
+      "decision": {
+        "apply": "Uygulandı",
+        "skip": "Atlandı",
+        "modify": "Değiştirildi"
+      }
+    },
+    "finished": {
+      "title": "Optimizasyon tamamlandı",
+      "changes": "Değişiklikler",
+      "noChanges": "Hiçbir dosya değiştirilmedi.",
+      "backup": "Başlamadan önce profilin yedeği alındı: {{path}}",
+      "done": "Tamam",
+      "revert": "Tümünü geri al",
+      "revertConfirm": "Bu çalışmadaki tüm değişiklikler geri alınıp profil yedekten geri yüklensin mi? Mevcut dosyalar önce yedeklenir.",
+      "reverted": "Tüm değişiklikler geri alındı. Profil, çalışmadan önceki hâline döndü."
+    },
+    "failed": {
+      "title": "Optimizasyon tamamlanamadı",
+      "unknown": "Claude beklenmedik şekilde durdu.",
+      "retry": "Yeniden dene"
+    },
+    "cancelled": {
+      "title": "Optimizasyon durduruldu",
+      "body": "Uygulanmış değişiklikler yerinde kalır. İstediğiniz zaman yeniden başlatabilirsiniz."
+    },
+    "badge": {
+      "running": "Profil optimize ediliyor",
+      "waiting": "Claude yanıtınızı bekliyor"
+    }
   }
 }

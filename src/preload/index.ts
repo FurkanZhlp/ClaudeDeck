@@ -63,7 +63,6 @@ const api: Api = {
     diff: (accountId, source) => call(IPC.profileDiff, accountId, source),
     import: (accountId, source, categories) =>
       call(IPC.profileImport, accountId, source, categories),
-    startOptimize: (accountId, cols, rows) => call(IPC.profileStartOptimize, accountId, cols, rows),
     openFolder: (accountId) => call(IPC.profileOpenFolder, accountId),
     onGuidelinesUpdated: (cb) => subscribe(IPC.profileGuidelinesUpdated, cb),
     takeGuidelineUpdates: () => call(IPC.profileTakeGuidelineUpdates)

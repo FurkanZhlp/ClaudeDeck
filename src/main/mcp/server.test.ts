@@ -8,14 +8,15 @@ import type { AppState } from '../../shared/types'
 import { JsonStore } from '../state/jsonStore'
 import { emptyState, Repository } from '../state/repository'
 import { startMcpServer, type RunningMcpServer } from './server'
-import { createSessionTokens, type McpScope, type SessionTokens } from './sessionTokens'
+import { createSessionTokens, type SessionScope, type SessionTokens } from './sessionTokens'
+import { createOptimizeTools } from './optimizeTools'
 import { createTools, type Tools } from './tools'
 
 let dir: string
 let running: RunningMcpServer
 let tokens: SessionTokens
 let tools: Tools
-let scope: McpScope
+let scope: SessionScope
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'claudedeck-mcp-server-'))
@@ -28,7 +29,7 @@ beforeAll(async () => {
   const other = repo.createAccount({ name: 'Other', color: '#111' }).account
   repo.createProject({ name: 'Hidden', path: '/code/hidden', accountId: other.id })
   const project = repo.get().projects[0]
-  scope = { sessionId: 'tab1', projectId: project.id, accountId: account.id }
+  scope = { kind: 'session', sessionId: 'tab1', projectId: project.id, accountId: account.id }
   tools = createTools({
     repo,
     notes: { list: () => [], read: () => '', write: () => undefined },
@@ -160,6 +161,50 @@ describe('MCP server', () => {
     } finally {
       await client.close()
       await limited.stop()
+    }
+  })
+  it('shows each scope kind only its own tools', async () => {
+    const both = await startMcpServer({
+      tools: {
+        ...tools,
+        ...createOptimizeTools({
+          status: () => undefined,
+          findings: () => undefined,
+          ask: () => Promise.resolve('Decision: skip'),
+          finish: () => undefined
+        })
+      },
+      tokens,
+      preferredPort: 0
+    })
+    const tab = await connect(both.url, tokens.issue(scope))
+    const run = await connect(
+      both.url,
+      tokens.issue({ kind: 'optimize', runId: 'run1', accountId: scope.accountId })
+    )
+    try {
+      const tabTools = (await tab.listTools()).tools.map((t) => t.name)
+      expect(tabTools).toContain('list_projects')
+      expect(tabTools.some((n) => n.startsWith('optimize_'))).toBe(false)
+      const runTools = (await run.listTools()).tools.map((t) => t.name).sort()
+      expect(runTools).toEqual([
+        'optimize_ask',
+        'optimize_findings',
+        'optimize_finish',
+        'optimize_status'
+      ])
+      const asked = await run.callTool({
+        name: 'optimize_ask',
+        arguments: { id: 'q1', title: 'T', rationale: 'R', files: [] }
+      })
+      expect(textOf(asked)).toBe('Decision: skip')
+      const refused = await run.callTool({ name: 'list_projects', arguments: {} })
+      expect(refused.isError).toBe(true)
+    } finally {
+      await tab.close()
+      await run.close()
+      tokens.revoke('run1')
+      await both.stop()
     }
   })
 })

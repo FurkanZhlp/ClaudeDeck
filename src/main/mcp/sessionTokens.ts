@@ -4,18 +4,46 @@ import { createHash, randomBytes } from 'node:crypto'
 export const MCP_TOKEN_ENV = 'CLAUDEDECK_MCP_TOKEN'
 
 /** What one Claude tab may touch through the MCP server. */
-export interface McpScope {
+export interface SessionScope {
+  kind: 'session'
   sessionId: string
   projectId: string
   accountId: string
 }
 
+/** A headless profile optimization run; it only reaches the optimize tools. */
+export interface OptimizeScope {
+  kind: 'optimize'
+  runId: string
+  accountId: string
+}
+
+export type McpScope = SessionScope | OptimizeScope
+export type McpScopeKind = McpScope['kind']
+
+/** Session scopes may omit `kind` so older callers keep working. */
+export type McpScopeInput = McpScope | Omit<SessionScope, 'kind'>
+
 export interface SessionTokens {
-  /** Issues a fresh token for a session, invalidating that session's previous one. */
-  issue(scope: McpScope): string
-  revoke(sessionId: string): void
-  revokeAll(): void
+  /** Issues a fresh token for a session or run, invalidating that owner's previous one. */
+  issue(scope: McpScopeInput): string
+  /** Revokes by session id or run id. */
+  revoke(id: string): void
+  /** Revokes everything, or only the tokens of one scope kind. */
+  revokeAll(kind?: McpScopeKind): void
   lookup(token: string): McpScope | null
+}
+
+/** Session id or run id: the owner a token and its rate limit belong to. */
+export const scopeId = (scope: McpScope): string =>
+  scope.kind === 'optimize' ? scope.runId : scope.sessionId
+
+function normalize(scope: McpScopeInput): McpScope {
+  if ('kind' in scope && scope.kind === 'optimize') {
+    return Object.freeze({ kind: 'optimize', runId: scope.runId, accountId: scope.accountId })
+  }
+  const { sessionId, projectId, accountId } = scope as Omit<SessionScope, 'kind'>
+  return Object.freeze({ kind: 'session', sessionId, projectId, accountId })
 }
 
 const TOKEN_PATTERN = /^[0-9a-f]{64}$/
@@ -27,28 +55,38 @@ const digest = (token: string): string => createHash('sha256').update(token).dig
 /** In-memory only: tokens die with the app and are never written to disk. */
 export function createSessionTokens(): SessionTokens {
   const scopes = new Map<string, McpScope>()
-  const bySession = new Map<string, string>()
+  const byOwner = new Map<string, string>()
 
-  const revoke = (sessionId: string): void => {
-    const key = bySession.get(sessionId)
+  const revoke = (id: string): void => {
+    const key = byOwner.get(id)
     if (key === undefined) return
     scopes.delete(key)
-    bySession.delete(sessionId)
+    byOwner.delete(id)
   }
 
   return {
-    issue(scope) {
-      revoke(scope.sessionId)
+    issue(input) {
+      const scope = normalize(input)
+      const owner = scopeId(scope)
+      revoke(owner)
       const token = randomBytes(32).toString('hex')
       const key = digest(token)
-      scopes.set(key, Object.freeze({ ...scope }))
-      bySession.set(scope.sessionId, key)
+      scopes.set(key, scope)
+      byOwner.set(owner, key)
       return token
     },
     revoke,
-    revokeAll() {
-      scopes.clear()
-      bySession.clear()
+    revokeAll(kind) {
+      if (kind === undefined) {
+        scopes.clear()
+        byOwner.clear()
+        return
+      }
+      for (const [key, scope] of scopes) {
+        if (scope.kind !== kind) continue
+        scopes.delete(key)
+        byOwner.delete(scopeId(scope))
+      }
     },
     lookup(token) {
       if (!TOKEN_PATTERN.test(token)) return null

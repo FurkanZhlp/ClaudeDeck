@@ -87,8 +87,6 @@ export interface Api {
       source: ProfileSource,
       categories: ProfileCategory[]
     ): Promise<ProfileImportResult>
-    /** Starts the optimize Claude session in PTY `optimizePtyId(accountId)`. */
-    startOptimize(accountId: string, cols: number, rows: number): Promise<null>
     openFolder(accountId: string): Promise<null>
     onGuidelinesUpdated(cb: (update: GuidelinesUpdate) => void): Unsubscribe
     /** Upgrades found before the UI was ready; returned once, then cleared. */

@@ -28,7 +28,6 @@ export const IPC = {
   profileSummarize: 'profile:summarize',
   profileDiff: 'profile:diff',
   profileImport: 'profile:import',
-  profileStartOptimize: 'profile:startOptimize',
   profileOpenFolder: 'profile:openFolder',
   profileGuidelinesUpdated: 'profile:guidelinesUpdated',
   profileTakeGuidelineUpdates: 'profile:takeGuidelineUpdates',
@@ -54,4 +53,3 @@ export const IPC = {
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; code: string }
 
 export const loginPtyId = (accountId: string): string => `login:${accountId}`
-export const optimizePtyId = (accountId: string): string => `optimize:${accountId}`

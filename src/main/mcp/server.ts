@@ -3,8 +3,8 @@ import type { AddressInfo } from 'node:net'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { MCP_SERVER_NAME } from './register'
-import type { McpScope, SessionTokens } from './sessionTokens'
-import type { ToolName, ToolResult, Tools } from './tools'
+import { scopeId, type McpScope, type SessionTokens } from './sessionTokens'
+import type { Tool, ToolResult } from './tools'
 
 export const DEFAULT_MCP_PORT = 47821
 const HOST = '127.0.0.1'
@@ -17,12 +17,15 @@ export interface RateLimit {
   windowMs: number
 }
 
+/** Every tool the server exposes, by name; each tool enforces its own scope kind. */
+export type ToolSet = Record<string, Tool>
+
 export interface McpServerOptions {
-  tools: Tools
+  tools: ToolSet
   tokens: SessionTokens
   preferredPort?: number
   version?: string
-  /** Tool calls allowed per session and window; defaults to 60 per minute. */
+  /** Tool calls allowed per session or run and window; defaults to 60 per minute. */
   rateLimit?: RateLimit
 }
 
@@ -71,17 +74,19 @@ const RATE_LIMITED: ToolResult = {
 }
 
 function buildMcpServer(
-  tools: Tools,
+  tools: ToolSet,
   version: string,
   scope: McpScope,
   allow: (key: string) => boolean
 ): McpServer {
   const server = new McpServer({ name: MCP_SERVER_NAME, version })
-  for (const [name, tool] of Object.entries(tools) as [ToolName, Tools[ToolName]][]) {
+  for (const [name, tool] of Object.entries(tools)) {
+    // A tab never sees the optimize tools and an optimize run never sees the project tools.
+    if (tool.scopeKind !== scope.kind) continue
     server.registerTool(
       name,
       { description: tool.description, inputSchema: tool.inputSchema },
-      (args) => (allow(scope.sessionId) ? tool.call(args, scope) : RATE_LIMITED)
+      (args) => (allow(scopeId(scope)) ? tool.call(args, scope) : RATE_LIMITED)
     )
   }
   return server

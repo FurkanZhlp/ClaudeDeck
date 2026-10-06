@@ -256,13 +256,7 @@
           "body": "Files are backed up before they are edited."
         }
       },
-      "start": "Optimize",
-      "starting": "Starting Claude...",
-      "running": "Claude is running. Approve or decline its suggestions in the terminal.",
-      "runningHint": "Answer Claude's questions in the terminal below. Press Finish when you are done.",
-      "exited": "The session ended (exit code {{code}}).",
-      "terminalLabel": "Optimize session",
-      "finish": "Finish"
+      "start": "Optimize"
     },
     "done": {
       "title": "You are all set",
@@ -300,5 +294,90 @@
     "confirmOpenClaude": "Claude wants to open a new Claude tab in \"{{project}}\".",
     "confirmOpenShell": "Claude wants to open a new terminal tab in \"{{project}}\".",
     "requestedBy": "Requested by Claude in {{project}} ({{account}} account). The new tab does not run until you start it."
+  },
+  "optimize": {
+    "start": "Optimize",
+    "open": "Open optimization",
+    "status": {
+      "idle": "Not started",
+      "starting": "Starting",
+      "running": "Working",
+      "waiting": "Waiting for your answer",
+      "finished": "Finished",
+      "failed": "Failed",
+      "cancelled": "Stopped"
+    },
+    "live": {
+      "starting": "Starting Claude...",
+      "working": "Claude is reviewing the profile...",
+      "waiting": "Claude is waiting for your answer.",
+      "elapsed": "Elapsed time {{time}}",
+      "hint": "You can close this; Claude keeps working and the account badge shows when it needs you.",
+      "stop": "Stop",
+      "stopConfirm": "Stop the optimization? Changes that were already applied stay in place.",
+      "background": "Continue in background"
+    },
+    "activity": {
+      "title": "Activity",
+      "empty": "No file activity yet.",
+      "tools": {
+        "read": "Reading {{target}}",
+        "write": "Writing {{target}}",
+        "edit": "Editing {{target}}",
+        "glob": "Searching for files {{target}}",
+        "grep": "Searching in files {{target}}",
+        "bash": "Running a command {{target}}",
+        "ls": "Listing {{target}}",
+        "other": "{{tool}} {{target}}"
+      }
+    },
+    "findings": {
+      "title": "What Claude found",
+      "strengths": "Working well",
+      "issues": "Can be improved"
+    },
+    "proposal": {
+      "label": "Proposal",
+      "files": "Files",
+      "preview": "Preview",
+      "apply": "Apply",
+      "skip": "Skip",
+      "modify": "Change and apply",
+      "noteLabel": "What should Claude change?",
+      "notePlaceholder": "For example: keep the existing rules and only merge the duplicated ones.",
+      "submitNote": "Apply with note",
+      "shortcut": "Cmd+Enter sends the note"
+    },
+    "history": {
+      "title": "Answered",
+      "decision": {
+        "apply": "Applied",
+        "skip": "Skipped",
+        "modify": "Changed"
+      }
+    },
+    "finished": {
+      "title": "Optimization finished",
+      "changes": "Changes",
+      "noChanges": "No files were changed.",
+      "backup": "A backup of the profile was taken before the run: {{path}}",
+      "done": "Done",
+      "revert": "Undo all",
+      "revertConfirm": "Undo every change from this run and restore the profile from the backup? The current files are backed up first.",
+      "reverted": "All changes were undone. The profile is back to how it was before the run."
+    },
+    "failed": {
+      "title": "The optimization could not be completed",
+      "unknown": "Claude stopped unexpectedly.",
+      "retry": "Try again"
+    },
+    "cancelled": {
+      "title": "The optimization was stopped",
+      "body": "Changes that were already applied stay in place. You can start again at any time."
+    },
+    "badge": {
+      "running": "Optimizing the profile",
+      "waiting": "Claude is waiting for your answer"
+    }
   }
 }

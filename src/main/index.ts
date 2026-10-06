@@ -21,6 +21,9 @@ import optimizePrompt from '../../resources/claudedeck/optimize-prompt.md?raw'
 import { createIpcTools } from './ipcUtil'
 import { registerMcpInConfig, unregisterMcpInConfig } from './mcp/register'
 import { createSessionTokens } from './mcp/sessionTokens'
+import { createOptimizeTools } from './mcp/optimizeTools'
+import { OptimizeManager } from './optimize/optimizeManager'
+import { registerOptimizeIpc } from './optimize/optimizeIpc'
 import { registerMcpIpc } from './mcp/mcpIpc'
 import { startMcpServer } from './mcp/server'
 import { createTools, type ConfirmRequest } from './mcp/tools'
@@ -54,6 +57,19 @@ const ptys = new PtyManager({
     mcpTokens.revoke(id)
     send(IPC.ptyExit, id, exitCode)
   }
+})
+
+// Headless profile optimization runs; they outlive the renderer and talk to Claude via MCP.
+const optimize = new OptimizeManager({
+  account: (id) => repo.account(id),
+  claudeAvailable: () => accounts.claudeAvailable(),
+  baseEnv: resolveShellEnv,
+  tokens: mcpTokens,
+  mcpUrl: () => mcp?.url ?? null,
+  prompt: optimizePrompt,
+  guidelinesText,
+  emit: (state) => send(IPC.optimizeUpdate, state),
+  onGuidelinesUpdated: (update) => send(IPC.profileGuidelinesUpdated, update)
 })
 
 const translator = (): Translate =>
@@ -128,7 +144,11 @@ async function startMcp(): Promise<void> {
   // Older builds stored a long-lived token here; tokens are per tab and in memory now.
   rmSync(join(userData, 'mcp.json'), { force: true })
   try {
-    mcp = await startMcpServer({ tools, tokens: mcpTokens, version: app.getVersion() })
+    mcp = await startMcpServer({
+      tools: { ...tools, ...createOptimizeTools(optimize.port) },
+      tokens: mcpTokens,
+      version: app.getVersion()
+    })
   } catch (error) {
     console.error('[mcp] server did not start', error)
     mcp = null
@@ -261,7 +281,8 @@ function createWindow(): void {
   // Renderer yeniden yüklenince terminal görünümleri kaybolur; sahipsiz süreç bırakma.
   win.webContents.on('did-finish-load', () => {
     ptys.killAll()
-    mcpTokens.revokeAll()
+    // Optimization runs keep going across reloads; only tab tokens die with their tabs.
+    mcpTokens.revokeAll('session')
     notes?.reset()
   })
 
@@ -320,7 +341,10 @@ app.whenReady().then(() => {
       }
     },
     issueMcpToken: (scope) => mcpTokens.issue(scope),
-    revokeMcpTokens: (sessionIds) => sessionIds.forEach((id) => mcpTokens.revoke(id))
+    revokeMcpTokens: (sessionIds) => sessionIds.forEach((id) => mcpTokens.revoke(id)),
+    cancelOptimize: (accountId) => {
+      if (optimize.isActive(accountId)) void optimize.cancel(accountId)
+    }
   })
   const ipcTools = createIpcTools(() => mainWindow)
   notes = registerNotesIpc({
@@ -335,16 +359,15 @@ app.whenReady().then(() => {
     repo,
     ptys,
     accounts,
-    send,
     globalDir: join(homedir(), '.claude'),
-    guidelinesText,
-    optimizePrompt,
+    isOptimizing: (accountId) => optimize.isActive(accountId),
     takePendingGuidelineUpdates: () => {
       const updates = pendingGuidelineUpdates
       pendingGuidelineUpdates = []
       return updates
     }
   })
+  registerOptimizeIpc({ handle: ipcTools.handle, manager: optimize })
   registerMcpIpc({
     handle: ipcTools.handle,
     getInfo: (): McpInfo => ({ running: mcp !== null, url: mcp?.url ?? null })
@@ -365,6 +388,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
   ptys.killAll()
+  optimize.disposeAll()
   mcpTokens.revokeAll()
   notes?.dispose()
   void mcp?.stop()

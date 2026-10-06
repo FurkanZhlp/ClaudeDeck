@@ -1,0 +1,49 @@
+/* Optimize view: compact variant of the notes Markdown style and coloured diff lines. */
+
+.optimize-markdown.notes-markdown {
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.optimize-markdown.notes-markdown pre {
+  max-height: 22rem;
+  overflow: auto;
+}
+
+.optimize-markdown .diff-line {
+  display: block;
+  margin: 0 -12px;
+  padding: 0 12px;
+}
+
+.optimize-markdown .diff-add {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+
+.optimize-markdown .diff-del {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.optimize-markdown .diff-hunk {
+  color: var(--muted);
+}
+
+/* Rotating ring on the account badge while a run is working. */
+@keyframes optimize-ring {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.optimize-ring {
+  animation: optimize-ring 900ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .optimize-ring {
+    animation: none;
+  }
+}
