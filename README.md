@@ -1,88 +1,88 @@
 <p align="center">
-  <img src="docs/icon.png" width="128" height="128" alt="ClaudeDeck ikonu">
+  <img src="docs/icon.png" width="128" height="128" alt="ClaudeDeck icon">
 </p>
 
 <h1 align="center">ClaudeDeck</h1>
 
 <p align="center">
-  Birden fazla Claude Pro/Max hesabını projelere atayın; her projede o hesapla çalışan <code>claude</code> terminalleri açın.
+  Assign multiple Claude Pro/Max accounts to your projects and open <code>claude</code> terminals that run with the right account.
 </p>
 
 <p align="center">
-  <a href="https://github.com/FurkanZhlp/ClaudeDeck/releases/latest"><strong>Son sürümü indir</strong></a>
+  <a href="https://github.com/FurkanZhlp/ClaudeDeck/releases/latest"><strong>Download the latest release</strong></a>
 </p>
 
-![Claude oturumu](docs/screenshots/claude-session.png)
+![Claude session](docs/screenshots/claude-session.png)
 
-## Neden?
+## Why
 
-Kişisel ve iş için ayrı Claude hesaplarınız varsa Claude Code'da hesap değiştirmek sürekli çıkış/giriş demektir. ClaudeDeck'te hesabı projeye bir kez atarsınız; o projede açtığınız her Claude sekmesi doğru hesapla başlar. Farklı hesaplara atanmış projeler yan yana, aynı anda çalışır.
+If you keep separate Claude accounts for personal and work use, switching between them in Claude Code means signing out and back in every time. In ClaudeDeck you assign an account to a project once, and every Claude tab you open in that project starts with that account. Projects on different accounts run side by side.
 
-## Özellikler
+## Features
 
-- **Çoklu hesap:** Her hesap kendi izole Claude Code config klasörünü kullanır. Hesaplar birbirine karışmaz, mevcut `~/.claude` kurulumunuza dokunulmaz.
-- **Proje bazlı hesap:** Proje = klasör + hesap. Hesabı değiştirdiğinizde yeni sekmeler yeni hesapla açılır.
-- **Sekmeler:** Bir projede istediğiniz kadar Claude ve düz Terminal sekmesi. Arka plandaki sekmeler çalışmaya devam eder.
-- **Kaldığı yerden devam:** Her Claude sekmesi kendi konuşmasını hatırlar; uygulamayı yeniden açtığınızda o sekmenin konuşmasına dönebilirsiniz.
-- **Türkçe ve İngilizce arayüz:** Varsayılan sistem dili, Ayarlar'dan değiştirilebilir.
-- **Güncelleme bildirimi:** Yeni sürüm yayınlandığında uygulama içinde haber verir.
+- **Multiple accounts:** each account uses its own isolated Claude Code config directory. Accounts never mix, and your existing `~/.claude` setup is left untouched.
+- **Per-project account:** a project is a folder plus an account. Change the account and new tabs open with the new one.
+- **Tabs:** as many Claude and plain Terminal tabs per project as you like. Background tabs keep running.
+- **Resume per tab:** each Claude tab remembers its own conversation, so you can pick it up again after restarting the app.
+- **English and Turkish UI:** follows the system language by default, switchable in Settings.
+- **Update notifications:** the app tells you when a new release is out.
 
-| Hesap izolasyonu | Ayarlar |
+| Account isolation | Settings |
 | --- | --- |
-| ![Terminal](docs/screenshots/terminal.png) | ![Ayarlar](docs/screenshots/settings.png) |
-| **Yeni proje** | **Giriş yapılmamış hesap uyarısı** |
-| ![Yeni proje](docs/screenshots/new-project.png) | ![Giriş uyarısı](docs/screenshots/signed-out.png) |
+| ![Terminal](docs/screenshots/terminal.png) | ![Settings](docs/screenshots/settings.png) |
+| **New project** | **Signed-out account warning** |
+| ![New project](docs/screenshots/new-project.png) | ![Signed-out warning](docs/screenshots/signed-out.png) |
 
-## Kurulum
+## Installation
 
-Gereksinimler: Apple Silicon Mac ve [Claude Code](https://docs.claude.com/en/docs/claude-code):
+Requirements: an Apple Silicon Mac and [Claude Code](https://docs.claude.com/en/docs/claude-code):
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-1. [Releases](https://github.com/FurkanZhlp/ClaudeDeck/releases/latest) sayfasından `.dmg` dosyasını indirin, ClaudeDeck'i Uygulamalar klasörüne sürükleyin.
-2. Uygulama henüz Apple tarafından notarize edilmediği için macOS ilk açılışta engelleyebilir. Bu durumda bir kez şunu çalıştırın:
+1. Download the `.dmg` from [Releases](https://github.com/FurkanZhlp/ClaudeDeck/releases/latest) and drag ClaudeDeck into Applications.
+2. The app is not notarized by Apple yet, so macOS may block the first launch. If it does, run this once:
 
    ```bash
    xattr -dr com.apple.quarantine /Applications/ClaudeDeck.app
    ```
 
-## Kullanım
+## Usage
 
-1. **Ayarlar > Hesaplar**'dan hesap ekleyin. Açılan pencerede `claude auth login` çalışır; tarayıcıda o hesapla giriş yapın.
-2. Kenar çubuğundaki **+** ile proje oluşturun: klasör seçin, hesap atayın.
-3. Üst şeritten **+ Claude** veya **+ Terminal** ile sekme açın.
+1. Add an account in **Settings > Accounts**. A window runs `claude auth login`; sign in with that account in your browser.
+2. Create a project with **+** in the sidebar: pick a folder and assign an account.
+3. Open a tab with **+ Claude** or **+ Terminal** in the top bar.
 
-Terminaldeki linkler Cmd+tık ile açılır.
+Links in the terminal open with Cmd+click.
 
-## Nasıl çalışır
+## How it works
 
-Claude Code, oturum ve ayarlarını `CLAUDE_CONFIG_DIR` ile verilen klasörde tutar. ClaudeDeck her hesap için `~/Library/Application Support/ClaudeDeck/accounts/<id>/` klasörü oluşturur ve Claude'u bu değişkenle başlatır. Kabuk yapılandırmanız (`.zshrc` vb.) bu değeri ezemesin diye değişken komut satırında yeniden verilir; `ANTHROPIC_API_KEY` gibi kimlik değişkenleri Claude sekmelerinden kaldırılır.
+Claude Code keeps its session and settings in the directory given by `CLAUDE_CONFIG_DIR`. ClaudeDeck creates `~/Library/Application Support/ClaudeDeck/accounts/<id>/` for each account and starts Claude with that variable. The variable is passed on the command line again so your shell config (`.zshrc` and friends) cannot override it, and credential variables such as `ANTHROPIC_API_KEY` are removed from Claude tabs.
 
-Giriş bilgilerini Claude Code kendisi macOS Anahtar Zinciri'nde saklar; ClaudeDeck token okumaz ve saklamaz.
+Claude Code stores credentials in the macOS Keychain itself. ClaudeDeck never reads or stores tokens.
 
-## Geliştirme
+## Development
 
 ```bash
 pnpm install
-pnpm dev          # geliştirme modu
-pnpm test         # birim testleri (Vitest)
+pnpm dev          # development mode
+pnpm test         # unit tests (Vitest)
 pnpm lint
 pnpm typecheck
-pnpm build:mac    # dist/claudedeck-<sürüm>-arm64.dmg
+pnpm build:mac    # dist/claudedeck-<version>-arm64.dmg
 ```
 
 ```
-src/main      Electron ana süreç: durum deposu, hesap servisi, PTY yöneticisi, güncelleme denetimi, IPC
-src/preload   Renderer'a açılan dar API (contextBridge)
-src/renderer  React arayüzü, xterm.js terminal havuzu
-src/shared    Tipler, IPC sözleşmesi, tr/en çeviriler
-docs/         Tasarım, uygulama planı, ekran görüntüleri
+src/main      Electron main process: state store, account service, PTY manager, update check, IPC
+src/preload   Narrow API exposed to the renderer (contextBridge)
+src/renderer  React UI, xterm.js terminal pool
+src/shared    Types, IPC contract, en/tr translations
+docs/         Design, implementation plan, screenshots
 ```
 
-Yeni sürüm yayınlamak için `package.json` içindeki `version` değerini artırın, `pnpm build:mac` ile derleyin ve `v<sürüm>` etiketiyle GitHub release oluşturup `.dmg` dosyasını ekleyin. Uygulama `releases/latest` uç noktasını denetler.
+To ship a release, bump `version` in `package.json`, build with `pnpm build:mac`, then create a GitHub release tagged `v<version>` with the `.dmg` attached. The app checks the `releases/latest` endpoint.
 
-## Not
+## Disclaimer
 
-ClaudeDeck bağımsız bir projedir; Anthropic ile bağlantılı değildir.
+ClaudeDeck is an independent project and is not affiliated with Anthropic.
