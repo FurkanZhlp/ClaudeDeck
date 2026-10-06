@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DomainError } from '../../shared/errors'
 import type { Account, AccountStatus } from '../../shared/types'
@@ -19,6 +19,24 @@ export function parseAuthStatus(stdout: string): AccountStatus {
   } catch {
     return { loggedIn: false }
   }
+}
+
+/**
+ * `claude auth login` stores credentials but leaves first-run onboarding pending, so an
+ * interactive session would walk through onboarding and ask for a login method again.
+ * Marks onboarding complete for signed-in config dirs only; other keys are preserved.
+ * Returns true when the file was changed.
+ */
+export function markOnboardingComplete(configDir: string): boolean {
+  const file = join(configDir, '.claude.json')
+  if (!existsSync(file)) return false
+  const json = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+  if (!json.oauthAccount || json.hasCompletedOnboarding === true) return false
+  json.hasCompletedOnboarding = true
+  const tmp = `${file}.claudedeck-tmp`
+  writeFileSync(tmp, JSON.stringify(json, null, 2), { encoding: 'utf8', mode: 0o600 })
+  renameSync(tmp, file)
+  return true
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/

@@ -12,7 +12,7 @@ import {
 import { DomainError } from '../shared/errors'
 import { IPC, loginPtyId, type IpcResult } from '../shared/ipc'
 import type { AccountInput, Language, ProjectInput, SessionKind, UpdateInfo } from '../shared/types'
-import type { AccountService } from './accounts/accountService'
+import { markOnboardingComplete, type AccountService } from './accounts/accountService'
 import { buildSessionEnv, claudeCommand, defaultShell, resolveShellEnv } from './env/shellEnv'
 import type { PtyManager } from './pty/ptyManager'
 import type { Repository } from './state/repository'
@@ -25,6 +25,14 @@ interface Deps {
   onLanguageChange: () => void
   checkUpdate: () => Promise<UpdateInfo | null>
   openUpdate: () => Promise<void>
+}
+
+function completeOnboarding(configDir: string): void {
+  try {
+    markOnboardingComplete(configDir)
+  } catch (error) {
+    console.warn('[ipc] could not mark onboarding complete', error)
+  }
 }
 
 const isText = (v: unknown): v is string => typeof v === 'string'
@@ -85,6 +93,7 @@ export function registerIpc({
   handle(IPC.accountStatus, async (id: string) => {
     const account = repo.account(id)
     const status = await accounts.status(account)
+    if (status.loggedIn) completeOnboarding(account.configDir)
     const email = status.loggedIn ? status.email : undefined
     const state = email !== account.email ? repo.updateAccount(id, { email }) : repo.get()
     return { status, state }
@@ -134,6 +143,7 @@ export function registerIpc({
       const account = repo.account(project.accountId)
       if (!existsSync(project.path)) throw new DomainError('PATH_MISSING')
       accounts.ensureConfigDir(account)
+      if (session.kind === 'claude') completeOnboarding(account.configDir)
 
       let args = ['-il']
       if (session.kind === 'claude') {
