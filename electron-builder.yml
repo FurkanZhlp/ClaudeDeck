@@ -1,0 +1,26 @@
+appId: com.furkanzhlp.claudedeck
+productName: ClaudeDeck
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!docs/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!vitest.config.ts'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml,pnpm-workspace.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+asarUnpack:
+  - resources/**
+  - node_modules/node-pty/**
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+  category: public.app-category.developer-tools
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
+dmg:
+  artifactName: ${name}-${version}-${arch}.${ext}
+npmRebuild: true

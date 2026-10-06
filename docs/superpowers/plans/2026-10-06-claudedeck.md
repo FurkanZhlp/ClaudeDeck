@@ -73,15 +73,16 @@ rm -rf "$SCR" src/renderer/src/components/Versions.tsx src/renderer/src/assets/b
 
 - [ ] **Step 3: pnpm ayarı (native modüller için hoisted)**
 
-`pnpm-workspace.yaml`:
+`pnpm-workspace.yaml` (pnpm 11 `allowBuilds` kullanır):
 ```yaml
 nodeLinker: hoisted
-onlyBuiltDependencies:
-  - electron
-  - esbuild
-  - node-pty
+allowBuilds:
+  electron: true
+  esbuild: true
+  node-pty: true
+  electron-winstaller: false
 ```
-(pnpm sürümü bu anahtarı tanımazsa `pnpm install` çıktısındaki yönergeye göre build onayı verilir, sonuç burada belgelenir.)
+Harici diskte hoisted kurulum çalıştırma bitlerini kaybedebildiği için `scripts/fix-permissions.mjs` postinstall'da `.bin` hedeflerini ve node-pty `spawn-helper`'ı `chmod +x` yapar. Electron yükseltmesinden sonra ikili dosya inmemişse `node node_modules/electron/install.js`.
 
 - [ ] **Step 4: Bağımlılıklar**
 
