@@ -1,0 +1,108 @@
+{
+  "common": {
+    "cancel": "Vazgeç",
+    "save": "Kaydet",
+    "delete": "Sil",
+    "close": "Kapat"
+  },
+  "sidebar": {
+    "projects": "Projeler",
+    "newProject": "Yeni proje",
+    "editProject": "Projeyi düzenle",
+    "settings": "Ayarlar",
+    "noProjects": "Henüz proje yok."
+  },
+  "welcome": {
+    "title": "ClaudeDeck'e hoş geldiniz",
+    "step1": "Ayarlar'dan bir Claude hesabı ekleyin ve giriş yapın.",
+    "step2": "Bir proje oluşturun, klasörünü seçin ve hesap atayın.",
+    "step3": "Projede Claude sekmesi açın; atanan hesapla çalışır.",
+    "addAccount": "Hesap ekle",
+    "newProject": "Proje oluştur"
+  },
+  "project": {
+    "createTitle": "Yeni proje",
+    "editTitle": "Projeyi düzenle",
+    "name": "Ad",
+    "namePlaceholder": "ör. Web sitesi",
+    "path": "Klasör",
+    "pickFolder": "Klasör seç",
+    "account": "Hesap",
+    "noAccounts": "Proje oluşturmadan önce en az bir hesap ekleyin.",
+    "openSettings": "Ayarları aç",
+    "accountChangeNote": "Hesap değişikliği yeni açılan oturumlara uygulanır; çalışan oturumlar önceki hesapla devam eder.",
+    "confirmDelete": "\"{{name}}\" projesi ve oturumları silinsin mi? Klasördeki dosyalara dokunulmaz."
+  },
+  "session": {
+    "newClaude": "Claude",
+    "newShell": "Terminal",
+    "claudeTitle": "Claude {{n}}",
+    "shellTitle": "Terminal {{n}}",
+    "start": "Başlat",
+    "resume": "Kaldığı yerden devam et",
+    "exited": "Süreç sonlandı (çıkış kodu {{code}}).",
+    "restart": "Yeniden başlat",
+    "close": "Kapat",
+    "confirmClose": "Bu oturum hâlâ çalışıyor. Kapatılsın mı?",
+    "staleAccount": "Bu oturum önceki hesapla çalışıyor. Yeni hesabı kullanmak için yeniden başlatın.",
+    "notLoggedIn": "\"{{account}}\" hesabında giriş yapılmamış görünüyor.",
+    "login": "Giriş yap",
+    "startAnyway": "Yine de başlat",
+    "pathMissing": "Proje klasörü bulunamadı: {{path}}",
+    "noSessions": "Bu projede oturum yok. Yukarıdan yeni bir Claude veya Terminal sekmesi açın.",
+    "accountLabel": "Hesap: {{name}}"
+  },
+  "settings": {
+    "title": "Ayarlar",
+    "accounts": "Hesaplar",
+    "noAccounts": "Henüz hesap yok.",
+    "addAccount": "Hesap ekle",
+    "accountName": "Hesap adı",
+    "accountNamePlaceholder": "ör. Kişisel, İş",
+    "color": "Renk",
+    "checking": "Kontrol ediliyor...",
+    "loggedIn": "Giriş yapıldı",
+    "loggedOut": "Giriş yapılmadı",
+    "login": "Giriş yap",
+    "relogin": "Yeniden giriş",
+    "refresh": "Durumu yenile",
+    "remove": "Hesabı sil",
+    "removeConfirm": "\"{{name}}\" hesabı silinsin mi?",
+    "removeFiles": "Hesabın oturumunu kapat ve yerel dosyalarını da sil",
+    "language": "Dil",
+    "languageSystem": "Sistem dili"
+  },
+  "login": {
+    "title": "{{name}} için giriş",
+    "hint": "Tarayıcıda açılan sayfadan bu hesaba ait Claude kullanıcısıyla giriş yapın. Tamamlanınca pencereyi kapatın.",
+    "done": "Giriş işlemi bitti. Pencereyi kapatabilirsiniz."
+  },
+  "errors": {
+    "ACCOUNT_IN_USE": "Bu hesap bir veya daha fazla projeye atanmış. Önce o projelerin hesabını değiştirin.",
+    "NOT_FOUND": "Kayıt bulunamadı.",
+    "INVALID": "Eksik veya geçersiz bilgi.",
+    "PATH_MISSING": "Proje klasörü bulunamadı.",
+    "CLAUDE_NOT_FOUND": "claude komutu bulunamadı. Claude Code'u kurun: curl -fsSL https://claude.ai/install.sh | bash",
+    "UNKNOWN": "Beklenmeyen bir hata oluştu."
+  },
+  "menu": {
+    "about": "ClaudeDeck hakkında",
+    "settings": "Ayarlar...",
+    "hide": "ClaudeDeck'i gizle",
+    "hideOthers": "Diğerlerini gizle",
+    "showAll": "Tümünü göster",
+    "quit": "ClaudeDeck'ten çık",
+    "edit": "Düzen",
+    "undo": "Geri al",
+    "redo": "Yinele",
+    "cut": "Kes",
+    "copy": "Kopyala",
+    "paste": "Yapıştır",
+    "selectAll": "Tümünü seç",
+    "view": "Görünüm",
+    "reload": "Yeniden yükle",
+    "devTools": "Geliştirici araçları",
+    "fullscreen": "Tam ekran",
+    "window": "Pencere"
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "close": "Close"
+  },
+  "sidebar": {
+    "projects": "Projects",
+    "newProject": "New project",
+    "editProject": "Edit project",
+    "settings": "Settings",
+    "noProjects": "No projects yet."
+  },
+  "welcome": {
+    "title": "Welcome to ClaudeDeck",
+    "step1": "Add a Claude account in Settings and sign in.",
+    "step2": "Create a project, pick its folder and assign an account.",
+    "step3": "Open a Claude tab in the project; it runs with the assigned account.",
+    "addAccount": "Add account",
+    "newProject": "Create project"
+  },
+  "project": {
+    "createTitle": "New project",
+    "editTitle": "Edit project",
+    "name": "Name",
+    "namePlaceholder": "e.g. Website",
+    "path": "Folder",
+    "pickFolder": "Choose folder",
+    "account": "Account",
+    "noAccounts": "Add at least one account before creating a project.",
+    "openSettings": "Open settings",
+    "accountChangeNote": "Account changes apply to newly opened sessions; running sessions keep the previous account.",
+    "confirmDelete": "Delete project \"{{name}}\" and its sessions? Files in the folder are not touched."
+  },
+  "session": {
+    "newClaude": "Claude",
+    "newShell": "Terminal",
+    "claudeTitle": "Claude {{n}}",
+    "shellTitle": "Terminal {{n}}",
+    "start": "Start",
+    "resume": "Continue where it left off",
+    "exited": "Process exited (exit code {{code}}).",
+    "restart": "Restart",
+    "close": "Close",
+    "confirmClose": "This session is still running. Close it?",
+    "staleAccount": "This session runs with the previous account. Restart it to use the new account.",
+    "notLoggedIn": "Account \"{{account}}\" does not appear to be signed in.",
+    "login": "Sign in",
+    "startAnyway": "Start anyway",
+    "pathMissing": "Project folder not found: {{path}}",
+    "noSessions": "No sessions in this project. Open a new Claude or Terminal tab above.",
+    "accountLabel": "Account: {{name}}"
+  },
+  "settings": {
+    "title": "Settings",
+    "accounts": "Accounts",
+    "noAccounts": "No accounts yet.",
+    "addAccount": "Add account",
+    "accountName": "Account name",
+    "accountNamePlaceholder": "e.g. Personal, Work",
+    "color": "Color",
+    "checking": "Checking...",
+    "loggedIn": "Signed in",
+    "loggedOut": "Not signed in",
+    "login": "Sign in",
+    "relogin": "Sign in again",
+    "refresh": "Refresh status",
+    "remove": "Delete account",
+    "removeConfirm": "Delete account \"{{name}}\"?",
+    "removeFiles": "Also sign out and delete the account's local files",
+    "language": "Language",
+    "languageSystem": "System language"
+  },
+  "login": {
+    "title": "Sign in for {{name}}",
+    "hint": "Sign in on the page that opens in your browser with the Claude user for this account. Close this window when done.",
+    "done": "Sign-in finished. You can close this window."
+  },
+  "errors": {
+    "ACCOUNT_IN_USE": "This account is assigned to one or more projects. Change those projects' account first.",
+    "NOT_FOUND": "Record not found.",
+    "INVALID": "Missing or invalid information.",
+    "PATH_MISSING": "Project folder not found.",
+    "CLAUDE_NOT_FOUND": "The claude command was not found. Install Claude Code: curl -fsSL https://claude.ai/install.sh | bash",
+    "UNKNOWN": "An unexpected error occurred."
+  },
+  "menu": {
+    "about": "About ClaudeDeck",
+    "settings": "Settings...",
+    "hide": "Hide ClaudeDeck",
+    "hideOthers": "Hide Others",
+    "showAll": "Show All",
+    "quit": "Quit ClaudeDeck",
+    "edit": "Edit",
+    "undo": "Undo",
+    "redo": "Redo",
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "selectAll": "Select All",
+    "view": "View",
+    "reload": "Reload",
+    "devTools": "Developer Tools",
+    "fullscreen": "Toggle Full Screen",
+    "window": "Window"
+  }
+}
