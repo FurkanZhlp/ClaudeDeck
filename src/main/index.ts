@@ -17,9 +17,6 @@ import icon from '../../resources/icon.png?asset'
 
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000
 
-// Keep development data apart so a dev build can run next to the installed app.
-if (is.dev) app.setPath('userData', `${app.getPath('userData')}-dev`)
-
 const userData = app.getPath('userData')
 const accountsRoot = join(userData, 'accounts')
 const repo = new Repository(new JsonStore(join(userData, 'config.json'), emptyState), accountsRoot)
