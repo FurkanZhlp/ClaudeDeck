@@ -154,10 +154,48 @@ export interface UsageWindow {
   resetsAt: number
 }
 
+/** A model-specific weekly limit from `/usage`, e.g. "Current week (Fable)". */
+export interface ModelUsageWindow extends UsageWindow {
+  model: string
+}
+
 export interface AccountUsage {
   accountId: string
   fiveHour: UsageWindow | null
   sevenDay: UsageWindow | null
+  /** Per-model weekly windows (only from the /usage poll; statusline does not report them). */
+  models?: ModelUsageWindow[]
   /** When Claude Code last reported these numbers (epoch ms). */
+  updatedAt: number
+}
+
+/** Subscription details read from the account's own Claude Code profile (no network). */
+export interface AccountPlan {
+  accountId: string
+  /** Human label such as "Max 20x", "Max 5x", "Pro", or null when unknown. */
+  label: string | null
+  extraUsageEnabled: boolean | null
+}
+
+export interface TokenBreakdown {
+  input: number
+  output: number
+  cacheWrite: number
+  cacheRead: number
+}
+
+export interface DailyUsage {
+  /** Local calendar day, YYYY-MM-DD. */
+  date: string
+  /** API-equivalent cost estimate in USD. */
+  costUSD: number
+  tokens: TokenBreakdown
+}
+
+/** Token and API-equivalent cost totals from the account's local Claude Code transcripts. */
+export interface AccountStats {
+  accountId: string
+  /** Last 30 days, oldest first, including empty days. */
+  days: DailyUsage[]
   updatedAt: number
 }

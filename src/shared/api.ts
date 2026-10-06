@@ -17,6 +17,8 @@ import type {
   OptimizeDecision,
   OptimizeState,
   AccountUsage,
+  AccountPlan,
+  AccountStats,
   SessionKind,
   UpdateInfo
 } from './types'
@@ -124,5 +126,11 @@ export interface Api {
   usage: {
     list(): Promise<AccountUsage[]>
     onUpdate(cb: (usage: AccountUsage) => void): Unsubscribe
+    /** Re-query plan usage now (all accounts, or one); throttled in the main process. */
+    pollNow(accountId?: string): Promise<null>
+    plans(): Promise<AccountPlan[]>
+    /** Local transcript statistics; rescans when older than a minute. */
+    stats(): Promise<AccountStats[]>
+    onStats(cb: (stats: AccountStats) => void): Unsubscribe
   }
 }

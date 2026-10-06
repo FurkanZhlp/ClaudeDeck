@@ -49,7 +49,11 @@ export const IPC = {
   optimizeRevert: 'optimize:revert',
   optimizeUpdate: 'optimize:update',
   usageList: 'usage:list',
-  usageUpdate: 'usage:update'
+  usageUpdate: 'usage:update',
+  usagePollNow: 'usage:pollNow',
+  usagePlans: 'usage:plans',
+  usageStats: 'usage:stats',
+  usageStatsUpdate: 'usage:statsUpdate'
 } as const
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; code: string }

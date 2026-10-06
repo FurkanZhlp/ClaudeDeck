@@ -89,7 +89,11 @@ const api: Api = {
   },
   usage: {
     list: () => call(IPC.usageList),
-    onUpdate: (cb) => subscribe(IPC.usageUpdate, cb)
+    onUpdate: (cb) => subscribe(IPC.usageUpdate, cb),
+    pollNow: (accountId) => call(IPC.usagePollNow, accountId),
+    plans: () => call(IPC.usagePlans),
+    stats: () => call(IPC.usageStats),
+    onStats: (cb) => subscribe(IPC.usageStatsUpdate, cb)
   }
 }
 
