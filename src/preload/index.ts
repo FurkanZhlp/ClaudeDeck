@@ -15,7 +15,10 @@ function subscribe<A extends unknown[]>(channel: string, cb: (...args: A) => voi
 }
 
 const api: Api = {
-  state: { get: () => call(IPC.stateGet) },
+  state: {
+    get: () => call(IPC.stateGet),
+    onChanged: (cb) => subscribe(IPC.stateChanged, cb)
+  },
   accounts: {
     create: (input) => call(IPC.accountCreate, input),
     update: (id, patch) => call(IPC.accountUpdate, id, patch),
@@ -30,7 +33,8 @@ const api: Api = {
   sessions: {
     create: (projectId, kind, title) => call(IPC.sessionCreate, projectId, kind, title),
     rename: (id, title) => call(IPC.sessionRename, id, title),
-    remove: (id) => call(IPC.sessionRemove, id)
+    remove: (id) => call(IPC.sessionRemove, id),
+    onOpenRequest: (cb) => subscribe(IPC.sessionOpenRequest, cb)
   },
   settings: { setLanguage: (language) => call(IPC.settingsSetLanguage, language) },
   pty: {

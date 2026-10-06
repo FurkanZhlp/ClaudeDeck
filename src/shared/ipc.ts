@@ -38,7 +38,9 @@ export const IPC = {
   notesChanged: 'notes:changed',
   notesOpen: 'notes:open',
   notesReveal: 'notes:reveal',
-  mcpInfo: 'mcp:info'
+  mcpInfo: 'mcp:info',
+  stateChanged: 'state:changed',
+  sessionOpenRequest: 'session:openRequest'
 } as const
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; code: string }

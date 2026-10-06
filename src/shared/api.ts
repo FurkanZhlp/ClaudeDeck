@@ -21,7 +21,11 @@ import type {
 type Unsubscribe = () => void
 
 export interface Api {
-  state: { get(): Promise<AppState> }
+  state: {
+    get(): Promise<AppState>
+    /** Main process changed the state on its own (e.g. through the MCP server). */
+    onChanged(cb: (state: AppState) => void): Unsubscribe
+  }
   accounts: {
     create(input: AccountInput): Promise<{ state: AppState; account: Account }>
     update(id: string, patch: Partial<AccountInput>): Promise<AppState>
@@ -41,6 +45,8 @@ export interface Api {
     ): Promise<{ state: AppState; session: Session }>
     rename(id: string, title: string): Promise<AppState>
     remove(id: string): Promise<AppState>
+    /** Main process asks the UI to select a session and start it (e.g. MCP open_session). */
+    onOpenRequest(cb: (sessionId: string) => void): Unsubscribe
   }
   settings: { setLanguage(language: Language | null): Promise<AppState> }
   pty: {
