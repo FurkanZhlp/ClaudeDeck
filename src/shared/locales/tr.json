@@ -74,6 +74,7 @@
   },
   "login": {
     "title": "{{name}} için giriş",
+    "subtitle": "Claude Code bu hesap için yetkilendiriliyor.",
     "steps": {
       "browser": "Tarayıcı açılıyor",
       "browserHint": "Claude giriş sayfası varsayılan tarayıcınızda açılıyor.",

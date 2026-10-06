@@ -6,9 +6,7 @@ import { parseLoginOutput, type LoginStage } from '@shared/loginProgress'
 import { errorCode, useApp } from '../store'
 import { TerminalView } from '../terminal/TerminalView'
 import * as pool from '../terminal/terminalPool'
-import { AccountDot } from '../ui/AccountDot'
 import { Button } from '../ui/Button'
-import { Modal } from '../ui/Modal'
 import { inputClass } from '../ui/styles'
 
 const STEPS = ['browser', 'signIn', 'code', 'done'] as const
@@ -55,19 +53,41 @@ function LoginContent({ accountId }: { accountId: string }): React.JSX.Element |
 
   if (!account) return null
   return (
-    <Modal
-      title={t('login.title', { name: account.name })}
-      onClose={close}
-      width="max-w-xl"
-      closeOnEscape={false}
-      closeOnBackdrop={false}
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('login.title', { name: account.name })}
+      className="animate-screen-in fixed inset-0 z-[70] flex flex-col bg-bg"
     >
-      <div className="mb-4 flex items-center gap-2 text-muted">
-        <AccountDot color={account.color} />
-        <span className="truncate">{account.email ?? account.name}</span>
+      <div className="drag flex h-11 shrink-0 items-center justify-end px-3">
+        <button
+          type="button"
+          aria-label={t('common.close')}
+          className="no-drag rounded-md p-1.5 text-muted hover:bg-panel hover:text-fg"
+          onClick={close}
+        >
+          <X size={16} />
+        </button>
       </div>
-      <LoginFlow key={attempt} accountId={accountId} onClose={close} onRetry={retry} />
-    </Modal>
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
+        <div className="mx-auto flex min-h-full w-full max-w-lg flex-col justify-center py-6">
+          <div className="animate-fade-up mb-8 flex flex-col items-center text-center">
+            <span
+              aria-hidden
+              className="mb-4 flex size-14 items-center justify-center rounded-2xl text-xl font-semibold text-white shadow-lg"
+              style={{ background: account.color }}
+            >
+              {account.name.trim().charAt(0).toLocaleUpperCase()}
+            </span>
+            <h1 className="text-lg font-semibold">{t('login.title', { name: account.name })}</h1>
+            <p className="mt-1 text-muted">{account.email ?? t('login.subtitle')}</p>
+          </div>
+          <div className="rounded-2xl border border-border bg-elevated p-6 shadow-sm">
+            <LoginFlow key={attempt} accountId={accountId} onClose={close} onRetry={retry} />
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 

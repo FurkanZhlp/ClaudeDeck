@@ -74,6 +74,7 @@
   },
   "login": {
     "title": "Sign in for {{name}}",
+    "subtitle": "Authorizing Claude Code for this account.",
     "steps": {
       "browser": "Opening your browser",
       "browserHint": "The Claude sign-in page is opening in your default browser.",
