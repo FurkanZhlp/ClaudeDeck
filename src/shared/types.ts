@@ -52,3 +52,48 @@ export interface UpdateInfo {
   available: boolean
   url: string
 }
+
+export type ProfileCategory =
+  'instructions' | 'agents' | 'skills' | 'commands' | 'outputStyles' | 'settings' | 'plugins'
+
+/** Where a profile import copies from: the user's global ~/.claude or another account. */
+export type ProfileSource = { kind: 'global' } | { kind: 'account'; accountId: string }
+
+export interface ProfileCategorySummary {
+  category: ProfileCategory
+  /** Whether the source has anything for this category. */
+  available: boolean
+  /** Number of top-level entries (files or folders) in the source for this category. */
+  items: number
+}
+
+export interface ProfileDiffEntry {
+  category: ProfileCategory
+  added: number
+  changed: number
+  removed: number
+}
+
+export interface ProfileImportResult {
+  imported: ProfileCategory[]
+  /** Folder holding the previous versions of overwritten items, or null if nothing was replaced. */
+  backupDir: string | null
+}
+
+export interface GuidelinesUpdate {
+  accountId: string
+  from: number | null
+  to: number
+}
+
+export interface NoteFile {
+  /** File name, e.g. "MEMORY.md". */
+  name: string
+  updatedAt: number
+  size: number
+}
+
+export interface McpInfo {
+  running: boolean
+  url: string | null
+}

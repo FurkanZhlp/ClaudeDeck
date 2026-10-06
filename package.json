@@ -24,7 +24,9 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
-    "node-pty": "^1.1.0"
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "node-pty": "^1.1.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
@@ -51,6 +53,8 @@
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "react-i18next": "^17.0.15",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^7.2.6",

@@ -53,7 +53,26 @@ const api: Api = {
     check: () => call(IPC.updateCheck),
     open: () => call(IPC.updateOpen),
     onAvailable: (cb) => subscribe(IPC.updateAvailable, cb)
-  }
+  },
+  profile: {
+    summarize: (source) => call(IPC.profileSummarize, source),
+    diff: (accountId, source) => call(IPC.profileDiff, accountId, source),
+    import: (accountId, source, categories) =>
+      call(IPC.profileImport, accountId, source, categories),
+    startOptimize: (accountId, cols, rows) => call(IPC.profileStartOptimize, accountId, cols, rows),
+    openFolder: (accountId) => call(IPC.profileOpenFolder, accountId),
+    onGuidelinesUpdated: (cb) => subscribe(IPC.profileGuidelinesUpdated, cb)
+  },
+  notes: {
+    list: (projectId) => call(IPC.notesList, projectId),
+    read: (projectId, name) => call(IPC.notesRead, projectId, name),
+    watch: (projectId) => call(IPC.notesWatch, projectId),
+    unwatch: (projectId) => call(IPC.notesUnwatch, projectId),
+    onChanged: (cb) => subscribe(IPC.notesChanged, cb),
+    open: (projectId, name) => call(IPC.notesOpen, projectId, name),
+    reveal: (projectId) => call(IPC.notesReveal, projectId)
+  },
+  mcp: { info: () => call(IPC.mcpInfo) }
 }
 
 contextBridge.exposeInMainWorld('api', api)

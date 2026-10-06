@@ -1,16 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import {
-  BrowserWindow,
-  dialog,
-  ipcMain,
-  type IpcMainEvent,
-  type IpcMainInvokeEvent,
-  type OpenDialogOptions
-} from 'electron'
+import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import { DomainError } from '../shared/errors'
-import { IPC, loginPtyId, type IpcResult } from '../shared/ipc'
+import { IPC, loginPtyId } from '../shared/ipc'
 import type { AccountInput, Language, ProjectInput, SessionKind, UpdateInfo } from '../shared/types'
 import {
   hasConversation,
@@ -19,6 +12,7 @@ import {
 } from './accounts/accountService'
 import { buildSessionEnv, claudeCommand, defaultShell, resolveShellEnv } from './env/shellEnv'
 import type { PtyManager } from './pty/ptyManager'
+import { createIpcTools, isSize, isText } from './ipcUtil'
 import type { Repository } from './state/repository'
 
 interface Deps {
@@ -39,9 +33,6 @@ function completeOnboarding(configDir: string): void {
   }
 }
 
-const isText = (v: unknown): v is string => typeof v === 'string'
-const isSize = (v: unknown): v is number => Number.isInteger(v) && (v as number) > 0
-
 export function registerIpc({
   repo,
   accounts,
@@ -51,23 +42,7 @@ export function registerIpc({
   checkUpdate,
   openUpdate
 }: Deps): void {
-  // Yalnızca uygulamanın kendi penceresinden gelen mesajlar kabul edilir.
-  const trusted = (event: IpcMainEvent | IpcMainInvokeEvent): boolean =>
-    event.sender === getWindow()?.webContents
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handle = (channel: string, fn: (...args: any[]) => unknown): void => {
-    ipcMain.handle(channel, async (event, ...args): Promise<IpcResult<unknown>> => {
-      if (!trusted(event)) return { ok: false, code: 'UNKNOWN' }
-      try {
-        return { ok: true, data: await fn(...args) }
-      } catch (error) {
-        if (error instanceof DomainError) return { ok: false, code: error.code }
-        console.error(`[ipc] ${channel}`, error)
-        return { ok: false, code: 'UNKNOWN' }
-      }
-    })
-  }
+  const { handle, trusted } = createIpcTools(getWindow)
 
   handle(IPC.stateGet, () => repo.get())
 

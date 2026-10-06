@@ -6,6 +6,14 @@ import type {
   Language,
   ProjectInput,
   Session,
+  GuidelinesUpdate,
+  McpInfo,
+  NoteFile,
+  ProfileCategory,
+  ProfileCategorySummary,
+  ProfileDiffEntry,
+  ProfileImportResult,
+  ProfileSource,
   SessionKind,
   UpdateInfo
 } from './types'
@@ -61,4 +69,30 @@ export interface Api {
     open(): Promise<null>
     onAvailable(cb: (info: UpdateInfo) => void): Unsubscribe
   }
+  profile: {
+    /** What the source offers per category; `global` reads ~/.claude without modifying it. */
+    summarize(source: ProfileSource): Promise<ProfileCategorySummary[]>
+    /** What importing would change in the account's profile, per category. */
+    diff(accountId: string, source: ProfileSource): Promise<ProfileDiffEntry[]>
+    import(
+      accountId: string,
+      source: ProfileSource,
+      categories: ProfileCategory[]
+    ): Promise<ProfileImportResult>
+    /** Starts the optimize Claude session in PTY `optimizePtyId(accountId)`. */
+    startOptimize(accountId: string, cols: number, rows: number): Promise<null>
+    openFolder(accountId: string): Promise<null>
+    onGuidelinesUpdated(cb: (update: GuidelinesUpdate) => void): Unsubscribe
+  }
+  notes: {
+    list(projectId: string): Promise<NoteFile[]>
+    read(projectId: string, name: string): Promise<string>
+    /** Starts watching the project's memory folder; changes arrive via onChanged. */
+    watch(projectId: string): Promise<null>
+    unwatch(projectId: string): Promise<null>
+    onChanged(cb: (projectId: string) => void): Unsubscribe
+    open(projectId: string, name: string): Promise<null>
+    reveal(projectId: string): Promise<null>
+  }
+  mcp: { info(): Promise<McpInfo> }
 }

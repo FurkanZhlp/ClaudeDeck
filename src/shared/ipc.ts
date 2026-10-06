@@ -24,9 +24,24 @@ export const IPC = {
   menuOpenSettings: 'menu:openSettings',
   updateCheck: 'update:check',
   updateOpen: 'update:open',
-  updateAvailable: 'update:available'
+  updateAvailable: 'update:available',
+  profileSummarize: 'profile:summarize',
+  profileDiff: 'profile:diff',
+  profileImport: 'profile:import',
+  profileStartOptimize: 'profile:startOptimize',
+  profileOpenFolder: 'profile:openFolder',
+  profileGuidelinesUpdated: 'profile:guidelinesUpdated',
+  notesList: 'notes:list',
+  notesRead: 'notes:read',
+  notesWatch: 'notes:watch',
+  notesUnwatch: 'notes:unwatch',
+  notesChanged: 'notes:changed',
+  notesOpen: 'notes:open',
+  notesReveal: 'notes:reveal',
+  mcpInfo: 'mcp:info'
 } as const
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; code: string }
 
 export const loginPtyId = (accountId: string): string => `login:${accountId}`
+export const optimizePtyId = (accountId: string): string => `optimize:${accountId}`
