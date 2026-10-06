@@ -31,6 +31,7 @@ export const IPC = {
   profileStartOptimize: 'profile:startOptimize',
   profileOpenFolder: 'profile:openFolder',
   profileGuidelinesUpdated: 'profile:guidelinesUpdated',
+  profileTakeGuidelineUpdates: 'profile:takeGuidelineUpdates',
   notesList: 'notes:list',
   notesRead: 'notes:read',
   notesWatch: 'notes:watch',

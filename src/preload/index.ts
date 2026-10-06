@@ -65,7 +65,8 @@ const api: Api = {
       call(IPC.profileImport, accountId, source, categories),
     startOptimize: (accountId, cols, rows) => call(IPC.profileStartOptimize, accountId, cols, rows),
     openFolder: (accountId) => call(IPC.profileOpenFolder, accountId),
-    onGuidelinesUpdated: (cb) => subscribe(IPC.profileGuidelinesUpdated, cb)
+    onGuidelinesUpdated: (cb) => subscribe(IPC.profileGuidelinesUpdated, cb),
+    takeGuidelineUpdates: () => call(IPC.profileTakeGuidelineUpdates)
   },
   notes: {
     list: (projectId) => call(IPC.notesList, projectId),

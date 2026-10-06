@@ -89,6 +89,8 @@ export interface Api {
     startOptimize(accountId: string, cols: number, rows: number): Promise<null>
     openFolder(accountId: string): Promise<null>
     onGuidelinesUpdated(cb: (update: GuidelinesUpdate) => void): Unsubscribe
+    /** Upgrades found before the UI was ready; returned once, then cleared. */
+    takeGuidelineUpdates(): Promise<GuidelinesUpdate[]>
   }
   notes: {
     list(projectId: string): Promise<NoteFile[]>
