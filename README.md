@@ -21,10 +21,12 @@ If you keep separate Claude accounts for personal and work use, switching betwee
 ## Features
 
 - **Multiple accounts:** each account uses its own isolated Claude Code config directory. Accounts never mix, and your existing `~/.claude` setup is left untouched.
+- **Account rail:** switch accounts from colour-coded badges on the left; each account shows only its own projects and remembers the last project and tab you used.
 - **Per-project account:** a project is a folder plus an account. Change the account and new tabs open with the new one.
 - **Tabs:** as many Claude and plain Terminal tabs per project as you like. Background tabs keep running.
 - **Resume per tab:** each Claude tab remembers its own conversation, so you can pick it up again after restarting the app.
 - **English and Turkish UI:** follows the system language by default, switchable in Settings.
+- **Guided sign-in:** an animated, step-by-step sign-in screen instead of a raw terminal.
 - **Update notifications:** the app tells you when a new release is out.
 
 | Account isolation | Settings |
