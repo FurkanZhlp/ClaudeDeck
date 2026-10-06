@@ -12,7 +12,11 @@ import {
 import { DomainError } from '../shared/errors'
 import { IPC, loginPtyId, type IpcResult } from '../shared/ipc'
 import type { AccountInput, Language, ProjectInput, SessionKind, UpdateInfo } from '../shared/types'
-import { markOnboardingComplete, type AccountService } from './accounts/accountService'
+import {
+  hasConversation,
+  markOnboardingComplete,
+  type AccountService
+} from './accounts/accountService'
 import { buildSessionEnv, claudeCommand, defaultShell, resolveShellEnv } from './env/shellEnv'
 import type { PtyManager } from './pty/ptyManager'
 import type { Repository } from './state/repository'
@@ -148,10 +152,12 @@ export function registerIpc({
       let args = ['-il']
       if (session.kind === 'claude') {
         let claudeArgs: string[]
-        if (resume === true) {
-          claudeArgs = session.claudeSessionId
-            ? ['--resume', session.claudeSessionId]
-            : ['--continue']
+        const stored = session.claudeSessionId
+        if (resume === true && stored && hasConversation(account.configDir, project.path, stored)) {
+          claudeArgs = ['--resume', stored]
+        } else if (resume === true && stored) {
+          // Nothing was ever sent in this tab, so there is no transcript; start it under the same id.
+          claudeArgs = ['--session-id', stored]
         } else {
           const claudeSessionId = randomUUID()
           repo.setClaudeSessionId(session.id, claudeSessionId)

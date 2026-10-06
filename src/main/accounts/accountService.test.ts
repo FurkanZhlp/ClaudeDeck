@@ -1,8 +1,14 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { accountDir, markOnboardingComplete, parseAuthStatus } from './accountService'
+import {
+  accountDir,
+  hasConversation,
+  markOnboardingComplete,
+  parseAuthStatus,
+  transcriptPath
+} from './accountService'
 
 describe('parseAuthStatus', () => {
   it('giriş durumunu ve e-postayı okur', () => {
@@ -63,5 +69,21 @@ describe('markOnboardingComplete', () => {
       false
     )
     expect(markOnboardingComplete(setup())).toBe(false)
+  })
+})
+
+describe('hasConversation', () => {
+  it('encodes the project path like Claude Code', () => {
+    expect(transcriptPath('/cfg', '/Volumes/My SSD/web-app', 'id')).toBe(
+      '/cfg/projects/-Volumes-My-SSD-web-app/id.jsonl'
+    )
+  })
+  it('is true only once the transcript file exists', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claudedeck-transcript-'))
+    expect(hasConversation(dir, '/tmp/app', 'abc')).toBe(false)
+    const file = transcriptPath(dir, '/tmp/app', 'abc')
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, '{}\n')
+    expect(hasConversation(dir, '/tmp/app', 'abc')).toBe(true)
   })
 })

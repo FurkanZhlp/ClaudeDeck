@@ -39,6 +39,16 @@ export function markOnboardingComplete(configDir: string): boolean {
   return true
 }
 
+/** Claude Code keeps transcripts in `projects/<cwd with non-alphanumerics as dashes>/`. */
+export function transcriptPath(configDir: string, cwd: string, sessionId: string): string {
+  return join(configDir, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`)
+}
+
+/** A session id only has a conversation to resume once a message was sent in it. */
+export function hasConversation(configDir: string, cwd: string, sessionId: string): boolean {
+  return existsSync(transcriptPath(configDir, cwd, sessionId))
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** Silinecek klasör saklanan yoldan değil, hesap kimliğinden türetilir. */
