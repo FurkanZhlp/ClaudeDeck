@@ -86,6 +86,10 @@ const api: Api = {
     cancel: (accountId) => call(IPC.optimizeCancel, accountId),
     revert: (accountId) => call(IPC.optimizeRevert, accountId),
     onUpdate: (cb) => subscribe(IPC.optimizeUpdate, cb)
+  },
+  usage: {
+    list: () => call(IPC.usageList),
+    onUpdate: (cb) => subscribe(IPC.usageUpdate, cb)
   }
 }
 

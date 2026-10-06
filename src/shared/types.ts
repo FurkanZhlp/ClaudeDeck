@@ -145,3 +145,19 @@ export interface OptimizeState {
   pending: OptimizeQuestion | null
   reverted: boolean
 }
+
+/** One plan rate-limit window as reported by Claude Code (statusline `rate_limits`). */
+export interface UsageWindow {
+  /** 0-100. */
+  usedPercentage: number
+  /** Epoch milliseconds. */
+  resetsAt: number
+}
+
+export interface AccountUsage {
+  accountId: string
+  fiveHour: UsageWindow | null
+  sevenDay: UsageWindow | null
+  /** When Claude Code last reported these numbers (epoch ms). */
+  updatedAt: number
+}

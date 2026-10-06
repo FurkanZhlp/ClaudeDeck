@@ -16,6 +16,7 @@ import type {
   ProfileSource,
   OptimizeDecision,
   OptimizeState,
+  AccountUsage,
   SessionKind,
   UpdateInfo
 } from './types'
@@ -118,5 +119,10 @@ export interface Api {
     /** Restores the snapshot taken before the run (current files are backed up first). */
     revert(accountId: string): Promise<OptimizeState>
     onUpdate(cb: (state: OptimizeState) => void): Unsubscribe
+  }
+  /** Plan usage reported by Claude Code through ClaudeDeck's statusline hook. */
+  usage: {
+    list(): Promise<AccountUsage[]>
+    onUpdate(cb: (usage: AccountUsage) => void): Unsubscribe
   }
 }
