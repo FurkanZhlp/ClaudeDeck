@@ -26,6 +26,9 @@ import { OptimizeManager } from './optimize/optimizeManager'
 import { registerOptimizeIpc } from './optimize/optimizeIpc'
 import { registerUsageIpc } from './usage/usageIpc'
 import { createUsageService } from './usage/usageWatcher'
+import { createUsagePoller } from './usage/usagePoller'
+import { registerStatsIpc } from './stats/statsIpc'
+import { createStatsService } from './stats/statsService'
 import { registerMcpIpc } from './mcp/mcpIpc'
 import { startMcpServer } from './mcp/server'
 import { createTools, type ConfirmRequest } from './mcp/tools'
@@ -42,6 +45,15 @@ const repo = new Repository(new JsonStore(join(userData, 'config.json'), emptySt
 const accounts = new AccountService(accountsRoot, resolveShellEnv)
 // Plan usage reported by Claude Code through a statusline hook installed per account.
 const usage = createUsageService({ repo, userDataDir: userData, send })
+// Tokens and API-equivalent cost from each account's local transcripts.
+const stats = createStatsService({ repo, send })
+// Background `claude -p /usage` checks (no model call) keep usage fresh between Claude runs.
+const usagePoller = createUsagePoller({
+  repo,
+  baseEnv: resolveShellEnv,
+  claudeAvailable: () => accounts.claudeAvailable(),
+  onUsage: (reading) => usage.ingest(reading)
+})
 
 let mainWindow: BrowserWindow | null = null
 let notes: NotesIpc | null = null
@@ -277,6 +289,7 @@ function createWindow(): void {
   mainWindow = win
 
   win.on('ready-to-show', () => win.show())
+  win.on('focus', () => usagePoller.pollSoon())
   win.on('closed', () => {
     mainWindow = null
   })
@@ -377,7 +390,8 @@ app.whenReady().then(() => {
     }
   })
   registerOptimizeIpc({ handle: ipcTools.handle, manager: optimize })
-  registerUsageIpc({ handle: ipcTools.handle, service: usage })
+  registerUsageIpc({ handle: ipcTools.handle, service: usage, poller: usagePoller, repo })
+  registerStatsIpc({ handle: ipcTools.handle, service: stats })
   registerMcpIpc({
     handle: ipcTools.handle,
     getInfo: (): McpInfo => ({ running: mcp !== null, url: mcp?.url ?? null })
@@ -386,6 +400,7 @@ app.whenReady().then(() => {
   applyMenu()
   void resolveShellEnv()
   createWindow()
+  usagePoller.start()
   setInterval(() => void checkUpdateQuietly(), UPDATE_INTERVAL_MS)
   // Geliştirme modunda Dock'ta Electron yerine uygulama ikonu görünsün.
   if (is.dev) app.dock?.setIcon(icon)
@@ -399,7 +414,9 @@ app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
   ptys.killAll()
   optimize.disposeAll()
+  usagePoller.stop()
   usage.dispose()
+  stats.dispose()
   mcpTokens.revokeAll()
   notes?.dispose()
   void mcp?.stop()

@@ -19,7 +19,8 @@
     "build": "pnpm typecheck && electron-vite build",
     "postinstall": "node scripts/fix-permissions.mjs && electron-builder install-app-deps",
     "build:unpack": "pnpm build && electron-builder --dir",
-    "build:mac": "pnpm build && electron-builder --mac"
+    "build:mac": "pnpm build && electron-builder --mac",
+    "pricing:update": "curl -fsSL https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json -o \"${TMPDIR:-/tmp}/litellm-prices.json\" && node scripts/update-pricing.mjs \"${TMPDIR:-/tmp}/litellm-prices.json\" resources/pricing/claude-models.json"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",

@@ -13,6 +13,21 @@ interface Deps {
   repo: { get(): { accounts: Account[] } }
   userDataDir: string
   send: (channel: string, ...args: unknown[]) => void
+  now?: () => number
+}
+
+/**
+ * Statusline readings carry no per-model limits; they keep the account's last polled ones
+ * while those windows have not reset yet.
+ */
+export function withKnownModels(
+  reading: AccountUsage,
+  previous: AccountUsage | null,
+  now: number
+): AccountUsage {
+  if (reading.models !== undefined || !previous?.models) return reading
+  const models = previous.models.filter((m) => m.resetsAt > now)
+  return models.length > 0 ? { ...reading, models } : reading
 }
 
 interface Watch {
@@ -27,11 +42,18 @@ export interface UsageService {
   prepareAccount(account: Account): void
   /** Stops watchers and forgets usage of accounts that no longer exist. */
   sync(accounts: Account[]): void
+  /** Takes a reading from another source (the poller); the newest `updatedAt` wins. */
+  ingest(usage: AccountUsage): void
   list(): AccountUsage[]
   dispose(): void
 }
 
-export function createUsageService({ repo, userDataDir, send }: Deps): UsageService {
+export function createUsageService({
+  repo,
+  userDataDir,
+  send,
+  now = Date.now
+}: Deps): UsageService {
   const store = createUsageStore(join(userDataDir, 'usage.json'))
   const watches = new Map<string, Watch>()
   let disposed = false
@@ -43,9 +65,14 @@ export function createUsageService({ repo, userDataDir, send }: Deps): UsageServ
     entry.timer = null
   }
 
+  const take = (reading: AccountUsage): void => {
+    const usage = withKnownModels(reading, store.get(reading.accountId), now())
+    if (store.update(usage)) send(IPC.usageUpdate, usage)
+  }
+
   const accept = (accountId: string, json: unknown, mtime: number): void => {
     const usage = parseStatuslineUsage(json, accountId, mtime)
-    if (usage && store.update(usage)) send(IPC.usageUpdate, usage)
+    if (usage) take(usage)
   }
 
   const read = (entry: Watch, retry: boolean): void => {
@@ -130,6 +157,11 @@ export function createUsageService({ repo, userDataDir, send }: Deps): UsageServ
       read(entry, true)
     },
     sync,
+    ingest(usage) {
+      if (disposed) return
+      if (!repo.get().accounts.some((a) => a.id === usage.accountId)) return
+      take(usage)
+    },
     list: () => store.list(),
     dispose() {
       disposed = true

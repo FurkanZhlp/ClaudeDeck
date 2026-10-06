@@ -152,4 +152,59 @@ describe('createUsageService', () => {
     await sleep(400)
     expect(send).not.toHaveBeenCalled()
   })
+
+  it('ingests polled readings, newest first, and only for known accounts', () => {
+    const base = root()
+    const a = account(base, 'a')
+    const send = vi.fn()
+    service = createUsageService({
+      repo: { get: () => ({ accounts: [a] }) },
+      userDataDir: base,
+      send
+    })
+    const polled = {
+      accountId: 'a',
+      fiveHour: { usedPercentage: 12, resetsAt: 2_000_000 },
+      sevenDay: { usedPercentage: 62, resetsAt: 3_000_000 },
+      models: [],
+      updatedAt: 1000
+    }
+    service.ingest(polled)
+    expect(send).toHaveBeenCalledWith(IPC.usageUpdate, polled)
+    service.ingest(polled)
+    service.ingest({ ...polled, updatedAt: 500 })
+    service.ingest({ ...polled, accountId: 'gone', updatedAt: 2000 })
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(service.list()).toEqual([polled])
+  })
+
+  it('keeps future per-model windows when a statusline reading arrives', async () => {
+    const base = root()
+    const a = account(base, 'a')
+    const send = vi.fn()
+    service = createUsageService({
+      repo: { get: () => ({ accounts: [a] }) },
+      userDataDir: base,
+      send,
+      now: () => 1_791_000_000_000
+    })
+    service.ingest({
+      accountId: 'a',
+      fiveHour: null,
+      sevenDay: null,
+      models: [
+        { model: 'Fable', usedPercentage: 5, resetsAt: 1_791_507_600_000 },
+        { model: 'Old', usedPercentage: 90, resetsAt: 1_790_000_000_000 }
+      ],
+      updatedAt: 1
+    })
+    service.prepareAccount(a)
+    await settle()
+    writeReading(a.configDir, reading(33))
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    expect(send.mock.calls[1][1]).toMatchObject({
+      fiveHour: { usedPercentage: 33 },
+      models: [{ model: 'Fable', usedPercentage: 5, resetsAt: 1_791_507_600_000 }]
+    })
+  })
 })

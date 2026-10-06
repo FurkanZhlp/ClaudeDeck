@@ -34,12 +34,16 @@ export function parseStatuslineUsage(
 const isWindow = (v: unknown): v is UsageWindow =>
   isObject(v) && isNumber(v.usedPercentage) && isNumber(v.resetsAt)
 
+const isModelWindow = (v: unknown): boolean =>
+  isWindow(v) && typeof (v as unknown as Json).model === 'string'
+
 const isUsage = (v: unknown): v is AccountUsage =>
   isObject(v) &&
   typeof v.accountId === 'string' &&
   isNumber(v.updatedAt) &&
   (v.fiveHour === null || isWindow(v.fiveHour)) &&
-  (v.sevenDay === null || isWindow(v.sevenDay))
+  (v.sevenDay === null || isWindow(v.sevenDay)) &&
+  (v.models === undefined || (Array.isArray(v.models) && v.models.every(isModelWindow)))
 
 export interface UsageStore {
   get(accountId: string): AccountUsage | null

@@ -418,6 +418,47 @@
       "day": "{{count}}d",
       "hour": "{{count}}h",
       "minute": "{{count}}m"
+    },
+    "details": {
+      "open": "Show usage details",
+      "title": "Usage details",
+      "cost": "Cost",
+      "range": {
+        "label": "Period",
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "month": "30 days"
+      },
+      "chartLabel": "Cost by account, {{range}}: {{total}}",
+      "estimateNote": "API-equivalent estimate; your subscription does not bill per token.",
+      "noStats": "No local Claude Code transcripts yet.",
+      "noUsage": "Usage appears after Claude runs or the next background check.",
+      "accounts": "Accounts",
+      "viewAccount": "Show {{name}}",
+      "session": "Session",
+      "weekly": "Weekly",
+      "left": "{{percent}} left",
+      "resetsToday": "Resets today at {{time}}",
+      "resetsTomorrow": "Resets tomorrow at {{time}}",
+      "resetsOn": "Resets {{date}} at {{time}}",
+      "resetDone": "Reset, new numbers arrive with the next check",
+      "noData": "No data",
+      "extraUsage": "Extra usage",
+      "extraOn": "On",
+      "extraOff": "Off",
+      "trend": "Usage trend",
+      "trendLabel": "Daily cost over the last 30 days, highest {{max}}",
+      "barTooltip": "{{date}}: {{cost}} · {{tokens}}",
+      "tokens": "{{value}} tokens",
+      "rows": {
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "month": "Last 30 days"
+      },
+      "updated": "Updated {{time}}",
+      "nextUpdate": "Next update in ~{{time}}",
+      "refresh": "Refresh now",
+      "refreshing": "Refreshing"
     }
   }
 }
