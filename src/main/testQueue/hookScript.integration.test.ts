@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { isWindows } from '../../test/platform'
 import { startMcpServer, type HookRoute, type RunningMcpServer } from '../mcp/server'
@@ -22,18 +22,11 @@ let waits = 0
 let hold: AbortSignal[] | null = null
 const tokens = createSessionTokens()
 let token: string
-const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH'
-/** Folder with a fake `curl` that exits 2. */
-let fakeCurlDir: string
 
 beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), 'claudedeck-tq-script-'))
   script = join(dir, 'test-queue.sh')
   writeFileSync(script, hookScript(1))
-  fakeCurlDir = join(dir, 'bin')
-  mkdirSync(fakeCurlDir)
-  writeFileSync(join(fakeCurlDir, 'curl'), '#!/bin/sh\ncat >/dev/null\nexit 2\n')
-  chmodSync(join(fakeCurlDir, 'curl'), 0o755)
   token = tokens.issue(scope)
   const route = (event: string): HookRoute => ({
     maxBodyBytes: 1024 * 1024,
@@ -70,11 +63,12 @@ function runHook(
   event: string,
   stdin: string,
   env: Record<string, string>,
-  onSpawn?: (child: ReturnType<typeof spawn>) => void
+  onSpawn?: (child: ReturnType<typeof spawn>) => void,
+  args: string[] = [script, event]
 ): Promise<{ stdout: string; status: number | null }> {
   received = []
   return new Promise((done, fail) => {
-    const child = spawn(shell as string, [script, event], {
+    const child = spawn(shell as string, args, {
       env: { ...process.env, CLAUDEDECK_MCP_TOKEN: '', CLAUDEDECK_HOOK_URL: '', ...env },
       windowsHide: true
     })
@@ -152,12 +146,16 @@ describe.runIf(shell)('generated hook script', { timeout: 30_000 }, () => {
   })
 
   it('exits 0 even when curl fails with exit code 2', async () => {
-    const { stdout, status } = await runHook('pre', JSON.stringify(payload), {
-      CLAUDEDECK_MCP_TOKEN: token,
-      CLAUDEDECK_HOOK_URL: hookBaseUrl(server.url),
-      // Windows spells it `Path`; a second `PATH` key would be ignored there.
-      [pathKey]: `${fakeCurlDir}${delimiter}${process.env[pathKey] ?? ''}`
-    })
+    // The script is sourced after defining a `curl` that fails with 2 (Git Bash puts its own
+    // folders first on PATH, so a fake curl on PATH would not be used there).
+    const failingCurl = 'curl() { cat >/dev/null; return 2; }; set -- pre; . "$0"'
+    const { stdout, status } = await runHook(
+      'pre',
+      JSON.stringify(payload),
+      { CLAUDEDECK_MCP_TOKEN: token, CLAUDEDECK_HOOK_URL: hookBaseUrl(server.url) },
+      undefined,
+      ['-c', failingCurl, script]
+    )
     expect({ stdout, status }).toEqual({ stdout: '', status: 0 })
     expect(received).toEqual([])
   })
