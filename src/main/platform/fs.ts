@@ -1,7 +1,10 @@
 import { execFile } from 'node:child_process'
-import { renameSync, rmSync, type RmOptions } from 'node:fs'
+import { rmSync, type RmOptions } from 'node:fs'
+import { cp, lstat, realpath, rename, rm, stat, symlink } from 'node:fs/promises'
+import { dirname, isAbsolute, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { COPY_TIMEOUT_MS, NOT_IMPLEMENTED } from './constants'
+import { COPY_TIMEOUT_MS } from './constants'
+import { isWithin } from './paths'
 import type { CopyRunner, OsName } from './types'
 
 const execFileAsync = promisify(execFile)
@@ -13,19 +16,208 @@ export const cloneCopy: CopyRunner = async (src, dest, dereference) => {
   })
 }
 
-const notImplemented = (): never => {
-  throw new Error(NOT_IMPLEMENTED)
+const errorCode = (error: unknown): string | undefined =>
+  error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined
+
+/** Resolved form of each root; a root that cannot be resolved is kept as given. */
+async function realRoots(roots: readonly string[]): Promise<string[]> {
+  return Promise.all(roots.map((root) => realpath(root).catch(() => root)))
 }
 
-/** POSIX rename is atomic and not blocked by open handles; Windows will retry EPERM/EBUSY. */
-export function renameWithRetry(os: OsName): (from: string, to: string) => void {
-  return os === 'win32' ? notImplemented : (from, to) => renameSync(from, to)
+/**
+ * Where the link at `path` finally resolves, when that is inside one of `roots` (resolved);
+ * null for a dangling link or one that leads elsewhere.
+ */
+async function linkTargetWithin(path: string, roots: readonly string[]): Promise<string | null> {
+  let real: string
+  try {
+    real = await realpath(path)
+  } catch {
+    return null
+  }
+  return roots.some((root) => isWithin(real, root)) ? real : null
 }
 
-export function rmWithRetry(os: OsName): (path: string, options?: RmOptions) => void {
-  return os === 'win32' ? notImplemented : (path, options) => rmSync(path, options)
+/**
+ * Copy filter that turns links into copies only when they lead into `roots`; dangling links and
+ * links to anything outside are skipped (with a warning), so a profile can never pull in files
+ * from elsewhere on the disk through a link.
+ */
+function linksWithin(roots: readonly string[]): (src: string) => Promise<boolean> {
+  return async (src) => {
+    let isLink: boolean
+    try {
+      isLink = (await lstat(src)).isSymbolicLink()
+    } catch {
+      return false
+    }
+    if (!isLink || (await linkTargetWithin(src, roots))) return true
+    console.warn('[fs] skipped a link that is dangling or leads outside the profile', src)
+    return false
+  }
 }
 
+/**
+ * Plain Node copy. Creating a symlink needs Developer Mode or admin rights on Windows, so a
+ * verbatim copy refused with EPERM is retried with links resolved into real files; only links
+ * leading into `src` or `roots` are resolved, the others are left out.
+ */
+export const nodeCopy: CopyRunner = async (src, dest, dereference, roots = []) => {
+  const options = { recursive: true, preserveTimestamps: true, force: true } as const
+  try {
+    await cp(src, dest, { ...options, dereference, verbatimSymlinks: !dereference })
+  } catch (error) {
+    if (dereference || errorCode(error) !== 'EPERM') throw error
+    await rm(dest, { recursive: true, force: true })
+    const filter = linksWithin(await realRoots([src, ...roots]))
+    await cp(src, dest, { ...options, dereference: true, filter })
+  }
+}
+
+// ---- Retries for Windows file locks ------------------------------------------------------
+
+/**
+ * Antivirus scanners, the search indexer and open `fs.watch` handles briefly lock files on
+ * Windows; these codes usually clear within a second.
+ */
+export const RETRY_CODES: ReadonlySet<string> = new Set(['EPERM', 'EBUSY', 'EACCES'])
+/** Waits between attempts (about 1.2 s in total). */
+export const RETRY_DELAYS_MS: readonly number[] = [25, 50, 100, 200, 350, 500]
+
+const isRetryable = (error: unknown): boolean => RETRY_CODES.has(errorCode(error) ?? '')
+
+/** Blocks the thread; only used between attempts of a synchronous file operation. */
+export function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+const sleepAsync = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+export function retrySync<T>(
+  op: () => T,
+  sleep: (ms: number) => void = sleepSync,
+  delays: readonly number[] = RETRY_DELAYS_MS
+): T {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return op()
+    } catch (error) {
+      if (attempt >= delays.length || !isRetryable(error)) throw error
+      sleep(delays[attempt])
+    }
+  }
+}
+
+export async function retryAsync<T>(
+  op: () => Promise<T>,
+  sleep: (ms: number) => Promise<void> = sleepAsync,
+  delays: readonly number[] = RETRY_DELAYS_MS
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await op()
+    } catch (error) {
+      if (attempt >= delays.length || !isRetryable(error)) throw error
+      await sleep(delays[attempt])
+    }
+  }
+}
+
+export interface SyncFsDeps {
+  rm?: (path: string, options?: RmOptions) => void
+  sleep?: (ms: number) => void
+}
+
+export interface AsyncFsDeps {
+  rename?: (from: string, to: string) => Promise<void>
+  rm?: (path: string, options?: RmOptions) => Promise<void>
+  sleep?: (ms: number) => Promise<void>
+}
+
+/** POSIX never needs it; Windows retries EPERM/EBUSY/EACCES. */
+export function rmWithRetry(
+  os: OsName,
+  deps: SyncFsDeps = {}
+): (path: string, options?: RmOptions) => void {
+  const op = deps.rm ?? rmSync
+  if (os !== 'win32') return (path, options) => op(path, options)
+  return (path, options) => retrySync(() => op(path, options), deps.sleep)
+}
+
+/**
+ * Async variants for code that already awaits its file operations. POSIX rename is atomic and
+ * not blocked by open handles.
+ */
+export function renameWithRetryAsync(
+  os: OsName,
+  deps: AsyncFsDeps = {}
+): (from: string, to: string) => Promise<void> {
+  const op = deps.rename ?? rename
+  if (os !== 'win32') return (from, to) => op(from, to)
+  return (from, to) => retryAsync(() => op(from, to), deps.sleep)
+}
+
+export function rmWithRetryAsync(
+  os: OsName,
+  deps: AsyncFsDeps = {}
+): (path: string, options?: RmOptions) => Promise<void> {
+  const op = deps.rm ?? rm
+  if (os !== 'win32') return (path, options) => op(path, options)
+  return (path, options) => retryAsync(() => op(path, options), deps.sleep)
+}
+
+// ---- Symlinks ------------------------------------------------------------------------------
+
+export interface SymlinkDeps {
+  symlink?: (target: string, path: string, type?: 'file' | 'dir' | 'junction') => Promise<void>
+  isDirectory?: (path: string) => Promise<boolean>
+  copy?: (src: string, dest: string) => Promise<void>
+}
+
+const isDirectory = async (path: string): Promise<boolean> => {
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+const copyResolved = (src: string, dest: string): Promise<void> =>
+  cp(src, dest, { recursive: true, dereference: true, preserveTimestamps: true, force: true })
+
+/**
+ * Creates a link at `path` pointing to `target` (relative to the link's folder or absolute).
+ * POSIX: a plain symlink. Windows: folders become junctions (no privilege needed, absolute
+ * target), files a file symlink; when that is refused (EPERM without Developer Mode) the target
+ * is copied instead, so the content is still there, but only when it resolves into one of
+ * `roots` (the profiles involved). Anything else is skipped with a warning.
+ */
+export function safeSymlink(
+  os: OsName,
+  deps: SymlinkDeps = {}
+): (target: string, path: string, roots?: readonly string[]) => Promise<void> {
+  const link = deps.symlink ?? symlink
+  if (os !== 'win32') return (target, path) => link(target, path)
+  const isDir = deps.isDirectory ?? isDirectory
+  const copy = deps.copy ?? copyResolved
+  return async (target, path, roots = []) => {
+    const absolute = isAbsolute(target) ? target : resolve(dirname(path), target)
+    const dir = await isDir(absolute)
+    try {
+      await (dir ? link(absolute, path, 'junction') : link(target, path, 'file'))
+    } catch (error) {
+      if (errorCode(error) !== 'EPERM') throw error
+      const real = await linkTargetWithin(absolute, await realRoots(roots))
+      if (real === null) {
+        console.warn('[fs] link not created; its target is missing or outside the profile', path)
+        return
+      }
+      await copy(real, path)
+    }
+  }
+}
+
+/** APFS clones only exist on macOS; elsewhere a plain Node copy. */
 export function copyRunner(os: OsName): CopyRunner {
-  return os === 'win32' ? () => Promise.reject(new Error(NOT_IMPLEMENTED)) : cloneCopy
+  return os === 'darwin' ? cloneCopy : nodeCopy
 }

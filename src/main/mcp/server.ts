@@ -92,6 +92,15 @@ function buildMcpServer(
   return server
 }
 
+/**
+ * The preferred port is taken (EADDRINUSE) or excluded (EACCES: Windows reserves port ranges
+ * for Hyper-V and WinNAT); either way a random free port works.
+ */
+export function canUseRandomPort(error: unknown, preferred: number): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  return preferred !== 0 && (code === 'EADDRINUSE' || code === 'EACCES')
+}
+
 function listen(server: Server, port: number): Promise<number> {
   return new Promise((done, fail) => {
     const onError = (error: Error): void => {
@@ -157,7 +166,7 @@ export async function startMcpServer(opts: McpServerOptions): Promise<RunningMcp
   try {
     port = await listen(http, preferred)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || preferred === 0) throw error
+    if (!canUseRandomPort(error, preferred)) throw error
     port = await listen(http, 0)
   }
   allowedHosts = [`${HOST}:${port}`, `localhost:${port}`]

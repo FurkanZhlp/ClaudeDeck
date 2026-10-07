@@ -1,6 +1,7 @@
 import { resolveBaseEnv } from './env'
-import { copyRunner, renameWithRetry, rmWithRetry } from './fs'
-import { claudeLaunch, claudeLocator, shellLaunch } from './launch'
+import { copyRunner, rmWithRetry } from './fs'
+import { claudeLocator } from './claudeLocator'
+import { claudeLaunch, shellLaunch } from './launch'
 import { permissionRulePath } from './paths'
 import { killTree, spawnDefaults } from './processTree'
 import type { OsName, Platform } from './types'
@@ -27,7 +28,6 @@ export function createPlatform(os: OsName): Platform {
     killTree: killTree(os),
     claudeLocator: claudeLocator(os),
     permissionRulePath: (abs) => permissionRulePath(abs, os),
-    renameWithRetry: renameWithRetry(os),
     rmWithRetry: rmWithRetry(os),
     copyRunner: copyRunner(os)
   }

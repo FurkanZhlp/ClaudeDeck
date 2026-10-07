@@ -140,6 +140,10 @@ export interface Api {
   }
   /** App level actions shared by the main window and the menu bar popover. */
   app: {
+    /** Operating system the app runs on (`process.platform`), known before the first render. */
+    readonly platform: NodeJS.Platform
+    /** Profile optimization is available on this platform (same rule the main process applies). */
+    readonly optimizeSupported: boolean
     /** The main window reports its selected account (menu bar 'selected' mode). */
     setSelectedAccount(accountId: string | null): void
     /** Account the menu bar currently shows, or null without accounts. */
@@ -149,6 +153,9 @@ export interface Api {
     quit(): Promise<null>
     /** False in development builds, where login items are not registered. */
     packaged(): Promise<boolean>
+    version(): Promise<string>
+    /** Checks for an update now and answers with a native dialog (main window only). */
+    checkUpdates(): Promise<null>
     /** The menu bar popover opened again (not on its first open, which loads the page). */
     onTrayShown(cb: () => void): () => void
     /** The menu bar popover asks for a window height that fits its content (popover only). */

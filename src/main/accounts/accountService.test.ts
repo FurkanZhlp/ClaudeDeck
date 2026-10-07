@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { encodeProjectKey } from '../notes/memoryPath'
 import {
   AccountService,
   accountDir,
@@ -77,6 +78,15 @@ describe('hasConversation', () => {
   it('encodes the project path like Claude Code', () => {
     expect(transcriptPath('/cfg', '/Volumes/My SSD/web-app', 'id')).toBe(
       '/cfg/projects/-Volumes-My-SSD-web-app/id.jsonl'
+    )
+  })
+  it('encodes Windows paths and long paths with the shared project key', () => {
+    expect(transcriptPath('/cfg', 'C:\\Users\\x\\p', 'id')).toBe(
+      '/cfg/projects/C--Users-x-p/id.jsonl'
+    )
+    const long = `/${'a'.repeat(250)}`
+    expect(transcriptPath('/cfg', long, 'id')).toBe(
+      join('/cfg', 'projects', encodeProjectKey(long), 'id.jsonl')
     )
   })
   it('is true only once the transcript file exists', () => {

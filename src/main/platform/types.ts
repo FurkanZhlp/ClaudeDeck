@@ -15,7 +15,16 @@ export interface LaunchSpec {
 
 export type KillTree = (child: ChildProcess, signal: NodeJS.Signals) => void
 
-export type CopyRunner = (src: string, dest: string, dereference: boolean) => Promise<void>
+/**
+ * Copies `src` to `dest`. `roots`: folders besides `src` that links may lead into when a copy
+ * has to resolve links it would otherwise keep (see nodeCopy).
+ */
+export type CopyRunner = (
+  src: string,
+  dest: string,
+  dereference: boolean,
+  roots?: readonly string[]
+) => Promise<void>
 
 /** Finds the `claude` executable for headless calls (`auth status`, `auth logout`). */
 export interface ClaudeLocator {
@@ -40,7 +49,6 @@ export interface Platform {
   claudeLocator: ClaudeLocator
   /** Absolute path in Claude Code permission rule syntax (`Read(<here>/x)`). */
   permissionRulePath(abs: string): string
-  renameWithRetry(from: string, to: string): void
   rmWithRetry(path: string, options?: RmOptions): void
   copyRunner: CopyRunner
 }

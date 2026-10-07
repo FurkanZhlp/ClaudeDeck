@@ -208,12 +208,16 @@ function parseModelLines(text: string, now: number): ModelUsageWindow[] {
   return models
 }
 
+/** Windows consoles and some shells end lines with CRLF (or a lone CR). */
+const toLf = (text: string): string => text.replace(/\r\n?/g, '\n')
+
 /** Usage from the text `claude -p /usage` prints; null when it has no plan windows. */
 export function parseUsageCommandOutput(
-  text: string,
+  raw: string,
   accountId: string,
   now: number
 ): AccountUsage | null {
+  const text = toLf(raw)
   const fiveHour = parseLine(text, SESSION_LINE, FIVE_HOUR_MS, now)
   const sevenDay = parseLine(text, WEEK_LINE, SEVEN_DAY_MS, now)
   if (!fiveHour && !sevenDay) return null
@@ -225,7 +229,8 @@ export function parseUsageCommandOutput(
  * The `result` text of `--output-format json` stdout. Login shell rc files may print first,
  * so the last line holding a JSON object wins. Null for errors or missing output.
  */
-export function usageResultText(stdout: string): string | null {
+export function usageResultText(raw: string): string | null {
+  const stdout = toLf(raw)
   const lines = stdout.split('\n')
   const candidates = lines.map((l) => l.trim()).filter((l) => l.startsWith('{'))
   // Pretty-printed output spans lines; try everything from the first brace as a last resort.

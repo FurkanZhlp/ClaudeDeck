@@ -3,10 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { shellQuote as shQuote } from '../env/shellEnv'
 import {
   installStatusline,
-  shQuote,
   statuslineScriptPath,
+  type StatuslineHost,
   uninstallStatusline,
   usageRawPath
 } from './statusline'
@@ -177,5 +178,61 @@ describe('statusline script', () => {
     const moved = join(tempDir('elsewhere'), 'statusline.sh')
     writeFileSync(moved, script.replace(/^dir=.*$/m, "dir='/nonexistent/claudedeck'"))
     expect(execFileSync('/bin/sh', [moved], { input: SAMPLE, encoding: 'utf8' })).toBe('out\n')
+  })
+})
+
+describe('installStatusline on Windows', () => {
+  const host = (gitBash: string | null): StatuslineHost => ({
+    os: 'win32',
+    env: {},
+    exists: (p) => p === gitBash
+  })
+
+  it('writes statusline.ps1 and a powershell -File command', () => {
+    const dir = tempDir()
+    expect(installStatusline(dir, host(null))).toBe(true)
+    const script = statuslineScriptPath(dir, 'win32')
+    expect(script.endsWith('statusline.ps1')).toBe(true)
+    expect(readSettings(dir).statusLine).toEqual({
+      type: 'command',
+      command: `C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '${script.replace(/\\/g, '/')}'`
+    })
+    expect(readFileSync(script, 'utf8')).toContain('[System.IO.File]::WriteAllText')
+    expect(installStatusline(dir, host(null))).toBe(false)
+  })
+
+  it('uses %SystemRoot% for the absolute PowerShell path, in the command and the chain', () => {
+    const dir = tempDir()
+    writeFileSync(
+      settingsFile(dir),
+      JSON.stringify({ statusLine: { type: 'command', command: 'echo mine' } })
+    )
+    installStatusline(dir, { os: 'win32', env: { SYSTEMROOT: 'D:\\Win' }, exists: () => false })
+    const ps = 'D:/Win/System32/WindowsPowerShell/v1.0/powershell.exe'
+    const { command } = readSettings(dir).statusLine as { command: string }
+    expect(command.startsWith(`${ps} -NoProfile`)).toBe(true)
+    const script = readFileSync(statuslineScriptPath(dir, 'win32'), 'utf8')
+    expect(script).toContain(`$psi.FileName = '${ps}'`)
+  })
+
+  it('chains the original through Git Bash when it is installed', () => {
+    const dir = tempDir()
+    const original = { type: 'command', command: 'echo mine' }
+    writeFileSync(settingsFile(dir), JSON.stringify({ statusLine: original }))
+    installStatusline(dir, host('C:\\Program Files\\Git\\bin\\bash.exe'))
+    const script = readFileSync(statuslineScriptPath(dir, 'win32'), 'utf8')
+    expect(script).toContain("$psi.FileName = 'C:\\Program Files\\Git\\bin\\bash.exe'")
+    expect(script).toContain(`$psi.Arguments = '-c "echo mine"'`)
+  })
+
+  it('treats a macOS script entry as ours and uninstall removes both scripts', () => {
+    const dir = tempDir()
+    installStatusline(dir)
+    installStatusline(dir, host(null))
+    expect(existsSync(originalFile(dir))).toBe(false)
+    expect(uninstallStatusline(dir)).toBe(true)
+    expect(readSettings(dir)).toEqual({})
+    expect(existsSync(statuslineScriptPath(dir, 'darwin'))).toBe(false)
+    expect(existsSync(statuslineScriptPath(dir, 'win32'))).toBe(false)
   })
 })

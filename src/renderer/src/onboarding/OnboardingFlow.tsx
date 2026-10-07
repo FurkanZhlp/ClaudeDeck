@@ -65,7 +65,7 @@ function OnboardingContent(): React.JSX.Element | null {
       aria-label={t('onboarding.title')}
       className="animate-screen-in fixed inset-0 z-[70] flex flex-col bg-bg"
     >
-      <div className="drag flex h-11 shrink-0 items-center justify-end px-3">
+      <div className="drag flex h-11 shrink-0 items-center justify-end pl-3 pr-[calc(var(--titlebar-inset-right)_+_0.75rem)]">
         <button
           type="button"
           aria-label={t('common.close')}

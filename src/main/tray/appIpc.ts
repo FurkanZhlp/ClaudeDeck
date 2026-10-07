@@ -16,6 +16,9 @@ interface Deps {
   openMain: () => void
   quit: () => void
   packaged: () => boolean
+  version: () => string
+  /** Interactive update check with native dialogs (Settings on every platform). */
+  checkUpdates: () => void
 }
 
 export function registerAppIpc({
@@ -25,7 +28,9 @@ export function registerAppIpc({
   trayAccount,
   openMain,
   quit,
-  packaged
+  packaged,
+  version,
+  checkUpdates
 }: Deps): void {
   ipcMain.on(IPC.appSelectedAccount, (event, accountId: unknown) => {
     if (!isMainSender(event)) return
@@ -42,4 +47,10 @@ export function registerAppIpc({
     return null
   })
   handle(IPC.appPackaged, () => packaged())
+  // Main window only: neither channel is in TRAY_CHANNELS.
+  handle(IPC.appVersion, () => version())
+  handle(IPC.appCheckUpdates, () => {
+    checkUpdates()
+    return null
+  })
 }

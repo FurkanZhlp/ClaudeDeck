@@ -76,6 +76,24 @@ textarea {
   --scrollbar-thumb-hover: color-mix(in srgb, var(--fg) 40%, transparent);
 }
 
+/*
+ * Room the window's own controls take at the top right of the title strip. macOS keeps its traffic
+ * lights on the left, so nothing is reserved there. On Windows the caption buttons (minimize,
+ * maximize, close; about 138px) overlay the strip: the Window Controls Overlay env() values give
+ * their exact width, 138px is the fallback.
+ */
+:root {
+  --titlebar-inset-right: 0px;
+  --titlebar-inset-top: 0px;
+}
+
+html[data-platform='win32'] {
+  --titlebar-inset-right: calc(
+    100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px))
+  );
+  --titlebar-inset-top: 44px;
+}
+
 /* The menu bar popover sits on the elevated surface, edge to edge. */
 html[data-view='tray'] body {
   background: var(--elevated);

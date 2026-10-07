@@ -104,7 +104,10 @@ beforeEach(() => {
       return child as unknown as ChildProcess
     },
     killTree,
-    now: () => (clock += 1000)
+    now: () => (clock += 1000),
+    // Off on Windows by default; these tests cover the run itself on every OS.
+    supported: true,
+    os: 'darwin'
   }
   manager = new OptimizeManager(deps)
 })
@@ -161,7 +164,7 @@ describe('optimize manager: start', () => {
         'mcp__claudedeck__optimize_ask,mcp__claudedeck__optimize_finish'
     )
     expect(args[args.indexOf('--disallowedTools') + 1]).toBe(
-      'Bash,WebFetch,WebSearch,Task,NotebookEdit'
+      'Bash,PowerShell,WebFetch,WebSearch,Task,NotebookEdit'
     )
     expect(args.slice(args.indexOf('--add-dir'), args.indexOf('--add-dir') + 2)).toEqual([
       '--add-dir',
@@ -178,6 +181,71 @@ describe('optimize manager: start', () => {
     await expect(other.start('a1')).rejects.toMatchObject({ code: 'CLAUDE_NOT_FOUND' })
     expect(other.get('a1').status).toBe('idle')
     await expect(manager.start('nope')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('passes the prompt inline outside Windows', async () => {
+    await manager.start('a1')
+    const command = last().args.join(' ')
+    expect(command).toMatch(/--append-system-prompt'? '?PROMPT/)
+    expect(command).not.toContain('--append-system-prompt-file')
+  })
+
+  it('passes the prompt as a temp file on Windows and removes it after the run', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'claudedeck-optimize-tmp-'))
+    const win = new OptimizeManager({ ...deps, os: 'win32', tmpDir: tmp, newId: () => 'r1' })
+    await win.start('a1')
+    const dir = join(tmp, 'claudedeck-optimize-r1')
+    const file = join(dir, 'system-prompt.md')
+    expect(readFileSync(file, 'utf8')).toBe('PROMPT')
+    const command = last().args.join(' ')
+    expect(command).toContain('--append-system-prompt-file')
+    expect(command).toContain(file)
+    expect(command).not.toContain('PROMPT')
+    // Outside the profile, so never inside the --add-dir scope.
+    expect(file.startsWith(account.configDir)).toBe(false)
+    await last().child.close(0)
+    expect(existsSync(dir)).toBe(false)
+  })
+
+  it('removes the prompt folder when the start fails', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'claudedeck-optimize-tmp-'))
+    const win = new OptimizeManager({
+      ...deps,
+      os: 'win32',
+      tmpDir: tmp,
+      newId: () => 'r2',
+      spawn: () => {
+        throw new Error('spawn failed')
+      }
+    })
+    await expect(win.start('a1')).rejects.toThrow('spawn failed')
+    expect(readdirSync(tmp)).toEqual([])
+  })
+
+  it('removes the prompt folder when cancelled before claude was spawned', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'claudedeck-optimize-tmp-'))
+    let release: (env: Record<string, string>) => void = () => undefined
+    const win = new OptimizeManager({
+      ...deps,
+      os: 'win32',
+      tmpDir: tmp,
+      newId: () => 'r3',
+      baseEnv: () => new Promise((resolve) => (release = resolve))
+    })
+    const started = win.start('a1')
+    await tick()
+    expect(win.cancel('a1').status).toBe('cancelled')
+    release({ PATH: '/usr/bin' })
+    await expect(started).resolves.toMatchObject({ status: 'cancelled' })
+    expect(spawned).toHaveLength(0)
+    expect(readdirSync(tmp)).toEqual([])
+  })
+
+  it('refuses to start where optimize is not supported yet', async () => {
+    const off = new OptimizeManager({ ...deps, supported: false })
+    await expect(off.start('a1')).rejects.toMatchObject({ code: 'UNSUPPORTED' })
+    expect(off.isActive('a1')).toBe(false)
+    expect(spawned).toHaveLength(0)
   })
 
   it('refuses to start without a running MCP server', async () => {
@@ -353,6 +421,57 @@ describe('optimize manager: lifecycle', () => {
   })
 })
 
+describe('optimize manager: protected settings', () => {
+  const settings = (): Record<string, unknown> =>
+    JSON.parse(readFileSync(join(account.configDir, 'settings.json'), 'utf8'))
+
+  it('undoes hook and env edits after finish and lists them in the summary', async () => {
+    writeFileSync(
+      join(account.configDir, 'settings.json'),
+      JSON.stringify({ model: 'opus', env: { A: '1' } })
+    )
+    await manager.start('a1')
+    writeFileSync(
+      join(account.configDir, 'settings.json'),
+      JSON.stringify({
+        model: 'sonnet',
+        env: { A: '1', ANTHROPIC_BASE_URL: 'https://x.example' },
+        hooks: { Stop: [] }
+      })
+    )
+    manager.port.finish(scopeOf(), { summary: 'Done', changes: ['Switched model'] })
+    await last().child.close(0)
+    expect(settings()).toEqual({ model: 'sonnet', env: { A: '1' } })
+    const finish = manager.get('a1').events.find((e) => e.type === 'finish')
+    expect(finish).toMatchObject({
+      changes: ['Switched model', 'ClaudeDeck undid changes to protected settings: hooks, env']
+    })
+  })
+
+  it('also guards a cancelled or failed run, reporting it as a status line', async () => {
+    await manager.start('a1')
+    writeFileSync(
+      join(account.configDir, 'settings.json'),
+      JSON.stringify({ statusLine: { type: 'command', command: 'evil' } })
+    )
+    manager.cancel('a1')
+    await last().child.close(143)
+    expect(settings()).toEqual({})
+    expect(manager.get('a1').events.at(-1)).toMatchObject({
+      type: 'status',
+      message: 'ClaudeDeck undid changes to protected settings: statusLine'
+    })
+  })
+
+  it('adds nothing when no protected key changed', async () => {
+    await manager.start('a1')
+    writeFileSync(join(account.configDir, 'settings.json'), JSON.stringify({ model: 'x' }))
+    await last().child.close(1)
+    expect(settings()).toEqual({ model: 'x' })
+    expect(manager.get('a1').events.some((e) => e.type === 'status')).toBe(false)
+  })
+})
+
 describe('optimize manager: revert', () => {
   it('restores the snapshot and backs up the current files first', async () => {
     const started = await manager.start('a1')
@@ -433,6 +552,24 @@ describe('profileDenyRules', () => {
     expect(rules).toContain(`Edit(${root}/projects/**)`)
     expect(rules).toContain(`Edit(${root}/claudedeck/guidelines.md)`)
     expect(rules).not.toContain(`Read(${root}/claudedeck/guidelines.md)`)
+  })
+  it('keeps every app-managed file that runs or feeds code later read-only', () => {
+    const rules = profileDenyRules('/cfg')
+    for (const rel of [
+      'claudedeck/statusline.sh',
+      'claudedeck/statusline.ps1',
+      'claudedeck/statusline-original.json',
+      'claudedeck/usage-raw.json',
+      'claudedeck/usage-raw.json.*',
+      'claudedeck/guidelines.md',
+      'claudedeck/backups/**',
+      'plugins/**'
+    ]) {
+      expect(rules).toContain(`Edit(//cfg/${rel})`)
+    }
+    // The run edits instructions and works in the workspace; a deny rule cannot carve out an
+    // exception, so nothing may cover them.
+    expect(rules.some((rule) => /claudedeck\/(\*|instructions|workspace)/.test(rule))).toBe(false)
   })
   it('passes the rules through --settings', () => {
     const args = buildClaudeArgs({

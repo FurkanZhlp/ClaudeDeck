@@ -97,6 +97,7 @@ Acceptance: Mac lint/typecheck/test green; snapshot test of the claude command u
 ### Phase 2: three parallel streams
 - D (backend + security review) notes, MCP tools, atomic writes: `notes/*`, `mcp/{tools,register}.ts`, `state/jsonStore.ts`, `profile/guidelines.ts`, `platform/{paths,fs}.ts` win32 additions.
 - E (devops) packaging and release: `electron-builder.yml`, `package.json`, `build/icon.ico`, `.github/workflows/release.yml` (draft release; jobs mac-arm64 on macos-latest, win-x64 on windows-latest, win-arm64 on windows-11-arm; publish at the end), scripts.
+  - `nsis.artifactName` must be `${name}-${version}-${arch}-setup.${ext}` (`WINDOWS_ARTIFACT_NAME` in `src/main/updates/updateChecker.ts`, pinned by its test). Windows clients only see an update when the release has the installer for their arch; macOS does not check assets.
 - F (qa-test) make Windows CI green: shared test helpers, test files not owned by A to D; module owners fix their own failures.
 
 ### Phase 3: integration and quality gate

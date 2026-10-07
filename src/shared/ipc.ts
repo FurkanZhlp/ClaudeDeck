@@ -61,6 +61,8 @@ export const IPC = {
   appOpenMain: 'app:openMain',
   appQuit: 'app:quit',
   appPackaged: 'app:packaged',
+  appVersion: 'app:version',
+  appCheckUpdates: 'app:checkUpdates',
   appTrayShown: 'app:trayShown',
   appTrayResize: 'app:trayResize'
 } as const

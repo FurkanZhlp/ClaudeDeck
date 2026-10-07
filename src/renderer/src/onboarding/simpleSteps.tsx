@@ -205,9 +205,11 @@ export function DoneStep({
               : t('onboarding.done.importSkipped')}
           </SummaryRow>
         )}
-        <SummaryRow ok={optimized}>
-          {optimized ? t('onboarding.done.optimized') : t('onboarding.done.optimizeSkipped')}
-        </SummaryRow>
+        {steps.includes('optimize') && (
+          <SummaryRow ok={optimized}>
+            {optimized ? t('onboarding.done.optimized') : t('onboarding.done.optimizeSkipped')}
+          </SummaryRow>
+        )}
       </ul>
       <p className="mt-5 text-[12px] text-muted">{t('onboarding.done.later')}</p>
       <div className="mt-6 flex justify-end">

@@ -1,9 +1,11 @@
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
-import { mkdir, rename } from 'node:fs/promises'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdir } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { DomainError } from '../../shared/errors'
+import { optimizeSupported } from '../../shared/optimizeSupport'
 import type {
   Account,
   GuidelinesUpdate,
@@ -17,9 +19,12 @@ import { markOnboardingComplete } from '../accounts/accountService'
 import { OptimizeRejection, type OptimizePort, type OptimizeToolName } from '../mcp/optimizeTools'
 import { inlineMcpConfig, MCP_SERVER_NAME } from '../mcp/register'
 import { MCP_TOKEN_ENV, type OptimizeScope, type SessionTokens } from '../mcp/sessionTokens'
-import { platform } from '../platform'
+import { platform, type OsName } from '../platform'
+import { renameWithRetryAsync } from '../platform/fs'
 import { ensureGuidelines } from '../profile/guidelines'
-import { cloneCopy, copyEntry, type CopyRunner } from '../profile/importer'
+import { copyEntry, type CopyRunner } from '../profile/importer'
+import { APP_MANAGED_USAGE_FILES } from '../usage/statuslineScript'
+import { readSettingsText, restoreProtectedSettings } from './settingsGuard'
 
 type Env = Record<string, string>
 
@@ -37,9 +42,20 @@ const TOOL_NAMES: OptimizeToolName[] = [
   'optimize_finish'
 ]
 export const ALLOWED_TOOLS = TOOL_NAMES.map((n) => `mcp__${MCP_SERVER_NAME}__${n}`).join(',')
-export const DISALLOWED_TOOLS = 'Bash,WebFetch,WebSearch,Task,NotebookEdit'
+// PowerShell is the shell tool on Windows without Git Bash; unknown names are accepted
+// (checked on Claude Code 2.1.282), so the list is the same everywhere.
+export const DISALLOWED_TOOLS = 'Bash,PowerShell,WebFetch,WebSearch,Task,NotebookEdit'
 /** Claude Code aborts MCP calls after ~60 s by default; optimize_ask waits for the user. */
 export const MCP_TOOL_TIMEOUT_MS = '86400000'
+
+const PROMPT_FILE = 'system-prompt.md'
+
+/**
+ * Folder for the system prompt file of a run, outside the profile (and so outside `--add-dir`).
+ * Windows caps a command line at 32K characters, too short for the prompt as an argument.
+ */
+export const promptDir = (runId: string, tmp: string = tmpdir()): string =>
+  join(tmp, `claudedeck-${runId}`)
 
 /** Profile entries ClaudeDeck snapshots before a run and restores on revert. */
 export const SNAPSHOT_ITEMS = [
@@ -68,20 +84,33 @@ export const optimizeWorkspace = (configDir: string): string =>
 
 export const backupsDir = (configDir: string): string => join(configDir, 'claudedeck', 'backups')
 
+const settingsFile = (configDir: string): string => join(configDir, 'settings.json')
+
 /** ISO time usable in a folder name. */
 const stamp = (at: number): string => new Date(at).toISOString().replace(/:/g, '-')
 
 const clip = (value: string, max: number): string =>
   value.length > max ? `${value.slice(0, max - 3)}...` : value
 
-/** Arguments for `claude`; the token only travels in the env (`${CLAUDEDECK_MCP_TOKEN}`). */
+const FINISH_EXIT_GRACE_MS = 60_000
+
+/**
+ * App-managed files under `claudedeck/` that Claude may read but never edit: the statusline
+ * scripts run on every prompt, so editing them would run code later. Deny always wins over
+ * allow in Claude Code and a rule cannot carve out an exception, so the files are listed one by
+ * one; `claudedeck/instructions/` (edited by the run) and `claudedeck/workspace/` stay open.
+ */
+export const APP_MANAGED_FILES = [
+  'claudedeck/guidelines.md',
+  'claudedeck/backups/**',
+  ...APP_MANAGED_USAGE_FILES.map((name) => `claudedeck/${name}`)
+]
+
 /**
  * The profile is an added directory, so it would be fully readable and editable. These rules
  * (verified on Claude Code 2.1.282: Read/Edit path rules, Edit covers every editing tool) keep
  * credentials, transcripts and app-managed files out of reach.
  */
-const FINISH_EXIT_GRACE_MS = 60_000
-
 export function profileDenyRules(
   configDir: string,
   rulePath: (abs: string) => string = platform.permissionRulePath
@@ -95,23 +124,27 @@ export function profileDenyRules(
     'sessions/**',
     'history.jsonl'
   ]
-  const readOnly = ['plugins/**', 'claudedeck/backups/**', 'claudedeck/guidelines.md']
+  const readOnly = ['plugins/**', ...APP_MANAGED_FILES]
   return [
     ...private_.flatMap((rel) => [`Read(${at(rel)})`, `Edit(${at(rel)})`]),
     ...readOnly.map((rel) => `Edit(${at(rel)})`)
   ]
 }
 
+/** Arguments for `claude`; the token only travels in the env (`${CLAUDEDECK_MCP_TOKEN}`). */
 export function buildClaudeArgs(opts: {
   prompt: string
   configDir: string
   mcpUrl: string
+  /** When set, the prompt is read from this file instead of the command line. */
+  promptFile?: string
 }): string[] {
   return [
     '-p',
     INITIAL_MESSAGE,
-    '--append-system-prompt',
-    opts.prompt,
+    ...(opts.promptFile
+      ? ['--append-system-prompt-file', opts.promptFile]
+      : ['--append-system-prompt', opts.prompt]),
     '--add-dir',
     opts.configDir,
     '--permission-mode',
@@ -197,7 +230,7 @@ function freeDir(base: string): string {
 export async function snapshotProfile(
   configDir: string,
   backupDir: string,
-  copy: CopyRunner = cloneCopy
+  copy: CopyRunner = platform.copyRunner
 ): Promise<string[]> {
   await mkdir(backupDir, { recursive: true })
   const copied: string[] = []
@@ -206,7 +239,7 @@ export async function snapshotProfile(
     if (!existsSync(src)) continue
     const dest = join(backupDir, item)
     await mkdir(dirname(dest), { recursive: true })
-    await copyEntry(src, dest, false, copy)
+    await copyEntry(src, dest, false, copy, [configDir])
     copied.push(item)
   }
   return copied
@@ -220,8 +253,9 @@ export async function restoreSnapshot(
   configDir: string,
   backupDir: string,
   revertedDir: string,
-  copy: CopyRunner = cloneCopy
+  copy: CopyRunner = platform.copyRunner
 ): Promise<void> {
+  const rename = renameWithRetryAsync(platform.os)
   await mkdir(revertedDir, { recursive: true })
   for (const item of SNAPSHOT_ITEMS) {
     const current = join(configDir, item)
@@ -235,7 +269,7 @@ export async function restoreSnapshot(
     if (!existsSync(saved)) continue
     const dest = join(configDir, item)
     await mkdir(dirname(dest), { recursive: true })
-    await copyEntry(saved, dest, false, copy)
+    await copyEntry(saved, dest, false, copy, [configDir])
   }
 }
 
@@ -260,6 +294,12 @@ export interface OptimizeManagerDeps {
   copy?: CopyRunner
   now?: () => number
   newId?: () => string
+  /** Defaults to optimizeSupported(process.platform). */
+  supported?: boolean
+  /** Decides how the prompt is passed; defaults to the running OS. */
+  os?: OsName
+  /** Parent of the per-run prompt folder; defaults to the OS temp dir. */
+  tmpDir?: string
 }
 
 interface Run {
@@ -275,6 +315,13 @@ interface Run {
   stderrTail: string
   result: { isError: boolean; text: string } | null
   killTimer: NodeJS.Timeout | null
+  /** Temp folder of the prompt file (Windows), removed when the run ends. */
+  promptDir: string | null
+  /**
+   * settings.json text right before Claude started (null: no file); undefined until then.
+   * Protected keys are put back to it when the run ends.
+   */
+  settingsBefore?: string | null
 }
 
 const idleState = (accountId: string): OptimizeState => ({
@@ -358,6 +405,8 @@ export class OptimizeManager {
   }
 
   async start(accountId: string): Promise<OptimizeState> {
+    if (!(this.deps.supported ?? optimizeSupported(process.platform)))
+      throw new DomainError('UNSUPPORTED')
     const account = this.deps.account(accountId)
     const previous = this.runs.get(accountId)
     if (previous && ACTIVE.has(previous.state.status)) throw new DomainError('INVALID')
@@ -375,7 +424,8 @@ export class OptimizeManager {
       skippingLine: false,
       stderrTail: '',
       result: null,
-      killTimer: null
+      killTimer: null,
+      promptDir: null
     }
     this.runs.set(accountId, run)
 
@@ -395,14 +445,20 @@ export class OptimizeManager {
       await snapshotProfile(account.configDir, backupDir, this.deps.copy)
       run.state.backupDir = backupDir
       const workspace = optimizeWorkspace(account.configDir)
-      rmSync(workspace, { recursive: true, force: true })
+      platform.rmWithRetry(workspace, { recursive: true, force: true })
       mkdirSync(workspace, { recursive: true })
       const args = buildClaudeArgs({
         prompt: this.deps.prompt,
         configDir: account.configDir,
-        mcpUrl
+        mcpUrl,
+        promptFile: this.writePromptFile(run)
       })
-      if (run.state.status !== 'starting') return copyState(run.state)
+      // Cancelled (or app quit) during the awaits above: nothing was started.
+      if (run.state.status !== 'starting') {
+        this.removePromptDir(run)
+        return copyState(run.state)
+      }
+      run.settingsBefore = readSettingsText(settingsFile(account.configDir))
       const launch = platform.claudeLaunch(account.configDir, args, base)
       const token = this.deps.tokens.issue({ kind: 'optimize', runId: run.id, accountId })
       child = this.spawnFn(launch.file, launch.args, {
@@ -413,6 +469,7 @@ export class OptimizeManager {
       })
     } catch (error) {
       this.deps.tokens.revoke(run.id)
+      this.removePromptDir(run)
       if (this.runs.get(accountId) === run) {
         if (previous) this.runs.set(accountId, previous)
         else this.runs.delete(accountId)
@@ -547,6 +604,28 @@ export class OptimizeManager {
     pending?.resolve(CANCEL_REPLY)
   }
 
+  /** Writes the prompt to a file on Windows; undefined elsewhere (passed inline). */
+  private writePromptFile(run: Run): string | undefined {
+    if ((this.deps.os ?? platform.os) !== 'win32') return undefined
+    const dir = promptDir(run.id, this.deps.tmpDir)
+    run.promptDir = dir
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    const file = join(dir, PROMPT_FILE)
+    writeFileSync(file, this.deps.prompt, { encoding: 'utf8', mode: 0o600 })
+    return file
+  }
+
+  private removePromptDir(run: Run): void {
+    const dir = run.promptDir
+    if (!dir) return
+    run.promptDir = null
+    try {
+      platform.rmWithRetry(dir, { recursive: true, force: true })
+    } catch (error) {
+      console.warn('[optimize] could not remove the prompt folder', run.id, error)
+    }
+  }
+
   private prepareProfile(account: Account): void {
     mkdirSync(account.configDir, { recursive: true, mode: 0o700 })
     try {
@@ -620,8 +699,10 @@ export class OptimizeManager {
     if (run.exited) return
     run.exited = true
     if (run.killTimer) clearTimeout(run.killTimer)
+    this.removePromptDir(run)
     this.deps.tokens.revoke(run.id)
     this.releasePending(run)
+    const restored = this.guardSettings(run)
     if (ACTIVE.has(run.state.status)) {
       const at = this.now()
       if (run.result?.isError || code !== 0) {
@@ -643,8 +724,38 @@ export class OptimizeManager {
       }
       run.state.finishedAt = at
     }
+    if (restored.length > 0) this.reportRestored(run, restored)
     this.emit(run)
     console.info('[optimize] exited', run.state.accountId, run.id, run.state.status)
+  }
+
+  /** Puts protected settings.json keys back once Claude can no longer write. */
+  private guardSettings(run: Run): string[] {
+    const before = run.settingsBefore
+    if (before === undefined) return []
+    try {
+      const restored = restoreProtectedSettings(settingsFile(run.configDir), before)
+      if (restored.length > 0) {
+        console.warn('[optimize] restored protected settings', run.id, restored.join(', '))
+      }
+      return restored
+    } catch (error) {
+      console.warn('[optimize] could not check protected settings', run.id, error)
+      return []
+    }
+  }
+
+  /** Adds the restored keys to the finish summary's change list, or as a status line. */
+  private reportRestored(run: Run, keys: string[]): void {
+    const note = `ClaudeDeck undid changes to protected settings: ${keys.join(', ')}`
+    const events = run.state.events
+    const index = events.findLastIndex((e) => e.type === 'finish')
+    const finish = events[index]
+    if (finish?.type === 'finish') {
+      events[index] = { ...finish, changes: [...finish.changes, note] }
+    } else {
+      this.push(run, { type: 'status', message: note, at: this.now() })
+    }
   }
 
   /** Appends an event; past the cap the oldest activity goes first, then the oldest event. */

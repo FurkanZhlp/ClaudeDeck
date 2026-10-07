@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { AppState } from '../../shared/types'
 import { JsonStore } from '../state/jsonStore'
 import { emptyState, Repository } from '../state/repository'
-import { startMcpServer, type RunningMcpServer } from './server'
+import { canUseRandomPort, startMcpServer, type RunningMcpServer } from './server'
 import { createSessionTokens, type SessionScope, type SessionTokens } from './sessionTokens'
 import { createOptimizeTools } from './optimizeTools'
 import { createTools, type Tools } from './tools'
@@ -206,5 +206,20 @@ describe('MCP server', () => {
       tokens.revoke('run1')
       await both.stop()
     }
+  })
+})
+
+describe('canUseRandomPort', () => {
+  const error = (code: string): NodeJS.ErrnoException => Object.assign(new Error(code), { code })
+
+  it('falls back when the preferred port is taken or reserved', () => {
+    expect(canUseRandomPort(error('EADDRINUSE'), 47821)).toBe(true)
+    expect(canUseRandomPort(error('EACCES'), 47821)).toBe(true)
+  })
+
+  it('rethrows other errors and failures of a random port', () => {
+    expect(canUseRandomPort(error('EADDRNOTAVAIL'), 47821)).toBe(false)
+    expect(canUseRandomPort(error('EACCES'), 0)).toBe(false)
+    expect(canUseRandomPort(null, 47821)).toBe(false)
   })
 })

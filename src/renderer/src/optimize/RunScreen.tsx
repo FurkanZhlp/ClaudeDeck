@@ -103,7 +103,7 @@ export function RunScreen({ run, onDone, onSkip }: Props): React.JSX.Element {
         aria-label={t('onboarding.optimize.title')}
         className="animate-screen-in fixed inset-0 z-[75] flex flex-col bg-bg"
       >
-        <div className="drag flex h-11 shrink-0 items-center justify-end px-3">
+        <div className="drag flex h-11 shrink-0 items-center justify-end pl-3 pr-[calc(var(--titlebar-inset-right)_+_0.75rem)]">
           {close && (
             <button
               type="button"

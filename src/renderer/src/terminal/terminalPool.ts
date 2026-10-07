@@ -2,6 +2,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
+import { isWindows, primaryModifier } from '../platform'
 
 /** Her oturumun xterm örneği burada yaşar; görünüm değişince yalnızca DOM'a takılıp çıkarılır. */
 interface Entry {
@@ -26,7 +27,7 @@ const entries = (globalPool.__claudedeckTerminals ??= new Map<string, Entry>())
 
 function create(id: string): Entry {
   const term = new Terminal({
-    fontFamily: '"SF Mono", Menlo, Monaco, monospace',
+    fontFamily: '"SF Mono", Menlo, Monaco, "Cascadia Mono", Consolas, monospace',
     fontSize: 13,
     lineHeight: 1.2,
     cursorBlink: true,
@@ -37,12 +38,13 @@ function create(id: string): Entry {
   })
   const fit = new FitAddon()
   term.loadAddon(fit)
-  // Yanlışlıkla tıklamayı önlemek için linkler yalnızca Cmd+tık ile açılır (iTerm/Terminal gibi).
+  // Yanlışlıkla tıklamayı önlemek için linkler yalnızca Cmd+tık (Windows'ta Ctrl+tık) ile açılır.
   term.loadAddon(
     new WebLinksAddon((event, uri) => {
-      if (event.metaKey) window.open(uri)
+      if (primaryModifier(event)) window.open(uri)
     })
   )
+  if (isWindows) term.attachCustomKeyEventHandler((event) => windowsClipboardKeys(term, event))
   term.onData((data) => window.api.pty.write(id, data))
   const host = document.createElement('div')
   host.style.width = '100%'
@@ -50,6 +52,27 @@ function create(id: string): Entry {
   const entry: Entry = { term, fit, host, opened: false, pending: null }
   entries.set(id, entry)
   return entry
+}
+
+/**
+ * Windows terminal clipboard keys (there is no app menu to provide them): Ctrl+C copies when text
+ * is selected and otherwise reaches the program as SIGINT; Ctrl+V pastes; Ctrl+Shift+C always
+ * copies and Ctrl+Shift+V pastes. Returns false for keys handled here so xterm does not also send them.
+ */
+function windowsClipboardKeys(term: Terminal, event: KeyboardEvent): boolean {
+  if (event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey) return true
+  const key = event.key.toLowerCase()
+  if (key === 'c' && (event.shiftKey || term.hasSelection())) {
+    event.preventDefault()
+    const text = term.getSelection()
+    if (text) void navigator.clipboard.writeText(text).catch(() => undefined)
+    term.clearSelection()
+    return false
+  }
+  // Ctrl+V and Ctrl+Shift+V: let the browser's native paste reach xterm's textarea (xterm pastes
+  // with bracketed paste support), instead of xterm sending ^V. No clipboard read permission.
+  if (key === 'v') return false
+  return true
 }
 
 function ensure(id: string): Entry {

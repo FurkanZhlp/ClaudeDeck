@@ -28,7 +28,7 @@ export function SessionTabs({ projectId }: { projectId: string }): React.JSX.Ele
 
   return (
     <div
-      className="drag flex h-11 shrink-0 items-end gap-2 border-b bg-panel px-2 transition-colors duration-300"
+      className="drag flex h-11 shrink-0 items-end gap-2 border-b bg-panel pl-2 pr-[calc(var(--titlebar-inset-right)_+_0.5rem)] transition-colors duration-300"
       style={{ borderBottomColor: 'color-mix(in srgb, var(--account) 45%, transparent)' }}
     >
       <div role="tablist" className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto">

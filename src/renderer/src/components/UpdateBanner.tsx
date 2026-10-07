@@ -10,7 +10,7 @@ export function UpdateBanner(): React.JSX.Element | null {
   if (!update?.available || !update.latestVersion) return null
 
   return (
-    <div className="flex items-center gap-3 border-b border-border bg-elevated px-4 py-2">
+    <div className="flex items-center gap-3 border-b border-border bg-elevated py-2 pl-4 pr-[calc(var(--titlebar-inset-right)_+_1rem)]">
       <span className="flex-1">
         {t('update.available', { version: update.latestVersion })}
         <span className="ml-2 text-muted">

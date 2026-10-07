@@ -53,6 +53,11 @@ interface Deps {
   onUsageSettingsChange: () => void
   /** An account was created, renamed or removed (menu bar title and tooltip follow). */
   onAccountsChange: () => void
+  /**
+   * Closes a removed account's usage watcher and drops its usage. Runs before its folder is
+   * deleted: an open watch handle blocks rm on Windows.
+   */
+  forgetUsage: (accountId: string) => void
   /** Applies the login item setting to macOS (packaged app only). */
   applyLaunchAtLogin: (enabled: boolean) => void
 }
@@ -82,6 +87,7 @@ export function registerIpc({
   cancelOptimize,
   onUsageSettingsChange,
   onAccountsChange,
+  forgetUsage,
   applyLaunchAtLogin
 }: Deps): void {
   const { handle, trusted } = ipcTools
@@ -107,6 +113,7 @@ export function registerIpc({
     if (ptys.hasAccount(id)) throw new DomainError('ACCOUNT_RUNNING')
     cancelOptimize(id)
     const state = repo.removeAccount(id)
+    forgetUsage(id)
     onAccountsChange()
     if (deleteFiles === true) {
       try {
@@ -219,35 +226,46 @@ export function registerIpc({
         })
       }
 
-      let launch = platform.shellLaunch(account.configDir, base)
-      if (session.kind === 'claude') {
-        let claudeArgs: string[]
-        const stored = session.claudeSessionId
-        if (resume === true && stored && hasConversation(account.configDir, project.path, stored)) {
-          claudeArgs = ['--resume', stored]
-        } else if (resume === true && stored) {
-          // Nothing was ever sent in this tab, so there is no transcript; start it under the same id.
-          claudeArgs = ['--session-id', stored]
-        } else {
-          const claudeSessionId = randomUUID()
-          repo.setClaudeSessionId(session.id, claudeSessionId)
-          claudeArgs = ['--session-id', claudeSessionId]
+      let started = false
+      try {
+        let launch = platform.shellLaunch(account.configDir, base)
+        if (session.kind === 'claude') {
+          let claudeArgs: string[]
+          const stored = session.claudeSessionId
+          if (
+            resume === true &&
+            stored &&
+            hasConversation(account.configDir, project.path, stored)
+          ) {
+            claudeArgs = ['--resume', stored]
+          } else if (resume === true && stored) {
+            // Nothing was ever sent in this tab, so there is no transcript; start it under the same id.
+            claudeArgs = ['--session-id', stored]
+          } else {
+            const claudeSessionId = randomUUID()
+            repo.setClaudeSessionId(session.id, claudeSessionId)
+            claudeArgs = ['--session-id', claudeSessionId]
+          }
+          launch = platform.claudeLaunch(account.configDir, claudeArgs, base)
         }
-        launch = platform.claudeLaunch(account.configDir, claudeArgs, base)
+        started = ptys.spawn(
+          sessionId,
+          {
+            file: launch.file,
+            args: launch.args,
+            cwd: project.path,
+            env: mcpToken ? { ...launch.env, [MCP_TOKEN_ENV]: mcpToken } : launch.env,
+            cols,
+            rows,
+            accountId: account.id
+          },
+          ticket
+        )
+      } finally {
+        // The tab never started (launch error, or closed while starting): its MCP token must not
+        // outlive it. A token is per tab, so this only drops the one issued above.
+        if (!started && mcpToken) revokeMcpTokens([session.id])
       }
-      ptys.spawn(
-        sessionId,
-        {
-          file: launch.file,
-          args: launch.args,
-          cwd: project.path,
-          env: mcpToken ? { ...launch.env, [MCP_TOKEN_ENV]: mcpToken } : launch.env,
-          cols,
-          rows,
-          accountId: account.id
-        },
-        ticket
-      )
       return { accountId: account.id }
     }
   )

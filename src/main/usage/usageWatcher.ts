@@ -42,6 +42,11 @@ export interface UsageService {
   prepareAccount(account: Account): void
   /** Stops watchers and forgets usage of accounts that no longer exist. */
   sync(accounts: Account[]): void
+  /**
+   * Closes the account's watcher and drops its usage. Call before moving or deleting the
+   * account folder: an open watch handle blocks rename and rm on Windows.
+   */
+  forget(accountId: string): void
   /** Takes a reading from another source (the poller); the newest `updatedAt` wins. */
   ingest(usage: AccountUsage): void
   list(): AccountUsage[]
@@ -133,6 +138,13 @@ export function createUsageService({
     store.retain(ids)
   }
 
+  const forget = (accountId: string): void => {
+    const entry = watches.get(accountId)
+    if (entry) stop(entry)
+    watches.delete(accountId)
+    store.retain(store.list().flatMap((u) => (u.accountId === accountId ? [] : [u.accountId])))
+  }
+
   return {
     prepareAccount(account) {
       if (disposed) return
@@ -157,6 +169,7 @@ export function createUsageService({
       read(entry, true)
     },
     sync,
+    forget,
     ingest(usage) {
       if (disposed) return
       if (!repo.get().accounts.some((a) => a.id === usage.accountId)) return

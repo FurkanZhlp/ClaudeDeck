@@ -96,7 +96,10 @@
     "metricBoth": "Both",
     "trayAccount": "Menu bar account",
     "trayAccountAuto": "Closest to limit",
-    "trayAccountSelected": "Selected account"
+    "trayAccountSelected": "Selected account",
+    "about": "About",
+    "version": "ClaudeDeck v{{version}}",
+    "checkUpdates": "Check for updates"
   },
   "login": {
     "title": "Sign in for {{name}}",
@@ -131,7 +134,8 @@
     "INVALID": "Missing or invalid information.",
     "PATH_MISSING": "Project folder not found.",
     "CLAUDE_NOT_FOUND": "The claude command was not found. Install Claude Code: curl -fsSL https://claude.ai/install.sh | bash",
-    "UNKNOWN": "An unexpected error occurred."
+    "UNKNOWN": "An unexpected error occurred.",
+    "UNSUPPORTED": "This isn't supported on Windows yet."
   },
   "menu": {
     "about": "About ClaudeDeck",
@@ -407,7 +411,8 @@
     "badge": {
       "running": "Optimizing the profile",
       "waiting": "Claude is waiting for your answer"
-    }
+    },
+    "unsupported": "Coming soon on Windows."
   },
   "usage": {
     "title": "Usage",
@@ -484,5 +489,31 @@
     "open": "Open ClaudeDeck",
     "quit": "Quit",
     "noAccounts": "Add an account in ClaudeDeck to see its usage here."
+  },
+  "platformCopy": {
+    "win32": {
+      "errors": {
+        "CLAUDE_NOT_FOUND": "The claude command was not found. Install Claude Code in PowerShell: irm https://claude.ai/install.ps1 | iex"
+      },
+      "settings": {
+        "launchAtLoginHint": "Starts ClaudeDeck when you sign in to Windows."
+      },
+      "notes": {
+        "reveal": "Show in File Explorer"
+      },
+      "onboarding": {
+        "import": {
+          "globalHint": "Your settings in %USERPROFILE%\\.claude"
+        },
+        "done": {
+          "later": "You can run the import again later from the account row in Settings."
+        }
+      },
+      "optimize": {
+        "proposal": {
+          "shortcut": "Ctrl+Enter sends"
+        }
+      }
+    }
   }
 }

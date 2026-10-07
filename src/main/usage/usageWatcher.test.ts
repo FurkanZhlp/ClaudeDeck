@@ -153,6 +153,51 @@ describe('createUsageService', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
+  it('sync closes the watchers of accounts that are gone', async () => {
+    const base = root()
+    const a = account(base, 'a')
+    const send = vi.fn()
+    service = createUsageService({
+      repo: { get: () => ({ accounts: [a] }) },
+      userDataDir: base,
+      send
+    })
+    service.prepareAccount(a)
+    await settle()
+    service.sync([])
+    writeReading(a.configDir, reading(20))
+    await sleep(400)
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('forget closes one watcher and drops its usage, keeping the others', async () => {
+    const base = root()
+    const a = account(base, 'a')
+    const b = account(base, 'b')
+    const send = vi.fn()
+    service = createUsageService({
+      repo: { get: () => ({ accounts: [a, b] }) },
+      userDataDir: base,
+      send
+    })
+    service.prepareAccount(a)
+    service.prepareAccount(b)
+    await settle()
+    writeReading(a.configDir, reading(10))
+    writeReading(b.configDir, reading(11))
+    await vi.waitFor(() => expect(service?.list()).toHaveLength(2), { timeout: 3000 })
+
+    service.forget('a')
+    expect(service.list().map((u) => u.accountId)).toEqual(['b'])
+    send.mockClear()
+    // The folder can move once the handle is closed (Windows refuses while it is open).
+    renameSync(join(a.configDir, 'claudedeck'), join(a.configDir, 'moved'))
+    writeReading(b.configDir, reading(12))
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1), { timeout: 3000 })
+    expect(send.mock.calls[0][1].accountId).toBe('b')
+    service.forget('missing')
+  })
+
   it('ingests polled readings, newest first, and only for known accounts', () => {
     const base = root()
     const a = account(base, 'a')

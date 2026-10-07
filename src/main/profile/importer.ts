@@ -1,21 +1,18 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, readdirSync, statSync, type Stats } from 'node:fs'
 import {
-  cp,
   lstat,
   mkdir,
   readFile,
   readdir,
   readlink,
   realpath,
-  rename,
-  rm,
   stat,
-  symlink,
   unlink,
   writeFile
 } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import * as nodePath from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, type PlatformPath } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type {
   ProfileCategory,
@@ -23,8 +20,16 @@ import type {
   ProfileDiffEntry,
   ProfileImportResult
 } from '../../shared/types'
-import { cloneCopy } from '../platform/fs'
-import type { CopyRunner } from '../platform/types'
+import { platform } from '../platform'
+import {
+  cloneCopy,
+  nodeCopy,
+  renameWithRetryAsync,
+  rmWithRetryAsync,
+  safeSymlink
+} from '../platform/fs'
+import { isWithin, pathKey, samePath, splitPath, stripPathPrefix } from '../platform/paths'
+import type { CopyRunner, OsName } from '../platform/types'
 import { GUIDELINES_IMPORT_LINE, withGuidelinesImport } from './guidelines'
 
 /** Source entry (relative to the config dir) for each importable category. */
@@ -43,7 +48,9 @@ export const PROFILE_CATEGORIES = Object.keys(CATEGORY_ENTRIES) as ProfileCatego
 export const isProfileCategory = (value: unknown): value is ProfileCategory =>
   typeof value === 'string' && Object.hasOwn(CATEGORY_ENTRIES, value)
 
-const FINDER_JUNK = '.DS_Store'
+/** File manager metadata (Finder, Explorer); never counted or compared. Lower case. */
+const JUNK_FILES = new Set(['.ds_store', 'thumbs.db', 'desktop.ini'])
+const isJunk = (name: string): boolean => JUNK_FILES.has(name.toLowerCase())
 const TMP_SUFFIX = '.claudedeck-tmp'
 const SETTINGS_MODE = 0o600
 const PLUGIN_INDEX_FILES = ['installed_plugins.json', 'known_marketplaces.json']
@@ -108,11 +115,16 @@ async function lstatAsync(path: string): Promise<Stats | null> {
   }
 }
 
-const within = (path: string, root: string): boolean => path === root || path.startsWith(root + sep)
+// Windows: case-insensitive, either separator.
+const within = (path: string, root: string): boolean => isWithin(path, root)
 
-/** Top-level entries of a folder, ignoring dotfiles such as .DS_Store. */
+const rename = renameWithRetryAsync(platform.os)
+const rm = rmWithRetryAsync(platform.os)
+const symlink = safeSymlink(platform.os)
+
+/** Top-level entries of a folder, ignoring dotfiles such as .DS_Store and Explorer files. */
 function visibleEntries(dir: string): string[] {
-  return readdirSync(dir).filter((name) => !name.startsWith('.'))
+  return readdirSync(dir).filter((name) => !name.startsWith('.') && !isJunk(name))
 }
 
 export function summarizeSource(sourceDir: string): ProfileCategorySummary[] {
@@ -136,6 +148,8 @@ interface Relocation {
   roots: Array<[from: string, to: string]>
   /** Source profile roots (resolved and as given) mapped to the target profile. */
   profileRoots: Array<[from: string, to: string]>
+  /** Folders a link may lead into when it has to become a copy (Windows without symlinks). */
+  linkRoots: string[]
 }
 
 async function relocationFor(source: string, target: string, entry: string): Promise<Relocation> {
@@ -149,7 +163,8 @@ async function relocationFor(source: string, target: string, entry: string): Pro
   return {
     realEntry,
     roots: [[realEntry, destEntry], [srcEntry, destEntry], ...profileRoots],
-    profileRoots
+    profileRoots,
+    linkRoots: [source, target]
   }
 }
 
@@ -173,7 +188,7 @@ async function relocateLinks(dir: string, relocation: Relocation): Promise<void>
       const next = relocateLink(value, rel, relocation)
       if (next !== value) {
         await unlink(abs)
-        await symlink(next, abs)
+        await symlink(next, abs, relocation.linkRoots)
       }
     } else if (stats.isDirectory()) {
       for (const name of await readdir(abs)) await walk(join(abs, name), join(rel, name))
@@ -207,7 +222,7 @@ async function listFiles(root: string, follow: boolean): Promise<Map<string, Fil
         chain = [...ancestors, real]
       }
       for (const name of await readdir(abs)) {
-        if (name !== FINDER_JUNK) await walk(join(abs, name), rel ? join(rel, name) : name, chain)
+        if (!isJunk(name)) await walk(join(abs, name), rel ? join(rel, name) : name, chain)
       }
     } else if (stats.isFile() || stats.isSymbolicLink()) {
       files.set(rel, {
@@ -341,26 +356,24 @@ export { cloneCopy, type CopyRunner }
  * Copies `src` to `dest` (which must not exist), keeping timestamps. The source is resolved first
  * so a symlinked folder is copied as a real folder; with `dereference` nested symlinks are copied
  * as files too, so later edits in the profile never write through a link into the source.
- * Without it links are copied verbatim (relative links stay relative).
+ * Without it links are copied verbatim (relative links stay relative). `roots`: see CopyRunner.
+ * A failed clone falls back to a plain Node copy.
  */
 export async function copyEntry(
   src: string,
   dest: string,
   dereference: boolean,
-  run: CopyRunner = cloneCopy
+  run: CopyRunner = platform.copyRunner,
+  roots: readonly string[] = []
 ): Promise<void> {
   const real = await realpath(src)
   try {
-    await run(real, dest, dereference)
-  } catch {
+    await run(real, dest, dereference, roots)
+  } catch (error) {
+    // The plain copy is already the fallback; running it again would repeat the same failure.
+    if (run === nodeCopy) throw error
     await rm(dest, { recursive: true, force: true })
-    await cp(real, dest, {
-      recursive: true,
-      dereference,
-      verbatimSymlinks: !dereference,
-      preserveTimestamps: true,
-      force: true
-    })
+    await nodeCopy(real, dest, dereference, roots)
   }
 }
 
@@ -412,12 +425,25 @@ export function mergeSettings(target: Json, source: Json): Json {
   return merged
 }
 
-/** Deep-rewrites string values under `from` (plus a separator) to live under `to`. */
-export function rewritePaths(value: unknown, from: string, to: string): unknown {
-  const prefix = from.endsWith(sep) ? from : from + sep
-  const target = to.endsWith(sep) ? to : to + sep
+/**
+ * Deep-rewrites string values under `from` (plus a separator) to live under `to`. With
+ * `path.win32` the prefix matches case-insensitively and with either separator.
+ */
+export function rewritePaths(
+  value: unknown,
+  from: string,
+  to: string,
+  p: PlatformPath = nodePath
+): unknown {
+  const endsWithSep = (v: string): boolean =>
+    v.endsWith(p.sep) || (p.sep === '\\' && v.endsWith('/'))
+  const prefix = endsWithSep(from) ? from : from + p.sep
+  const target = endsWithSep(to) ? to : to + p.sep
   const walk = (v: unknown): unknown => {
-    if (typeof v === 'string') return v.startsWith(prefix) ? target + v.slice(prefix.length) : v
+    if (typeof v === 'string') {
+      const rest = stripPathPrefix(v, prefix, p)
+      return rest === null ? v : target + rest
+    }
     if (Array.isArray(v)) return v.map(walk)
     if (isObject(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]))
     return v
@@ -455,10 +481,44 @@ async function rewritePluginIndexes(
 }
 
 /**
+ * Whether an `@import` reference may be followed at all. Never absolute or home-relative. On
+ * Windows a segment must not hold `:` (drive or alternate data stream) or `~` (8.3 short name),
+ * nor end with a dot or space (trimmed by Win32): each would let a name pass the checks below
+ * while opening another file.
+ */
+export function importRefAllowed(ref: string, os: OsName = platform.os): boolean {
+  const p = os === 'win32' ? nodePath.win32 : nodePath.posix
+  if (!ref || p.isAbsolute(ref) || ref.startsWith('~')) return false
+  if (os !== 'win32') return true
+  return splitPath(ref, p).every(
+    (segment) =>
+      segment === '.' ||
+      segment === '..' ||
+      !(/[:~]/.test(segment) || segment.endsWith('.') || segment.endsWith(' '))
+  )
+}
+
+/** A profile-relative path an import may not copy (private, app-managed or a category entry). */
+function deniedImport(rel: string): boolean {
+  const top = splitPath(rel)[0] ?? ''
+  // Windows file names ignore case: `@Settings.json` is settings.json there.
+  return (
+    top.startsWith('.') ||
+    DENIED_IMPORT_ROOTS.has(pathKey(top)) ||
+    samePath(rel, CATEGORY_ENTRIES.instructions) ||
+    samePath(rel, GUIDELINES_FILE) ||
+    within(rel, join('claudedeck', 'backups'))
+  )
+}
+
+/**
  * Relative files the source CLAUDE.md pulls in with `@path` lines, so they can travel with it.
  * Only existing files inside the source profile are returned, never app-managed or private ones.
+ * Both the written path and the resolved one (links followed) must pass, and the resolved file
+ * must stay inside the resolved source profile.
  */
 async function instructionImports(source: string, text: string): Promise<string[]> {
+  const realSource = await realpath(source)
   const found = new Set<string>()
   let fenced = false
   for (const line of text.split(/\r?\n/)) {
@@ -466,20 +526,20 @@ async function instructionImports(source: string, text: string): Promise<string[
     if (trimmed.startsWith('```')) fenced = !fenced
     if (fenced || !trimmed.startsWith('@')) continue
     const ref = trimmed.slice(1).split(/\s+/, 1)[0] ?? ''
-    if (!ref || isAbsolute(ref) || ref.startsWith('~')) continue
+    if (!importRefAllowed(ref)) continue
     const abs = resolve(source, ref)
-    if (!within(abs, source) || abs === source) continue
+    if (!within(abs, source) || samePath(abs, source)) continue
     const rel = relative(source, abs)
-    const top = rel.split(sep, 1)[0]
-    if (
-      top.startsWith('.') ||
-      DENIED_IMPORT_ROOTS.has(top) ||
-      rel === CATEGORY_ENTRIES.instructions ||
-      rel === GUIDELINES_FILE ||
-      within(rel, join('claudedeck', 'backups'))
-    )
+    if (deniedImport(rel)) continue
+    let real: string
+    try {
+      real = await realpath(abs)
+    } catch {
       continue
-    if ((await statAsync(abs))?.isFile()) found.add(rel)
+    }
+    if (!within(real, realSource) || samePath(real, realSource)) continue
+    if (deniedImport(relative(realSource, real))) continue
+    if ((await statAsync(real))?.isFile()) found.add(rel)
   }
   return [...found]
 }
@@ -505,11 +565,11 @@ export async function importProfile(
   targetDir: string,
   categories: ProfileCategory[],
   now: Date = new Date(),
-  run: CopyRunner = cloneCopy
+  run: CopyRunner = platform.copyRunner
 ): Promise<ProfileImportResult> {
   const source = resolve(sourceDir)
   const target = resolve(targetDir)
-  if (source === target || within(target, source) || within(source, target)) {
+  if (samePath(source, target) || within(target, source) || within(source, target)) {
     throw new Error('source and target profiles overlap')
   }
   const chosen = PROFILE_CATEGORIES.filter((c) => categories.includes(c))
@@ -587,7 +647,7 @@ export async function importProfile(
         const follow = followsLinks(category)
         const relocation = follow ? null : await relocationFor(source, target, entry)
         await replaceItem(entry, async (tmp) => {
-          await copyEntry(src, tmp, follow, run)
+          await copyEntry(src, tmp, follow, run, [source])
           if (!relocation) return
           await relocateLinks(tmp, relocation)
           if (category === 'plugins') await rewritePluginIndexes(tmp, relocation.profileRoots)

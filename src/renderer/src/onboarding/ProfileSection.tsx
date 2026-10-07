@@ -1,6 +1,7 @@
 import { Download, FolderOpen, ListChecks, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useOptimizeBadgeState, useOptimizeRun } from '../optimize/optimizeStore'
+import { optimizeSupported } from '../platform'
 import { errorCode, useApp } from '../store'
 import { Button } from '../ui/Button'
 import { useOnboarding } from './onboardingStore'
@@ -30,7 +31,10 @@ export function ProfileSection({ accountId }: { accountId: string }): React.JSX.
           <Download size={14} />
           {t('onboarding.profile.import')}
         </Button>
-        <Button onClick={() => startForAccount(accountId, { startAt: 'optimize' })}>
+        <Button
+          disabled={!optimizeSupported}
+          onClick={() => startForAccount(accountId, { startAt: 'optimize' })}
+        >
           {activity === 'running' ? (
             <Loader2 size={14} className="animate-spin" aria-hidden />
           ) : (
@@ -50,6 +54,7 @@ export function ProfileSection({ accountId }: { accountId: string }): React.JSX.
           {t('onboarding.profile.openFolder')}
         </Button>
       </div>
+      {!optimizeSupported && <p className="text-[12px] text-muted">{t('optimize.unsupported')}</p>}
     </div>
   )
 }

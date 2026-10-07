@@ -8,6 +8,7 @@ import { UsagePanel } from '../usage/UsagePanel'
 import { useApp } from '../store'
 import { SessionIcon, StatusDot } from '../ui/SessionIcon'
 import { sectionTitleClass, tint } from '../ui/styles'
+import { pathSegments } from '../ui/paths'
 
 export function Sidebar(): React.JSX.Element | null {
   const { t } = useTranslation()
@@ -265,8 +266,8 @@ function RailItem({
   )
 }
 
-/** Last two path segments, enough to recognise a project folder. */
+/** Last two path segments, enough to recognise a project folder (either separator). */
 function shortPath(path: string): string {
-  const parts = path.split('/').filter(Boolean)
+  const parts = pathSegments(path)
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path
 }

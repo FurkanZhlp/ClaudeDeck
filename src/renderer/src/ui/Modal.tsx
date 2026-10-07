@@ -33,7 +33,7 @@ export function Modal({
 
   return (
     <div
-      className="no-drag fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
+      className="no-drag fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6 pt-[max(1.5rem,var(--titlebar-inset-top))]"
       onMouseDown={(event) => {
         if (closeOnBackdrop && event.target === event.currentTarget) onClose()
       }}

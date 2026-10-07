@@ -13,6 +13,7 @@ import { Sidebar } from './components/Sidebar'
 import { UpdateBanner } from './components/UpdateBanner'
 import { TooltipLayer } from './ui/TooltipLayer'
 import { Workspace } from './components/Workspace'
+import { isMac } from './platform'
 import { useApp } from './store'
 
 export default function App(): React.JSX.Element {
@@ -50,6 +51,20 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     window.api.app.setSelectedAccount(selectedAccountId)
   }, [selectedAccountId])
+
+  // Windows has no app menu: Ctrl+, opens Settings here (macOS uses the menu's Cmd+,).
+  useEffect(() => {
+    if (isMac) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== ',' || !event.ctrlKey || event.altKey || event.shiftKey) return
+      event.preventDefault()
+      event.stopPropagation()
+      useApp.getState().setSettingsOpen(true)
+    }
+    // Capture phase, so a focused terminal does not receive the key first.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   if (!ready) return <div className="drag h-full" />
 

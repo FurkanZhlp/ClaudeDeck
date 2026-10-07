@@ -5,6 +5,8 @@ export type ErrorCode =
   | 'INVALID'
   | 'PATH_MISSING'
   | 'CLAUDE_NOT_FOUND'
+  /** The feature is not available on this operating system yet (e.g. optimize on Windows). */
+  | 'UNSUPPORTED'
   | 'UNKNOWN'
 
 export class DomainError extends Error {

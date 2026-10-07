@@ -3,7 +3,11 @@ import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Account, Language } from '@shared/types'
 import { ProfileSection } from '../onboarding/ProfileSection'
-import { GeneralSettingsSection, UsageSettingsSection } from './PreferenceSections'
+import {
+  AboutSettingsSection,
+  GeneralSettingsSection,
+  UsageSettingsSection
+} from './PreferenceSections'
 import { useOnboarding } from '../onboarding/onboardingStore'
 import { useApp } from '../store'
 import { AccountDot } from '../ui/AccountDot'
@@ -89,6 +93,8 @@ function SettingsContent(): React.JSX.Element | null {
           <option value="en">English</option>
         </select>
       </section>
+
+      <AboutSettingsSection />
     </Modal>
   )
 }

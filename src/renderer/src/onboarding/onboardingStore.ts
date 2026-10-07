@@ -1,20 +1,18 @@
 import { create } from 'zustand'
 import type { ProfileCategory } from '@shared/types'
+import { optimizeSupported } from '../platform'
 
 export type OnboardingStep = 'welcome' | 'account' | 'signIn' | 'import' | 'optimize' | 'done'
 export type OnboardingMode = 'firstRun' | 'account'
 /** Where an onboarding opened for an existing account begins. */
 export type AccountStartStep = 'signIn' | 'import' | 'optimize'
 
-const FIRST_RUN_STEPS: OnboardingStep[] = [
-  'welcome',
-  'account',
-  'signIn',
-  'import',
-  'optimize',
-  'done'
-]
-const ACCOUNT_STEPS: OnboardingStep[] = ['signIn', 'import', 'optimize', 'done']
+/** Optimize is left out where the main process does not support it (Windows for now). */
+const available = (steps: OnboardingStep[]): OnboardingStep[] =>
+  optimizeSupported ? steps : steps.filter((step) => step !== 'optimize')
+
+const FIRST_RUN_STEPS = available(['welcome', 'account', 'signIn', 'import', 'optimize', 'done'])
+const ACCOUNT_STEPS = available(['signIn', 'import', 'optimize', 'done'])
 
 interface OnboardingStore {
   open: boolean
@@ -61,7 +59,8 @@ export const useOnboarding = create<OnboardingStore>((set, get) => ({
     }),
 
   startForAccount(accountId, options) {
-    const startAt = options?.startAt ?? 'import'
+    const requested = options?.startAt ?? 'import'
+    const startAt = ACCOUNT_STEPS.includes(requested) ? requested : 'import'
     set({
       open: true,
       mode: 'account',

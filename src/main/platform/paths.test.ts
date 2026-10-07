@@ -1,5 +1,13 @@
+import { posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { permissionRulePath } from './paths'
+import {
+  isWithin,
+  pathKey,
+  permissionRulePath,
+  samePath,
+  splitPath,
+  stripPathPrefix
+} from './paths'
 
 describe('permissionRulePath', () => {
   it('prefixes a POSIX absolute path with one more slash', () => {
@@ -26,5 +34,52 @@ describe('permissionRulePath', () => {
     for (const bad of ['\\\\server\\share\\x', '\\\\wsl$\\Ubuntu', 'Users\\me', 'C:rel', '']) {
       expect(() => permissionRulePath(bad, 'win32')).toThrow()
     }
+  })
+})
+
+describe('pathKey / samePath', () => {
+  it('ignores case and separator style on Windows only', () => {
+    expect(pathKey('C:/Users/Me', win32)).toBe('c:\\users\\me')
+    expect(pathKey('/Users/Me', posix)).toBe('/Users/Me')
+    expect(samePath('C:\\Users\\Me', 'c:/users/me/', win32)).toBe(true)
+    expect(samePath('C:\\', 'c:/', win32)).toBe(true)
+    expect(samePath('C:\\a\\..\\b', 'C:\\b', win32)).toBe(true)
+    expect(samePath('/Users/Me', '/users/me', posix)).toBe(false)
+    expect(samePath('/a/b/', '/a/b', posix)).toBe(false)
+  })
+})
+
+describe('stripPathPrefix', () => {
+  it('keeps the original spelling of the rest', () => {
+    expect(stripPathPrefix('C:/Users/Me/X/y', 'c:\\users\\me\\', win32)).toBe('X/y')
+    expect(stripPathPrefix('C:\\Other', 'C:\\Users\\', win32)).toBeNull()
+    expect(stripPathPrefix('/a/B', '/A/', posix)).toBeNull()
+    expect(stripPathPrefix('/a/B', '/a/', posix)).toBe('B')
+  })
+})
+
+describe('isWithin', () => {
+  it('matches the root and paths below it on POSIX', () => {
+    expect(isWithin('/a/b', '/a/b', posix)).toBe(true)
+    expect(isWithin('/a/b/c', '/a/b', posix)).toBe(true)
+    expect(isWithin('/a/bc', '/a/b', posix)).toBe(false)
+    expect(isWithin('/A/b/c', '/a/b', posix)).toBe(false)
+  })
+
+  it('is case-insensitive with either separator on Windows', () => {
+    expect(isWithin('c:\\users\\me\\.claude\\x', 'C:\\Users\\Me\\.claude', win32)).toBe(true)
+    expect(isWithin('C:/Users/Me/.claude/x', 'C:\\Users\\Me\\.claude\\', win32)).toBe(true)
+    expect(isWithin('C:\\Users\\Me\\.CLAUDE', 'c:/users/me/.claude', win32)).toBe(true)
+    expect(isWithin('C:\\Users\\Me\\.claude2', 'C:\\Users\\Me\\.claude', win32)).toBe(false)
+    expect(isWithin('D:\\x', 'C:\\', win32)).toBe(false)
+    expect(isWithin('C:\\x', 'C:\\', win32)).toBe(true)
+  })
+})
+
+describe('splitPath', () => {
+  it('splits on both separators on Windows and on / elsewhere', () => {
+    expect(splitPath('claudedeck\\backups/x', win32)).toEqual(['claudedeck', 'backups', 'x'])
+    expect(splitPath('a\\b/c', posix)).toEqual(['a\\b', 'c'])
+    expect(splitPath('', posix)).toEqual([])
   })
 })

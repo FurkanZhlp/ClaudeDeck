@@ -1,7 +1,10 @@
+import { RefreshCw } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TrayMetric, UsageDisplay } from '@shared/types'
+import { isWindows } from '../platform'
 import { useApp } from '../store'
+import { Button } from '../ui/Button'
 import { Segmented } from '../ui/Segmented'
 import { inputClass, sectionTitleClass } from '../ui/styles'
 import { Switch } from '../ui/Switch'
@@ -26,14 +29,15 @@ function Row({
   )
 }
 
-/** Settings > Usage: display mode and the macOS menu bar item. */
+/**
+ * Settings > Usage: display mode and the macOS menu bar item. Windows has no tray yet, so its
+ * menu bar options are hidden there.
+ */
 export function UsageSettingsSection(): React.JSX.Element | null {
   const { t } = useTranslation()
   const usage = useApp((s) => s.data?.settings.usage)
-  const accounts = useApp((s) => s.data?.accounts) ?? []
   const setUsageSettings = useApp((s) => s.setUsageSettings)
   if (!usage) return null
-  const trayOff = !usage.trayEnabled
 
   return (
     <section className="mt-6 space-y-3">
@@ -49,6 +53,21 @@ export function UsageSettingsSection(): React.JSX.Element | null {
           onChange={(display) => void setUsageSettings({ display })}
         />
       </Row>
+      {!isWindows && <MenuBarSettings />}
+    </section>
+  )
+}
+
+function MenuBarSettings(): React.JSX.Element | null {
+  const { t } = useTranslation()
+  const usage = useApp((s) => s.data?.settings.usage)
+  const accounts = useApp((s) => s.data?.accounts) ?? []
+  const setUsageSettings = useApp((s) => s.setUsageSettings)
+  if (!usage) return null
+  const trayOff = !usage.trayEnabled
+
+  return (
+    <>
       <Switch
         label={t('settings.trayEnabled')}
         hint={t('settings.trayEnabledHint')}
@@ -85,7 +104,7 @@ export function UsageSettingsSection(): React.JSX.Element | null {
           ))}
         </select>
       </Row>
-    </section>
+    </>
   )
 }
 
@@ -121,6 +140,35 @@ export function GeneralSettingsSection(): React.JSX.Element | null {
         checked={launchAtLogin}
         onChange={(enabled) => void setLaunchAtLogin(enabled)}
       />
+    </section>
+  )
+}
+
+/** Settings > About: version and a manual update check (the app menu is macOS only). */
+export function AboutSettingsSection(): React.JSX.Element {
+  const { t } = useTranslation()
+  const [version, setVersion] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    window.api.app
+      .version()
+      .then((value) => alive && setVersion(value))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  return (
+    <section className="mt-6 space-y-2">
+      <h3 className={sectionTitleClass}>{t('settings.about')}</h3>
+      <Row label={version ? t('settings.version', { version }) : 'ClaudeDeck'}>
+        <Button onClick={() => void window.api.app.checkUpdates()}>
+          <RefreshCw size={14} />
+          {t('settings.checkUpdates')}
+        </Button>
+      </Row>
     </section>
   )
 }

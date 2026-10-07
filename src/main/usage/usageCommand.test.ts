@@ -28,6 +28,14 @@ describe('parseUsageCommandOutput', () => {
     })
   })
 
+  it('tolerates CRLF line endings', () => {
+    const now = utc(2026, 10, 7, 3)
+    const crlf = SAMPLE.replace(/\n/g, '\r\n') + '\r\n'
+    expect(parseUsageCommandOutput(crlf, 'a', now)).toEqual(
+      parseUsageCommandOutput(SAMPLE, 'a', now)
+    )
+  })
+
   it('collects every per-model weekly line', () => {
     const now = utc(2026, 10, 7, 3)
     const text =
@@ -138,6 +146,13 @@ describe('usageResultText', () => {
 
   it('reads the result after shell noise', () => {
     expect(usageResultText(`Welcome back!\n${json}\n`)).toBe(SAMPLE)
+  })
+
+  it('reads CRLF output with shell noise', () => {
+    expect(usageResultText(`Welcome back!\r\n${json}\r\n`)).toBe(SAMPLE)
+    expect(usageResultText(JSON.stringify({ result: 'x' }, null, 2).replace(/\n/g, '\r\n'))).toBe(
+      'x'
+    )
   })
 
   it('reads pretty-printed output', () => {

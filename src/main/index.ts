@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, net, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeTheme, net, session, shell } from 'electron'
 import { rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -7,7 +7,7 @@ import { IPC } from '../shared/ipc'
 import { resolveLanguage } from '../shared/language'
 import { createTranslator, type Translate } from '../shared/translate'
 import { AccountService } from './accounts/accountService'
-import { resolveShellEnv } from './env/shellEnv'
+import { platform } from './platform'
 import { registerIpc } from './ipc'
 import { buildMenu } from './menu'
 import { PtyManager } from './pty/ptyManager'
@@ -40,13 +40,15 @@ import { registerProfileIpc } from './profile/profileIpc'
 import { registerAppIpc } from './tray/appIpc'
 import { createMenuBar, type MenuBar } from './tray/menuBar'
 import { TRAY_CHANNELS } from './tray/trayChannels'
+import { loginItemSettings, wasOpenedAtLogin } from './window/loginItem'
+import { titleBarOverlay, windowBackground, windowChrome } from './window/windowChrome'
 
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 const userData = app.getPath('userData')
 const accountsRoot = join(userData, 'accounts')
 const repo = new Repository(new JsonStore(join(userData, 'config.json'), emptyState), accountsRoot)
-const accounts = new AccountService(accountsRoot, resolveShellEnv)
+const accounts = new AccountService(accountsRoot, platform.resolveBaseEnv)
 // Plan usage reported by Claude Code through a statusline hook installed per account.
 const usage = createUsageService({
   repo,
@@ -61,7 +63,7 @@ const stats = createStatsService({ repo, send: broadcast })
 // Background `claude -p /usage` checks (no model call) keep usage fresh between Claude runs.
 const usagePoller = createUsagePoller({
   repo,
-  baseEnv: resolveShellEnv,
+  baseEnv: platform.resolveBaseEnv,
   claudeAvailable: () => accounts.claudeAvailable(),
   onUsage: (reading) => usage.ingest(reading)
 })
@@ -101,7 +103,7 @@ const ptys = new PtyManager({
 const optimize = new OptimizeManager({
   account: (id) => repo.account(id),
   claudeAvailable: () => accounts.claudeAvailable(),
-  baseEnv: resolveShellEnv,
+  baseEnv: platform.resolveBaseEnv,
   tokens: mcpTokens,
   mcpUrl: () => mcp?.url ?? null,
   prompt: optimizePrompt,
@@ -110,11 +112,11 @@ const optimize = new OptimizeManager({
   onGuidelinesUpdated: (update) => send(IPC.profileGuidelinesUpdated, update)
 })
 
-/** Registers or removes ClaudeDeck as a macOS login item; only meaningful for the packaged app. */
+/** Registers or removes ClaudeDeck as a login item; only meaningful for the packaged app. */
 function applyLaunchAtLogin(enabled: boolean): void {
   if (!app.isPackaged) return
   try {
-    app.setLoginItemSettings({ openAtLogin: enabled })
+    app.setLoginItemSettings(loginItemSettings(process.platform, enabled))
   } catch (error) {
     console.warn('[login-item]', error)
   }
@@ -210,6 +212,12 @@ async function startMcp(): Promise<void> {
 }
 
 function applyMenu(): void {
+  // Windows: no menu bar, so its accelerators (Ctrl+C, Ctrl+V) never clash with the terminal.
+  // Settings (Ctrl+,), updates and the version are reached from the renderer instead.
+  if (process.platform === 'win32') {
+    Menu.setApplicationMenu(null)
+    return
+  }
   const t = translator()
   Menu.setApplicationMenu(
     buildMenu(t, {
@@ -352,8 +360,7 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 560,
     show: false,
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 14, y: 14 },
+    ...windowChrome(process.platform, nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
@@ -369,6 +376,17 @@ function createWindow(): void {
   })
   win.on('focus', () => usagePoller.pollSoon())
   win.on('closed', onMainWindowClosed)
+  if (process.platform === 'win32') {
+    // The caption buttons and the window background follow the system light or dark theme.
+    const syncTheme = (): void => {
+      if (win.isDestroyed()) return
+      const dark = nativeTheme.shouldUseDarkColors
+      win.setTitleBarOverlay(titleBarOverlay(dark))
+      win.setBackgroundColor(windowBackground(dark))
+    }
+    nativeTheme.on('updated', syncTheme)
+    win.on('closed', () => nativeTheme.off('updated', syncTheme))
+  }
   win.webContents.setWindowOpenHandler(({ url }) => {
     void confirmOpenExternal(url)
     return { action: 'deny' }
@@ -466,6 +484,8 @@ app.whenReady().then(() => {
     revokeMcpTokens: (sessionIds) => sessionIds.forEach((id) => mcpTokens.revoke(id)),
     onUsageSettingsChange: syncMenuBar,
     onAccountsChange: syncMenuBar,
+    // Called on account removal before its folder is deleted (an open watcher blocks rm on Windows).
+    forgetUsage: (accountId) => usage.forget(accountId),
     applyLaunchAtLogin,
     cancelOptimize: (accountId) => {
       if (optimize.isActive(accountId)) void optimize.cancel(accountId)
@@ -482,7 +502,9 @@ app.whenReady().then(() => {
     trayAccount: () => menuBar?.account() ?? null,
     openMain: () => void showMainWindow(),
     quit: () => app.quit(),
-    packaged: () => app.isPackaged
+    packaged: () => app.isPackaged,
+    version: () => app.getVersion(),
+    checkUpdates: () => void checkUpdatesManually()
   })
   notes = registerNotesIpc({
     handle: ipcTools.handle,
@@ -513,8 +535,8 @@ app.whenReady().then(() => {
   })
   void startMcp()
   applyMenu()
-  void resolveShellEnv()
-  // Keep macOS in sync with the saved choice (e.g. after the app was moved or reinstalled).
+  void platform.resolveBaseEnv()
+  // Keep the login item in sync with the saved choice (e.g. after the app was moved or reinstalled).
   applyLaunchAtLogin(repo.get().settings.launchAtLogin)
   menuBar.sync()
   // Opened at login with the menu bar on: stay in the menu bar until the user asks for the window.
@@ -537,11 +559,7 @@ function startsHidden(): boolean {
   if (!app.isPackaged || !launchAtLogin || !usageSettings.trayEnabled || !menuBar?.enabled()) {
     return false
   }
-  try {
-    return app.getLoginItemSettings().wasOpenedAtLogin === true
-  } catch {
-    return false
-  }
+  return wasOpenedAtLogin(process.platform, process.argv, () => app.getLoginItemSettings())
 }
 
 app.on('window-all-closed', () => {

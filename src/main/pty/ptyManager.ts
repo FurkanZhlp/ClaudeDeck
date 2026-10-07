@@ -1,3 +1,4 @@
+import { win32 } from 'node:path'
 import * as pty from 'node-pty'
 
 export interface SpawnOptions {
@@ -30,6 +31,11 @@ export class PtyManager {
   /** Bilet geçersizse süreç açmaz ve false döner. */
   spawn(id: string, opts: SpawnOptions, ticket: string): boolean {
     if (ticket !== this.ticket(id)) return false
+    // Windows: the launch spec carries the located executable; a bare name would be searched
+    // in the cwd (the project) first.
+    if (process.platform === 'win32' && !win32.isAbsolute(opts.file)) {
+      throw new Error(`executable path is not absolute: ${opts.file}`)
+    }
     this.kill(id)
     const proc = pty.spawn(opts.file, opts.args, {
       name: 'xterm-256color',

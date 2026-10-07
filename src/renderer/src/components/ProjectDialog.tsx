@@ -5,6 +5,7 @@ import { useApp, type ProjectDialogState } from '../store'
 import { Button } from '../ui/Button'
 import { Field } from '../ui/Field'
 import { Modal } from '../ui/Modal'
+import { pathSegments } from '../ui/paths'
 import { inputClass } from '../ui/styles'
 
 export function ProjectDialog(): React.JSX.Element | null {
@@ -39,7 +40,7 @@ function ProjectForm({
     const dir = await window.api.system.pickFolder()
     if (!dir) return
     setPath(dir)
-    if (!name.trim()) setName(dir.split('/').filter(Boolean).at(-1) ?? '')
+    if (!name.trim()) setName(pathSegments(dir).at(-1) ?? '')
   }
   const submit = (event: FormEvent): void => {
     event.preventDefault()

@@ -14,14 +14,16 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ProfileCategory } from '../../shared/types'
+import { nodeCopy } from '../platform/fs'
 import {
   ProfileImportError,
   copyEntry,
   diffProfile,
   importProfile,
+  importRefAllowed,
   mergeSettings,
   rewritePaths,
   summarizeSource
@@ -123,6 +125,22 @@ describe('summarizeSource', () => {
     expect(by.settings.items).toBe(1)
     expect(by.plugins.items).toBe(3)
   })
+  it('ignores Finder and Explorer metadata files', async () => {
+    const src = makeSource()
+    for (const junk of ['.DS_Store', 'Thumbs.db', 'desktop.ini']) {
+      writeFileSync(join(src, 'agents', junk), 'x')
+    }
+    const by = Object.fromEntries(summarizeSource(src).map((s) => [s.category, s]))
+    expect(by.agents.items).toBe(2)
+    const dst = tempDir()
+    await importProfile(src, dst, ['agents'])
+    expect((await diffProfile(src, dst)).find((d) => d.category === 'agents')).toMatchObject({
+      added: 0,
+      changed: 0,
+      removed: 0
+    })
+  })
+
   it('reports nothing for a missing source', async () => {
     const summary = summarizeSource(join(tempDir(), 'missing'))
     expect(summary).toHaveLength(7)
@@ -233,9 +251,53 @@ describe('rewritePaths', () => {
       )
     ).toEqual({ a: ['/dst/x', '/srcother/y', '/src'], b: { c: '/dst/z' }, n: 1 })
   })
+
+  it('matches Windows paths case-insensitively with either separator', () => {
+    const from = 'C:\\Users\\Me\\.claude'
+    const to = 'C:\\Users\\Me\\AppData\\Roaming\\ClaudeDeck\\accounts\\a1'
+    expect(
+      rewritePaths(
+        [
+          'c:\\users\\me\\.claude\\plugins\\x',
+          'C:/Users/Me/.claude/plugins/y',
+          'C:\\Users\\Me\\.claude-other\\z',
+          'C:\\Users\\Me\\.claude'
+        ],
+        from,
+        to,
+        win32
+      )
+    ).toEqual([
+      `${to}\\plugins\\x`,
+      `${to}\\plugins/y`,
+      'C:\\Users\\Me\\.claude-other\\z',
+      'C:\\Users\\Me\\.claude'
+    ])
+  })
+
+  it('stays case-sensitive with POSIX paths', () => {
+    expect(rewritePaths(['/SRC/x', '/src/x'], '/src', '/dst', posix)).toEqual(['/SRC/x', '/dst/x'])
+  })
 })
 
 describe('copyEntry', () => {
+  it('does not repeat a failed plain copy', async () => {
+    const src = tempDir()
+    let calls = 0
+    const plain = async (): Promise<void> => {
+      calls++
+      throw new Error('copy failed')
+    }
+    // A failing runner (the APFS clone) falls back to the plain copy once.
+    await expect(copyEntry(src, join(tempDir(), 'x'), false, plain)).resolves.toBeUndefined()
+    expect(calls).toBe(1)
+    // The plain copy (Windows) is not run a second time: its failure stands as it is.
+    const blocked = join(tempDir(), 'file')
+    writeFileSync(blocked, 'keep')
+    await expect(copyEntry(src, blocked, false, nodeCopy)).rejects.toThrow()
+    expect(readFileSync(blocked, 'utf8')).toBe('keep')
+  })
+
   it('falls back to a regular copy when cloning fails', async () => {
     const src = tempDir()
     const dst = tempDir()
@@ -511,5 +573,53 @@ describe('instructions', () => {
     }
     expect(existsSync(join(parent, 'outside.md'))).toBe(true)
     expect(read(dst, 'CLAUDE.md')).toContain('@claudedeck/guidelines.md')
+  })
+})
+
+describe('@import canonicalisation', () => {
+  it('skips an import whose link leads outside the source profile', async () => {
+    const parent = tempDir()
+    const src = join(parent, 'src')
+    const dst = tempDir()
+    put(src, 'CLAUDE.md', '# Rules\n@docs/escape.md\n@docs/alias.md\n@docs/ok.md\n')
+    put(parent, 'secret.txt', 'outside secret')
+    put(src, '.credentials.json', 'secret')
+    put(src, 'docs/ok.md', 'ok')
+    symlinkSync(join(parent, 'secret.txt'), join(src, 'docs', 'escape.md'))
+    symlinkSync(join(src, '.credentials.json'), join(src, 'docs', 'alias.md'))
+    await importProfile(src, dst, ['instructions'])
+    expect(read(dst, 'docs/ok.md')).toBe('ok')
+    expect(existsSync(join(dst, 'docs', 'escape.md'))).toBe(false)
+    expect(existsSync(join(dst, 'docs', 'alias.md'))).toBe(false)
+  })
+
+  it('applies the Windows name rules', () => {
+    for (const ref of [
+      'docs/style.md',
+      './docs/style.md',
+      '../src/docs/x.md',
+      'rules\\a.md',
+      'a.b/c.md'
+    ]) {
+      expect(importRefAllowed(ref, 'win32')).toBe(true)
+    }
+    for (const ref of [
+      'C:\\x.md',
+      'C:x.md',
+      '\\\\server\\share\\x.md',
+      '~/x.md',
+      'SETTIN~1.JSO',
+      'docs/PROGRA~1/x.md',
+      'docs/x.md:secret',
+      'settings.json.',
+      'settings.json ',
+      'docs./x.md',
+      'docs /x.md'
+    ]) {
+      expect(importRefAllowed(ref, 'win32')).toBe(false)
+    }
+    // POSIX names may hold these characters.
+    expect(importRefAllowed('docs/a:b~c.', 'darwin')).toBe(true)
+    expect(importRefAllowed('/etc/hosts', 'darwin')).toBe(false)
   })
 })

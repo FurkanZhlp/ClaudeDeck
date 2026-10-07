@@ -96,7 +96,10 @@
     "metricBoth": "İkisi de",
     "trayAccount": "Menü çubuğu hesabı",
     "trayAccountAuto": "Sınıra en yakın",
-    "trayAccountSelected": "Seçili hesap"
+    "trayAccountSelected": "Seçili hesap",
+    "about": "Hakkında",
+    "version": "ClaudeDeck v{{version}}",
+    "checkUpdates": "Güncellemeleri denetle"
   },
   "login": {
     "title": "{{name}} için giriş",
@@ -131,7 +134,8 @@
     "INVALID": "Eksik veya geçersiz bilgi.",
     "PATH_MISSING": "Proje klasörü bulunamadı.",
     "CLAUDE_NOT_FOUND": "claude komutu bulunamadı. Claude Code'u kurun: curl -fsSL https://claude.ai/install.sh | bash",
-    "UNKNOWN": "Beklenmeyen bir hata oluştu."
+    "UNKNOWN": "Beklenmeyen bir hata oluştu.",
+    "UNSUPPORTED": "Bu özellik Windows'ta henüz desteklenmiyor."
   },
   "menu": {
     "about": "ClaudeDeck hakkında",
@@ -407,7 +411,8 @@
     "badge": {
       "running": "Profil optimize ediliyor",
       "waiting": "Claude yanıtınızı bekliyor"
-    }
+    },
+    "unsupported": "Windows'ta yakında."
   },
   "usage": {
     "title": "Kullanım",
@@ -484,5 +489,31 @@
     "open": "ClaudeDeck'i aç",
     "quit": "Çık",
     "noAccounts": "Kullanımı burada görmek için ClaudeDeck'te bir hesap ekleyin."
+  },
+  "platformCopy": {
+    "win32": {
+      "errors": {
+        "CLAUDE_NOT_FOUND": "claude komutu bulunamadı. Claude Code'u PowerShell'de kurun: irm https://claude.ai/install.ps1 | iex"
+      },
+      "settings": {
+        "launchAtLoginHint": "Windows'ta oturum açtığınızda ClaudeDeck'i başlatır."
+      },
+      "notes": {
+        "reveal": "Dosya Gezgini'nde göster"
+      },
+      "onboarding": {
+        "import": {
+          "globalHint": "%USERPROFILE%\\.claude klasöründeki ayarlarınız"
+        },
+        "done": {
+          "later": "Aktarmayı daha sonra Ayarlar'daki hesap satırından yeniden çalıştırabilirsiniz."
+        }
+      },
+      "optimize": {
+        "proposal": {
+          "shortcut": "Ctrl+Enter gönderir"
+        }
+      }
+    }
   }
 }

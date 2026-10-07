@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DomainError } from '../../shared/errors'
 import type { Account, AccountStatus } from '../../shared/types'
 import { buildSessionEnv } from '../env/shellEnv'
+import { encodeProjectKey } from '../notes/memoryPath'
 import { platform } from '../platform'
 import type { ClaudeLocator } from '../platform/types'
 
@@ -41,9 +42,9 @@ export function markOnboardingComplete(configDir: string): boolean {
   return true
 }
 
-/** Claude Code keeps transcripts in `projects/<cwd with non-alphanumerics as dashes>/`. */
+/** Claude Code keeps transcripts in `projects/<encoded cwd>/` (same key as auto memory). */
 export function transcriptPath(configDir: string, cwd: string, sessionId: string): string {
-  return join(configDir, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`)
+  return join(configDir, 'projects', encodeProjectKey(cwd), `${sessionId}.jsonl`)
 }
 
 /** A session id only has a conversation to resume once a message was sent in it. */
@@ -72,7 +73,7 @@ export class AccountService {
     const file = await this.locator.file(env)
     return new Promise((done) => {
       // claude giriş yoksa sıfırdan farklı kodla çıkabilir; stdout yine de değerlendirilir.
-      execFile(file, args, { env, timeout: RUN_TIMEOUT_MS }, (_error, stdout) =>
+      execFile(file, args, { env, timeout: RUN_TIMEOUT_MS, windowsHide: true }, (_error, stdout) =>
         done(String(stdout ?? ''))
       )
     })
@@ -91,7 +92,8 @@ export class AccountService {
   async destroy(account: Account): Promise<void> {
     const configDir = accountDir(this.accountsRoot, account.id)
     await this.run(['auth', 'logout'], buildSessionEnv(await this.baseEnv(), { configDir }))
-    rmSync(configDir, { recursive: true, force: true })
+    // Windows: a just-exited claude or an AV scanner can hold files for a moment.
+    platform.rmWithRetry(configDir, { recursive: true, force: true })
   }
 
   async claudeAvailable(): Promise<boolean> {
