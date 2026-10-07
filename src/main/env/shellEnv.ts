@@ -102,12 +102,26 @@ export function normalizeWindowsEnv(env: Record<string, string | undefined>): En
 }
 
 /** Drops undefined values and the variables child processes must not inherit. */
+/**
+ * Set by a running Claude Code session for its own children. When ClaudeDeck is started from
+ * inside one, Claude in our tabs would treat itself as a child session (no transcripts, so no
+ * resume) and inherit the host session's ids, sockets and tokens.
+ */
+const HOST_SESSION_MARKERS = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION']
+const HOST_SESSION_PREFIX = /^CLAUDE(CODE$|_)/
+/** User settings that keep their meaning in our tabs even when inherited from a Claude session. */
+const HOST_SESSION_KEEP = new Set(['CLAUDE_CODE_GIT_BASH_PATH'])
+
 export function sanitizeEnv(env: Record<string, string | undefined>, os: OsName = 'darwin'): Env {
   const source = os === 'win32' ? normalizeWindowsEnv(env) : env
+  const names = Object.keys(source).map((key) => (os === 'win32' ? key.toUpperCase() : key))
+  const fromClaude = HOST_SESSION_MARKERS.some((marker) => names.includes(marker))
   const out: Env = {}
   for (const [key, value] of Object.entries(source)) {
     const name = os === 'win32' ? key.toUpperCase() : key
-    if (value !== undefined && !STRIPPED.has(name)) out[key] = value
+    if (value === undefined || STRIPPED.has(name)) continue
+    if (fromClaude && HOST_SESSION_PREFIX.test(name) && !HOST_SESSION_KEEP.has(name)) continue
+    out[key] = value
   }
   return out
 }

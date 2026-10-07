@@ -20,6 +20,33 @@ describe('parseEnvOutput', () => {
 })
 
 describe('sanitizeEnv', () => {
+  it('drops the variables of a host Claude session but keeps user settings', () => {
+    const host = {
+      PATH: '/bin',
+      CLAUDECODE: '1',
+      CLAUDE_CODE_CHILD_SESSION: '1',
+      CLAUDE_CODE_SESSION_ID: 's',
+      CLAUDE_CODE_MESSAGING_TOKEN: 't',
+      CLAUDE_PID: '42',
+      CLAUDE_CODE_GIT_BASH_PATH: 'C:/Git/bin/bash.exe',
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: '9'
+    }
+    expect(sanitizeEnv(host)).toEqual({
+      PATH: '/bin',
+      CLAUDE_CODE_GIT_BASH_PATH: 'C:/Git/bin/bash.exe'
+    })
+    expect(
+      sanitizeEnv({ claude_code_child_session: '1', Claude_Pid: '1', Path: 'C:/x' }, 'win32')
+    ).toEqual({ Path: 'C:/x' })
+  })
+
+  it('keeps CLAUDE_CODE_* settings when not started from a Claude session', () => {
+    expect(sanitizeEnv({ PATH: '/bin', CLAUDE_CODE_MAX_OUTPUT_TOKENS: '9' })).toEqual({
+      PATH: '/bin',
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: '9'
+    })
+  })
+
   it('tanımsızları ve Claude Code iç değişkenlerini atar', () => {
     expect(
       sanitizeEnv({
