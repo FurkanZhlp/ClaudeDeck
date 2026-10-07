@@ -425,7 +425,7 @@ describe('optimize manager: lifecycle', () => {
     last().child.stdout.write(text.slice(20))
     await tick()
     expect(manager.get('a1').events).toEqual([
-      { type: 'activity', tool: 'Read', target: 'agents/a.md', at: expect.any(Number) }
+      { type: 'activity', tool: 'Read', target: join('agents', 'a.md'), at: expect.any(Number) }
     ])
 
     for (let i = 0; i < 600; i++) last().child.line(read)
