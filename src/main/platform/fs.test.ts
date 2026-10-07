@@ -23,6 +23,7 @@ import {
   rmWithRetryAsync,
   safeSymlink
 } from './fs'
+import { windowsOnly } from '../../test/platform'
 
 /** Lets a test make the next `cp` fail like Windows refusing to create a symlink. */
 const cpControl = vi.hoisted(() => ({ failNext: false }))
@@ -158,7 +159,8 @@ describe('safeSymlink', () => {
   })
 
   it('copies a target inside the given roots when Windows refuses the link', async () => {
-    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'claudedeck-fs-')))
+    // .native expands Windows 8.3 short names (RUNNER~1) like the async realpath does.
+    const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'claudedeck-fs-')))
     writeFileSync(join(dir, 'x.md'), 'x')
     const symlink = vi.fn(async () => {
       throw fsError('EPERM')
@@ -182,6 +184,17 @@ describe('safeSymlink', () => {
     await link('missing.md', join(profile, 'b'), [profile])
     await link(join(outside, 'secret'), join(profile, 'c'))
     expect(copy).not.toHaveBeenCalled()
+  })
+
+  windowsOnly('creates a real junction for a folder', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claudedeck-fs-'))
+    mkdirSync(join(dir, 'target'))
+    writeFileSync(join(dir, 'target', 'f.md'), 'x')
+    mkdirSync(join(dir, 'sub'))
+    // A relative folder target becomes an absolute junction; no privilege is needed for it.
+    await safeSymlink('win32')(join('..', 'target'), join(dir, 'sub', 'link'), [dir])
+    expect(lstatSync(join(dir, 'sub', 'link')).isSymbolicLink()).toBe(true)
+    expect(readFileSync(join(dir, 'sub', 'link', 'f.md'), 'utf8')).toBe('x')
   })
 
   it('rethrows other errors', async () => {

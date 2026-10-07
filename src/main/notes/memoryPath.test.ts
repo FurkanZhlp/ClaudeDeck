@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, win32 } from 'node:path'
+import { join, resolve, win32 } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   encodeProjectKey,
@@ -75,9 +75,9 @@ describe('resolveMemoryKey', () => {
   })
 
   it('keeps a missing path as given', () => {
-    expect(resolveMemoryKey('/definitely/missing/claudedeck-app')).toBe(
-      '/definitely/missing/claudedeck-app'
-    )
+    // resolve() adds the current drive on Windows, so the input is already absolute everywhere.
+    const missing = resolve('/definitely/missing/claudedeck-app')
+    expect(resolveMemoryKey(missing)).toBe(missing)
   })
 
   it('builds the memory folder from the key', () => {

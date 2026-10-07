@@ -13,6 +13,12 @@ import {
   type UsagePollerDeps
 } from './usagePoller'
 
+// Spawning is tested with the macOS launch spec (login shell) on every host, so a Windows runner
+// does not need claude.exe. The win32 launch spec is covered in platform/launch.test.ts.
+vi.mock('../platform', async (importOriginal) =>
+  (await import('../../test/platform')).withDarwinLaunch(await importOriginal())
+)
+
 const OUTPUT =
   'Current session: 12% used · resets Oct 7 at 7:30am (Europe/Istanbul)\n' +
   'Current week (all models): 62% used · resets Oct 9 at 4am (Europe/Istanbul)'

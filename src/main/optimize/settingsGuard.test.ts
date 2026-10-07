@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -9,6 +9,7 @@ import {
   restoreProtectedSettings,
   WHOLE_FILE
 } from './settingsGuard'
+import { expectMode } from '../../test/platform'
 
 let file: string
 
@@ -48,7 +49,7 @@ describe('restoreProtectedSettings', () => {
       statusLine: { type: 'command', command: 'mine' },
       permissions: { allow: ['Read', 'Edit'], defaultMode: 'default' }
     })
-    expect(statSync(file).mode & 0o777).toBe(0o600)
+    expectMode(file, 0o600)
   })
 
   it('leaves the file alone when only other keys changed', () => {

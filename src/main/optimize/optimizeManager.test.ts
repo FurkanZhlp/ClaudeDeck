@@ -9,7 +9,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { DomainError } from '../../shared/errors'
@@ -25,6 +25,17 @@ import {
   parseStreamLine,
   type OptimizeManagerDeps
 } from './optimizeManager'
+
+// The run itself is tested with the macOS launch spec (login shell) on every host, so a Windows
+// runner does not need claude.exe. The win32 launch spec is covered in platform/launch.test.ts.
+vi.mock('../platform', async (importOriginal) =>
+  (await import('../../test/platform')).withDarwinLaunch(await importOriginal())
+)
+
+/** An absolute config dir of the host OS (`/cfg`, or `D:\\cfg` on Windows). */
+const CFG = resolve('/cfg')
+/** `CFG` in permission rule syntax (`//cfg`, or `//d/cfg`). */
+const CFG_RULE = permissionRulePath(CFG, process.platform)
 
 const GUIDELINES = '<!-- claudedeck-guidelines v1 -->\n# Guidelines\n'
 const MCP_URL = 'http://127.0.0.1:47821/mcp'
@@ -116,7 +127,9 @@ describe('optimize manager: start', () => {
   it('snapshots the profile and spawns claude headless through the login shell', async () => {
     const state = await manager.start('a1')
     expect(state.status).toBe('running')
-    expect(state.backupDir).toMatch(/claudedeck\/backups\/optimize-2026-10-07T12-00-0\d\.\d{3}Z$/)
+    expect(state.backupDir).toMatch(
+      /claudedeck[\\/]backups[\\/]optimize-2026-10-07T12-00-0\d\.\d{3}Z$/
+    )
     const backup = state.backupDir as string
     expect(readFileSync(join(backup, 'CLAUDE.md'), 'utf8')).toBe(
       readFileSync(join(account.configDir, 'CLAUDE.md'), 'utf8')
@@ -147,7 +160,7 @@ describe('optimize manager: start', () => {
     await manager.start('a1')
     const token = (last().options.env as Record<string, string>)[MCP_TOKEN_ENV]
     expect(last().args.join(' ')).not.toContain(token)
-    const args = buildClaudeArgs({ prompt: 'P', configDir: '/cfg', mcpUrl: MCP_URL })
+    const args = buildClaudeArgs({ prompt: 'P', configDir: CFG, mcpUrl: MCP_URL })
     const config = JSON.parse(args[args.indexOf('--mcp-config') + 1])
     expect(config).toEqual({
       mcpServers: {
@@ -168,7 +181,7 @@ describe('optimize manager: start', () => {
     )
     expect(args.slice(args.indexOf('--add-dir'), args.indexOf('--add-dir') + 2)).toEqual([
       '--add-dir',
-      '/cfg'
+      CFG
     ])
   })
 
@@ -546,7 +559,10 @@ describe('parseStreamLine', () => {
 
 describe('profileDenyRules', () => {
   it('blocks credentials and transcripts and keeps app files read-only', () => {
-    const rules = profileDenyRules('/Users/me/Library/Application Support/ClaudeDeck/accounts/a')
+    const rules = profileDenyRules(
+      '/Users/me/Library/Application Support/ClaudeDeck/accounts/a',
+      (abs) => permissionRulePath(abs, 'darwin')
+    )
     const root = '//Users/me/Library/Application Support/ClaudeDeck/accounts/a'
     expect(rules).toContain(`Read(${root}/.claude.json)`)
     expect(rules).toContain(`Edit(${root}/projects/**)`)
@@ -554,7 +570,7 @@ describe('profileDenyRules', () => {
     expect(rules).not.toContain(`Read(${root}/claudedeck/guidelines.md)`)
   })
   it('keeps every app-managed file that runs or feeds code later read-only', () => {
-    const rules = profileDenyRules('/cfg')
+    const rules = profileDenyRules('/cfg', (abs) => permissionRulePath(abs, 'darwin'))
     for (const rel of [
       'claudedeck/statusline.sh',
       'claudedeck/statusline.ps1',
@@ -574,11 +590,11 @@ describe('profileDenyRules', () => {
   it('passes the rules through --settings', () => {
     const args = buildClaudeArgs({
       prompt: 'p',
-      configDir: '/cfg',
+      configDir: CFG,
       mcpUrl: 'http://127.0.0.1:1/mcp'
     })
     const settings = JSON.parse(args[args.indexOf('--settings') + 1])
-    expect(settings.permissions.deny).toContain('Read(//cfg/.claude.json)')
+    expect(settings.permissions.deny).toContain(`Read(${CFG_RULE}/.claude.json)`)
   })
 })
 

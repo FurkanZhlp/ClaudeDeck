@@ -35,7 +35,7 @@ describe('parseAuthStatus', () => {
 describe('accountDir', () => {
   it('UUID kimlikten hesap klasörünü türetir', () => {
     const id = '5ef4bfc8-45fe-43c9-b57e-20b2397975b7'
-    expect(accountDir('/a/accounts', id)).toBe(`/a/accounts/${id}`)
+    expect(accountDir('/a/accounts', id)).toBe(join('/a/accounts', id))
   })
   it('UUID olmayan kimliği reddeder', () => {
     expect(() => accountDir('/a/accounts', '../x')).toThrowError('INVALID')
@@ -77,12 +77,12 @@ describe('markOnboardingComplete', () => {
 describe('hasConversation', () => {
   it('encodes the project path like Claude Code', () => {
     expect(transcriptPath('/cfg', '/Volumes/My SSD/web-app', 'id')).toBe(
-      '/cfg/projects/-Volumes-My-SSD-web-app/id.jsonl'
+      join('/cfg', 'projects', '-Volumes-My-SSD-web-app', 'id.jsonl')
     )
   })
   it('encodes Windows paths and long paths with the shared project key', () => {
     expect(transcriptPath('/cfg', 'C:\\Users\\x\\p', 'id')).toBe(
-      '/cfg/projects/C--Users-x-p/id.jsonl'
+      join('/cfg', 'projects', 'C--Users-x-p', 'id.jsonl')
     )
     const long = `/${'a'.repeat(250)}`
     expect(transcriptPath('/cfg', long, 'id')).toBe(

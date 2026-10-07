@@ -52,7 +52,11 @@ describe('createUsageService', () => {
     service.prepareAccount(a)
 
     const settings = JSON.parse(readFileSync(join(a.configDir, 'settings.json'), 'utf8'))
-    expect(settings.statusLine.command).toContain(statuslineScriptPath(a.configDir))
+    // The Windows command spells the script path with forward slashes.
+    const slashes = (path: string): string => path.replace(/\\/g, '/')
+    expect(slashes(settings.statusLine.command)).toContain(
+      slashes(statuslineScriptPath(a.configDir))
+    )
     expect(send).not.toHaveBeenCalled()
 
     await settle()

@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { registerMcpInConfig, unregisterMcpInConfig } from './register'
+import { expectMode } from '../../test/platform'
 
 let dir: string
 const read = (): Record<string, unknown> =>
@@ -27,7 +28,7 @@ describe('registerMcpInConfig', () => {
       }
     })
     expect(readFileSync(join(configDir, '.claude.json'), 'utf8')).not.toMatch(/[0-9a-f]{64}/)
-    expect(statSync(join(configDir, '.claude.json')).mode & 0o777).toBe(0o600)
+    expectMode(join(configDir, '.claude.json'), 0o600)
   })
 
   it('keeps other keys and servers, and is a no-op when already current', () => {
@@ -78,7 +79,7 @@ describe('unregisterMcpInConfig', () => {
     expect(unregisterMcpInConfig(dir)).toBe(true)
     expect(read()).toEqual({ oauthAccount: { a: 1 }, mcpServers: { other: { command: 'x' } } })
     expect(unregisterMcpInConfig(dir)).toBe(false)
-    expect(statSync(join(dir, '.claude.json')).mode & 0o777).toBe(0o600)
+    expectMode(join(dir, '.claude.json'), 0o600)
   })
 
   it('is a no-op when the file is missing and throws on an unparsable one', () => {

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { shellQuote as shQuote } from '../env/shellEnv'
 import {
@@ -11,6 +11,8 @@ import {
   uninstallStatusline,
   usageRawPath
 } from './statusline'
+import { findGitBash, windowsPowerShellPath } from './statuslineScript'
+import { expectMode, isWindows } from '../../test/platform'
 
 const tempDir = (name = 'profile'): string => {
   const dir = join(mkdtempSync(join(tmpdir(), 'claudedeck-usage-')), name)
@@ -31,16 +33,42 @@ const SAMPLE = JSON.stringify({
   }
 })
 
+/** Settings logic is the same on every OS; these tests pin the POSIX script and command. */
+const POSIX_HOST: StatuslineHost = { os: 'darwin', env: {} }
+
+/** Git Bash on a Windows host; the chained original runs through it like in Claude Code. */
+const gitBash = isWindows ? findGitBash(process.env) : null
+/** Chaining tests use POSIX shell commands, so Windows needs Git Bash for them. */
+const chainIt = it.skipIf(isWindows && !gitBash)
+
+/** Runs a statusline script file the way the host's settings.json command does. */
+const runScriptFile = (script: string, input: string, cwd?: string): string =>
+  isWindows
+    ? execFileSync(
+        windowsPowerShellPath(process.env),
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
+        { input, encoding: 'utf8', cwd }
+      )
+    : execFileSync('/bin/sh', [script], { input, encoding: 'utf8', cwd })
+
+/** Runs the installed script of the host OS. */
 const runScript = (dir: string, input: string): string =>
-  execFileSync('/bin/sh', [statuslineScriptPath(dir)], { input, encoding: 'utf8', cwd: dir })
+  runScriptFile(statuslineScriptPath(dir), input, dir)
+
+/** Runs a settings.json command string through a shell, as Claude Code does. */
+const runCommand = (command: string, input: string): string =>
+  execFileSync(isWindows ? (gitBash as string) : '/bin/sh', ['-c', command], {
+    input,
+    encoding: 'utf8'
+  })
 
 describe('installStatusline', () => {
   it('creates the script and settings when missing', () => {
     const dir = tempDir()
-    expect(installStatusline(dir)).toBe(true)
-    const script = statuslineScriptPath(dir)
-    expect(statSync(script).mode & 0o777).toBe(0o755)
-    expect(statSync(settingsFile(dir)).mode & 0o777).toBe(0o600)
+    expect(installStatusline(dir, POSIX_HOST)).toBe(true)
+    const script = statuslineScriptPath(dir, 'darwin')
+    expectMode(script, 0o755)
+    expectMode(settingsFile(dir), 0o600)
     expect(readSettings(dir)).toEqual({
       statusLine: { type: 'command', command: shQuote(script) }
     })
@@ -50,7 +78,7 @@ describe('installStatusline', () => {
   it('tolerates an empty settings.json', () => {
     const dir = tempDir()
     writeFileSync(settingsFile(dir), '  \n')
-    installStatusline(dir)
+    installStatusline(dir, POSIX_HOST)
     expect(readSettings(dir).statusLine).toBeDefined()
   })
 
@@ -58,9 +86,9 @@ describe('installStatusline', () => {
     const dir = tempDir()
     const other = { model: 'opus', env: { A: '1' }, permissions: { allow: ['Bash(ls)'] } }
     writeFileSync(settingsFile(dir), JSON.stringify(other))
-    expect(installStatusline(dir)).toBe(true)
+    expect(installStatusline(dir, POSIX_HOST)).toBe(true)
     const first = readFileSync(settingsFile(dir), 'utf8')
-    expect(installStatusline(dir)).toBe(false)
+    expect(installStatusline(dir, POSIX_HOST)).toBe(false)
     expect(readFileSync(settingsFile(dir), 'utf8')).toBe(first)
     expect(readSettings(dir)).toMatchObject(other)
   })
@@ -68,10 +96,10 @@ describe('installStatusline', () => {
   it('refuses to overwrite invalid JSON', () => {
     const dir = tempDir()
     writeFileSync(settingsFile(dir), '{ broken')
-    expect(installStatusline(dir)).toBe(false)
+    expect(installStatusline(dir, POSIX_HOST)).toBe(false)
     expect(readFileSync(settingsFile(dir), 'utf8')).toBe('{ broken')
     writeFileSync(settingsFile(dir), '[1, 2]')
-    expect(installStatusline(dir)).toBe(false)
+    expect(installStatusline(dir, POSIX_HOST)).toBe(false)
     expect(readFileSync(settingsFile(dir), 'utf8')).toBe('[1, 2]')
   })
 
@@ -79,39 +107,38 @@ describe('installStatusline', () => {
     const dir = tempDir()
     const original = { type: 'command', command: 'cat >/dev/null; echo mine', padding: 2 }
     writeFileSync(settingsFile(dir), JSON.stringify({ statusLine: original, model: 'x' }))
-    installStatusline(dir)
+    installStatusline(dir, POSIX_HOST)
     expect(JSON.parse(readFileSync(originalFile(dir), 'utf8'))).toEqual(original)
     const entry = readSettings(dir).statusLine
     expect(entry).toEqual({
       padding: 2,
       type: 'command',
-      command: shQuote(statuslineScriptPath(dir))
+      command: shQuote(statuslineScriptPath(dir, 'darwin'))
     })
     // A second run must not save our own entry as the original.
-    expect(installStatusline(dir)).toBe(false)
+    expect(installStatusline(dir, POSIX_HOST)).toBe(false)
     expect(JSON.parse(readFileSync(originalFile(dir), 'utf8'))).toEqual(original)
     expect(readSettings(dir).model).toBe('x')
   })
 
   it('adopts a statusline imported after installation', () => {
     const dir = tempDir()
-    installStatusline(dir)
+    installStatusline(dir, POSIX_HOST)
     const imported = { type: 'command', command: 'echo imported' }
     writeFileSync(settingsFile(dir), JSON.stringify({ statusLine: imported }))
-    expect(installStatusline(dir)).toBe(true)
+    expect(installStatusline(dir, POSIX_HOST)).toBe(true)
     expect(JSON.parse(readFileSync(originalFile(dir), 'utf8'))).toEqual(imported)
-    expect(runScript(dir, SAMPLE)).toBe('imported\n')
   })
 
   it('treats another account script as ours instead of chaining to it', () => {
     const dir = tempDir()
     const foreign = { type: 'command', command: "'/other/acct/claudedeck/statusline.sh'" }
     writeFileSync(settingsFile(dir), JSON.stringify({ statusLine: foreign }))
-    installStatusline(dir)
+    installStatusline(dir, POSIX_HOST)
     expect(existsSync(originalFile(dir))).toBe(false)
     expect(readSettings(dir).statusLine).toEqual({
       type: 'command',
-      command: shQuote(statuslineScriptPath(dir))
+      command: shQuote(statuslineScriptPath(dir, 'darwin'))
     })
   })
 
@@ -119,23 +146,33 @@ describe('installStatusline', () => {
     const dir = tempDir()
     const original = { type: 'command', command: 'echo mine' }
     writeFileSync(settingsFile(dir), JSON.stringify({ statusLine: original, model: 'x' }))
-    installStatusline(dir)
+    installStatusline(dir, POSIX_HOST)
     expect(uninstallStatusline(dir)).toBe(true)
     expect(readSettings(dir)).toEqual({ statusLine: original, model: 'x' })
-    expect(existsSync(statuslineScriptPath(dir))).toBe(false)
+    expect(existsSync(statuslineScriptPath(dir, 'darwin'))).toBe(false)
     expect(existsSync(originalFile(dir))).toBe(false)
   })
 
   it('uninstall removes the key when there was no original', () => {
     const dir = tempDir()
     writeFileSync(settingsFile(dir), JSON.stringify({ model: 'x' }))
-    installStatusline(dir)
+    installStatusline(dir, POSIX_HOST)
     uninstallStatusline(dir)
     expect(readSettings(dir)).toEqual({ model: 'x' })
   })
 })
 
+// Runs the real script of the host OS: /bin/sh on macOS, Windows PowerShell on Windows.
 describe('statusline script', () => {
+  chainIt('chains a statusline imported after installation', () => {
+    const dir = tempDir()
+    installStatusline(dir)
+    const imported = { type: 'command', command: 'echo imported' }
+    writeFileSync(settingsFile(dir), JSON.stringify({ statusLine: imported }))
+    expect(installStatusline(dir)).toBe(true)
+    expect(runScript(dir, SAMPLE)).toBe('imported\n')
+  })
+
   it('records the input and prints nothing without an original', () => {
     const dir = tempDir()
     installStatusline(dir)
@@ -150,7 +187,7 @@ describe('statusline script', () => {
     expect(existsSync(usageRawPath(dir))).toBe(false)
   })
 
-  it('works under a path with spaces and quotes, chaining the original', () => {
+  chainIt('works under a path with spaces and quotes, chaining the original', () => {
     const dir = tempDir("Application Support/Claude Deck/it's")
     // The original reads the same JSON from stdin.
     const original = { type: 'command', command: 'grep -o "five_hour" | head -1; echo done' }
@@ -160,14 +197,10 @@ describe('statusline script', () => {
     expect(JSON.parse(readFileSync(usageRawPath(dir), 'utf8')).rate_limits).toBeDefined()
     // Run the configured command string through a shell, as Claude Code does.
     const command = readSettings(dir).statusLine as { command: string }
-    const out = execFileSync('/bin/sh', ['-c', command.command], {
-      input: SAMPLE,
-      encoding: 'utf8'
-    })
-    expect(out).toBe('five_hour\ndone\n')
+    expect(runCommand(command.command, SAMPLE)).toBe('five_hour\ndone\n')
   })
 
-  it('exits 0 when the usage folder is gone and the original fails', () => {
+  chainIt('exits 0 when the usage folder is gone and the original fails', () => {
     const dir = tempDir()
     writeFileSync(
       settingsFile(dir),
@@ -175,9 +208,10 @@ describe('statusline script', () => {
     )
     installStatusline(dir)
     const script = readFileSync(statuslineScriptPath(dir), 'utf8')
-    const moved = join(tempDir('elsewhere'), 'statusline.sh')
-    writeFileSync(moved, script.replace(/^dir=.*$/m, "dir='/nonexistent/claudedeck'"))
-    expect(execFileSync('/bin/sh', [moved], { input: SAMPLE, encoding: 'utf8' })).toBe('out\n')
+    const moved = join(tempDir('elsewhere'), basename(statuslineScriptPath(dir)))
+    // `dir='...'` in the POSIX script, `$dir = '...'` in the PowerShell one.
+    writeFileSync(moved, script.replace(/^(\$?dir\s*=\s*).*$/m, "$1'/nonexistent/claudedeck'"))
+    expect(runScriptFile(moved, SAMPLE)).toBe('out\n')
   })
 })
 
@@ -227,7 +261,7 @@ describe('installStatusline on Windows', () => {
 
   it('treats a macOS script entry as ours and uninstall removes both scripts', () => {
     const dir = tempDir()
-    installStatusline(dir)
+    installStatusline(dir, POSIX_HOST)
     installStatusline(dir, host(null))
     expect(existsSync(originalFile(dir))).toBe(false)
     expect(uninstallStatusline(dir)).toBe(true)

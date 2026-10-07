@@ -7,7 +7,6 @@ import {
   readFileSync,
   readdirSync,
   readlinkSync,
-  statSync,
   symlinkSync,
   chmodSync,
   utimesSync,
@@ -28,6 +27,7 @@ import {
   rewritePaths,
   summarizeSource
 } from './importer'
+import { expectMode, posixOnly } from '../../test/platform'
 
 const failingClone = async (): Promise<void> => {
   throw new Error('clone failed')
@@ -247,7 +247,8 @@ describe('rewritePaths', () => {
       rewritePaths(
         { a: ['/src/x', '/srcother/y', '/src'], b: { c: '/src/z' }, n: 1 },
         '/src',
-        '/dst'
+        '/dst',
+        posix
       )
     ).toEqual({ a: ['/dst/x', '/srcother/y', '/src'], b: { c: '/dst/z' }, n: 1 })
   })
@@ -371,7 +372,7 @@ describe('importProfile', () => {
     const src = makeSource()
     const dst = tempDir()
     await importProfile(src, dst, ['settings'])
-    expect(statSync(join(dst, 'settings.json')).mode & 0o777).toBe(0o600)
+    expectMode(join(dst, 'settings.json'), 0o600)
   })
 
   it('rewrites plugin paths to the account dir', async () => {
@@ -454,7 +455,7 @@ describe('symlinks', () => {
       const src = pluginSource()
       const dst = tempDir()
       await importProfile(src, dst, ['plugins'], new Date(), run)
-      expect(readlinkSync(join(dst, 'plugins/a/rel.md'))).toBe('../b/file.md')
+      expect(readlinkSync(join(dst, 'plugins/a/rel.md'))).toBe(join('..', 'b', 'file.md'))
       expect(readlinkSync(join(dst, 'plugins/a/abs.md'))).toBe(join(dst, 'plugins/b/file.md'))
       expect(readlinkSync(join(dst, 'plugins/a/root.md'))).toBe(join(dst, 'CLAUDE.md'))
       expect(read(dst, 'plugins/a/rel.md')).toBe('target file')
@@ -480,7 +481,8 @@ describe('symlinks', () => {
 })
 
 describe('import atomicity', () => {
-  it('keeps the previous item when copying a category fails', async () => {
+  // chmod 0o000 makes a file unreadable only on POSIX; Windows ignores the mode bits.
+  posixOnly('keeps the previous item when copying a category fails', async () => {
     const src = tempDir()
     const dst = tempDir()
     put(src, 'agents/ok.md', 'ok')
@@ -497,7 +499,7 @@ describe('import atomicity', () => {
     expect(existsSync(join(dst, 'claudedeck'))).toBe(false)
   })
 
-  it('reports which category failed', async () => {
+  posixOnly('reports which category failed', async () => {
     const src = tempDir()
     const dst = tempDir()
     put(src, 'commands/locked.md', 'x')

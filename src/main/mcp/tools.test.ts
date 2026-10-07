@@ -17,6 +17,7 @@ import {
   type ToolResult,
   type Tools
 } from './tools'
+import { isWindows } from '../../test/platform'
 
 let dir: string
 let repo: Repository
@@ -218,6 +219,15 @@ describe('MCP tools: create_project', () => {
     expect(await slow.create_project.call({ name: 'N', path: dir }, scope)).toMatchObject(DECLINED)
   })
 
+  /** Existing system folders of the host OS that must never become a project. */
+  const SYSTEM_FOLDERS = isWindows
+    ? [
+        process.env.SystemRoot ?? 'C:\\Windows',
+        process.env.ProgramFiles ?? 'C:\\Program Files',
+        process.env.ProgramData ?? 'C:\\ProgramData'
+      ]
+    : ['/usr/bin', '/etc', '/System']
+
   it('refuses another account and invalid folders without asking', async () => {
     const file = join(dir, 'file.txt')
     writeFileSync(file, 'x')
@@ -227,9 +237,10 @@ describe('MCP tools: create_project', () => {
       [{ name: 'X', path: file }, 'Path is not a directory'],
       [{ name: 'X', path: '/' }, 'Path not allowed'],
       [{ name: 'X', path: homedir() }, 'Path not allowed'],
-      [{ name: 'X', path: '/usr/bin' }, 'Path not allowed'],
-      [{ name: 'X', path: '/etc' }, 'Path not allowed'],
-      [{ name: 'X', path: '/System' }, 'Path not allowed']
+      ...SYSTEM_FOLDERS.map((path): [Record<string, string>, string] => [
+        { name: 'X', path },
+        'Path not allowed'
+      ])
     ]
     for (const [args, message] of cases) {
       const r = await tools.create_project.call(args, scope)
