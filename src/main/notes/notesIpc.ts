@@ -1,16 +1,21 @@
-import { mkdirSync, watch, type FSWatcher } from 'node:fs'
+import { lstatSync, mkdirSync, watch as fsWatch, type FSWatcher } from 'node:fs'
 import { shell } from 'electron'
 import { DomainError } from '../../shared/errors'
 import { IPC } from '../../shared/ipc'
 import { isText, type IpcTools } from '../ipcUtil'
-import { samePath } from '../platform/paths'
+import { isWithin, samePath } from '../platform/paths'
+import type { OsName } from '../platform/types'
 import type { Repository } from '../state/repository'
-import { existingNotePath, isSafeMemoryDir, listNotes, readNote } from './notesStore'
-import { createNotesSync, type ProjectLocation } from './notesSync'
+import {
+  existingNotePath,
+  isSafeMemoryDir,
+  listNotes,
+  readNote,
+  relocateMemory
+} from './notesStore'
+import { createNotesSync, type NotesSyncDeps, type ProjectLocation } from './notesSync'
 
 const CHANGE_DEBOUNCE_MS = 150
-/** Only Windows locks watched folders; elsewhere watchers stay open during relocations. */
-const WATCH_LOCKS_FOLDERS = process.platform === 'win32'
 
 interface Deps {
   handle: IpcTools['handle']
@@ -18,6 +23,12 @@ interface Deps {
   send: (channel: string, ...args: unknown[]) => void
   /** True while any terminal of the project is alive. */
   isProjectRunning: (projectId: string) => boolean
+  /** Only Windows locks watched folders; elsewhere watchers stay open during relocations. */
+  os?: OsName
+  /** `fs.watch` (tests). */
+  watch?: (dir: string, listener: () => void) => FSWatcher
+  /** Memory key of a project folder (tests). */
+  resolveKey?: NotesSyncDeps['resolveKey']
 }
 
 interface Watch {
@@ -50,14 +61,29 @@ async function openPath(path: string): Promise<null> {
   return null
 }
 
-export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps): NotesIpc {
-  const watches = new Map<string, Watch>()
-  const sync = createNotesSync({ repo, isProjectRunning })
-
-  const dirOf = (projectId: unknown): string => {
-    if (!isText(projectId)) throw new DomainError('INVALID')
-    return sync.dirOf(projectId)
+function isDirectory(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory()
+  } catch {
+    return false
   }
+}
+
+/** One folder is the other or lies inside it. */
+const overlaps = (a: string, b: string): boolean => isWithin(a, b) || isWithin(b, a)
+
+export function registerNotesIpc({
+  handle,
+  repo,
+  send,
+  isProjectRunning,
+  os = process.platform,
+  watch = (dir, listener) => fsWatch(dir, listener),
+  resolveKey
+}: Deps): NotesIpc {
+  const watches = new Map<string, Watch>()
+  // Windows keeps a handle on a watched folder, so it could not be renamed or removed.
+  const watchLocksFolders = os === 'win32'
 
   const notify = (projectId: string, entry: Watch): void => {
     if (entry.timer) clearTimeout(entry.timer)
@@ -72,14 +98,16 @@ export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps)
     entry.watcher = null
   }
 
+  /** Closes the watcher and drops a pending notification (unwatch, reset). */
   const stop = (entry: Watch): void => {
     closeWatcher(entry)
     if (entry.timer) clearTimeout(entry.timer)
     entry.timer = null
   }
 
-  const start = (projectId: string, entry: Watch): void => {
-    stop(entry)
+  /** (Re)opens the watcher on `entry.dir`; a pending notification is kept. */
+  const open = (projectId: string, entry: Watch): void => {
+    closeWatcher(entry)
     if (!isSafeMemoryDir(entry.dir)) {
       console.warn('[notes] refusing to watch an unsafe memory folder')
       return
@@ -89,7 +117,7 @@ export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps)
       const watcher = watch(entry.dir, () => notify(projectId, entry))
       watcher.on('error', (error) => {
         console.warn('[notes] watcher stopped', error)
-        if (entry.watcher === watcher) stop(entry)
+        if (entry.watcher === watcher) closeWatcher(entry)
       })
       entry.watcher = watcher
     } catch (error) {
@@ -97,49 +125,72 @@ export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps)
     }
   }
 
+  /** Points the entry at the project's current folder; true when that folder changed. */
+  const follow = (projectId: string, entry: Watch): boolean => {
+    let dir: string
+    try {
+      dir = sync.dirOf(projectId)
+    } catch (error) {
+      console.warn('[notes] could not resolve memory folder', error)
+      return false
+    }
+    if (samePath(dir, entry.dir)) return false
+    entry.dir = dir
+    return true
+  }
+
+  /**
+   * Runs a relocation with the watchers on or around `dirs` closed (Windows only). Reopens them
+   * on each project's current folder, so a moved folder is not recreated empty at its old place,
+   * and tells the panels whose folder changed. Other watchers and pending notifications stay.
+   */
+  const unwatchedDuring = <T>(dirs: string[], op: () => T): T => {
+    if (!watchLocksFolders) return op()
+    const affected = [...watches].filter(
+      ([, entry]) => entry.watcher && dirs.some((dir) => overlaps(entry.dir, dir))
+    )
+    affected.forEach(([, entry]) => closeWatcher(entry))
+    try {
+      return op()
+    } finally {
+      for (const [projectId, entry] of affected) {
+        const moved = follow(projectId, entry)
+        open(projectId, entry)
+        if (moved) notify(projectId, entry)
+      }
+    }
+  }
+
+  const sync = createNotesSync({
+    repo,
+    isProjectRunning,
+    resolveKey,
+    // Watchers are only touched when a folder is really moved or merged, not on every listing.
+    relocate: (fromDir, toDir, now, mode) =>
+      isDirectory(fromDir)
+        ? unwatchedDuring([fromDir, toDir], () => relocateMemory(fromDir, toDir, now, mode))
+        : relocateMemory(fromDir, toDir, now, mode)
+  })
+
+  const dirOf = (projectId: unknown): string => {
+    if (!isText(projectId)) throw new DomainError('INVALID')
+    return sync.dirOf(projectId)
+  }
+
   /** Points the project's watcher at its current folder and refreshes the panel. */
   const retarget = (projectId: string, changed: boolean): void => {
     const entry = watches.get(projectId)
     if (!entry) return
-    const dir = sync.dirOf(projectId)
-    if (!samePath(dir, entry.dir)) {
-      entry.dir = dir
-      start(projectId, entry)
+    if (follow(projectId, entry)) {
+      open(projectId, entry)
       changed = true
     }
     if (changed) notify(projectId, entry)
   }
 
-  /**
-   * Runs a relocation with every watcher closed: Windows keeps a handle on a watched folder, so
-   * it could not be renamed or removed. Reopens them afterwards on each project's current folder
-   * (a moved folder is not recreated empty at its old place).
-   */
-  const whileUnwatched = <T>(op: () => T): T => {
-    if (!WATCH_LOCKS_FOLDERS) return op()
-    const open = [...watches].filter(([, entry]) => entry.watcher)
-    open.forEach(([, entry]) => closeWatcher(entry))
-    try {
-      return op()
-    } finally {
-      for (const [projectId, entry] of open) {
-        try {
-          const dir = sync.dirOf(projectId)
-          if (!samePath(dir, entry.dir)) {
-            entry.dir = dir
-            notify(projectId, entry)
-          }
-        } catch (error) {
-          console.warn('[notes] could not resolve memory folder', error)
-        }
-        start(projectId, entry)
-      }
-    }
-  }
-
   const prepare = (projectId: string): boolean => {
     try {
-      return whileUnwatched(() => sync.prepare(projectId))
+      return sync.prepare(projectId)
     } catch (error) {
       console.warn('[notes] could not prepare project memory', error)
       return false
@@ -167,19 +218,15 @@ export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps)
   handle(IPC.notesWatch, (projectId: string) => {
     dirOf(projectId)
     prepare(projectId)
-    const dir = sync.dirOf(projectId)
     const existing = watches.get(projectId)
     if (existing) {
       existing.refs++
-      if (!samePath(existing.dir, dir) || !existing.watcher) {
-        existing.dir = dir
-        start(projectId, existing)
-      }
+      if (follow(projectId, existing) || !existing.watcher) open(projectId, existing)
       return null
     }
-    const entry: Watch = { refs: 1, dir, watcher: null, timer: null }
+    const entry: Watch = { refs: 1, dir: sync.dirOf(projectId), watcher: null, timer: null }
     watches.set(projectId, entry)
-    start(projectId, entry)
+    open(projectId, entry)
     return null
   })
   handle(IPC.notesUnwatch, (projectId: string) => {
@@ -199,7 +246,7 @@ export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps)
 
   return {
     relocateForProjectChange(before, after, projectId) {
-      const outcome = whileUnwatched(() => sync.relocate(before, after, projectId))
+      const outcome = sync.relocate(before, after, projectId)
       retarget(projectId, outcome !== 'none')
     },
     prepareProjectMemory(projectId) {

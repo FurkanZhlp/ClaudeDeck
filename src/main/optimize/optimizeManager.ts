@@ -20,6 +20,7 @@ import { OptimizeRejection, type OptimizePort, type OptimizeToolName } from '../
 import { inlineMcpConfig, MCP_SERVER_NAME } from '../mcp/register'
 import { MCP_TOKEN_ENV, type OptimizeScope, type SessionTokens } from '../mcp/sessionTokens'
 import { platform, type OsName } from '../platform'
+import { withEnvVars } from '../platform/env'
 import { renameWithRetryAsync } from '../platform/fs'
 import { ensureGuidelines } from '../profile/guidelines'
 import { copyEntry, type CopyRunner } from '../profile/importer'
@@ -296,7 +297,7 @@ export interface OptimizeManagerDeps {
   newId?: () => string
   /** Defaults to optimizeSupported(process.platform). */
   supported?: boolean
-  /** Decides how the prompt is passed; defaults to the running OS. */
+  /** Decides how the prompt is passed and how env names compare; defaults to the running OS. */
   os?: OsName
   /** Parent of the per-run prompt folder; defaults to the OS temp dir. */
   tmpDir?: string
@@ -463,7 +464,11 @@ export class OptimizeManager {
       const token = this.deps.tokens.issue({ kind: 'optimize', runId: run.id, accountId })
       child = this.spawnFn(launch.file, launch.args, {
         cwd: workspace,
-        env: { ...launch.env, MCP_TOOL_TIMEOUT: MCP_TOOL_TIMEOUT_MS, [MCP_TOKEN_ENV]: token },
+        env: withEnvVars(
+          launch.env,
+          { MCP_TOOL_TIMEOUT: MCP_TOOL_TIMEOUT_MS, [MCP_TOKEN_ENV]: token },
+          this.deps.os ?? platform.os
+        ),
         stdio: ['ignore', 'pipe', 'pipe'],
         ...platform.spawnDefaults()
       })

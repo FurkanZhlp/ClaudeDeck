@@ -3,6 +3,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   symlinkSync,
@@ -17,11 +18,13 @@ import {
   nodeCopy,
   renameWithRetry,
   renameWithRetryAsync,
+  retryBudget,
   retrySync,
   RETRY_DELAYS_MS,
   rmWithRetry,
   rmWithRetryAsync,
-  safeSymlink
+  safeSymlink,
+  writeFileAtomicSync
 } from './fs'
 import { windowsOnly } from '../../test/platform'
 
@@ -136,6 +139,76 @@ describe('rmWithRetry and friends (Windows)', () => {
     expect(readFileSync(join(dir, 'c'), 'utf8')).toBe('x')
     rmWithRetry('win32')(dir, { recursive: true, force: true })
     expect(existsSync(dir)).toBe(false)
+  })
+})
+
+describe('retry budget (batches)', () => {
+  it('without a budget keeps the full schedule for every code', () => {
+    const rename = flaky('EPERM', RETRY_DELAYS_MS.length)
+    const sleep = vi.fn()
+    renameWithRetry('win32', { rename, sleep })('a', 'b')
+    expect(rename).toHaveBeenCalledTimes(RETRY_DELAYS_MS.length + 1)
+  })
+
+  it.each(['EPERM', 'EACCES'])('retries a lasting %s only once', (code) => {
+    const rename = flaky(code, 5)
+    const sleep = vi.fn()
+    const budget = retryBudget()
+    expect(() => renameWithRetry('win32', { rename, sleep })('a', 'b', budget)).toThrow(code)
+    expect(rename).toHaveBeenCalledTimes(2)
+    expect(sleep).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps retrying EBUSY until the shared budget is spent', () => {
+    const sleep = vi.fn()
+    const budget = retryBudget(100)
+    const rename = renameWithRetry('win32', { rename: flaky('EBUSY', 99), sleep })
+    // 25 + 50, then 25 of the 100 ms step: the budget is gone after three waits.
+    expect(() => rename('a', 'b', budget)).toThrow('EBUSY')
+    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([25, 50, 25])
+    // The next file of the batch gets no wait at all.
+    const next = flaky('EBUSY', 1)
+    expect(() => renameWithRetry('win32', { rename: next, sleep })('c', 'd', budget)).toThrow()
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(sleep).toHaveBeenCalledTimes(3)
+  })
+
+  it('ignores the budget on POSIX', () => {
+    const rename = vi.fn()
+    renameWithRetry('darwin', { rename })('a', 'b', retryBudget(0))
+    expect(rename).toHaveBeenCalledWith('a', 'b')
+  })
+})
+
+describe('writeFileAtomicSync', () => {
+  it('writes through a unique temp file and leaves nothing behind', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claudedeck-atomic-'))
+    const file = join(dir, 'sub', 'x.json')
+    const renames: string[] = []
+    writeFileAtomicSync(file, 'one', (from, to) => {
+      renames.push(from)
+      renameWithRetry(process.platform)(from, to)
+    })
+    writeFileAtomicSync(file, 'two', (from, to) => {
+      renames.push(from)
+      renameWithRetry(process.platform)(from, to)
+    })
+    expect(readFileSync(file, 'utf8')).toBe('two')
+    expect(new Set(renames).size).toBe(2)
+    expect(readdirSync(join(dir, 'sub'))).toEqual(['x.json'])
+  })
+
+  it('removes the temp file when the rename fails', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claudedeck-atomic-'))
+    const file = join(dir, 'x.json')
+    writeFileSync(file, 'old')
+    expect(() =>
+      writeFileAtomicSync(file, 'new', () => {
+        throw fsError('EPERM')
+      })
+    ).toThrow('EPERM')
+    expect(readdirSync(dir)).toEqual(['x.json'])
+    expect(readFileSync(file, 'utf8')).toBe('old')
   })
 })
 

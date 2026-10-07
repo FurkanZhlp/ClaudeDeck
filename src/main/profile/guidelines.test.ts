@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -80,6 +80,6 @@ describe('ensureGuidelines', () => {
     expect(() => ensureGuidelines(dir, '# no version')).toThrow()
     mkdirSync(join(dir, 'claudedeck'), { recursive: true })
     ensureGuidelines(dir, bundled(1))
-    expect(existsSync(`${guidelinesPath(dir)}.claudedeck-tmp`)).toBe(false)
+    expect(readdirSync(join(dir, 'claudedeck')).filter((f) => f.endsWith('.tmp'))).toEqual([])
   })
 })

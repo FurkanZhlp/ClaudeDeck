@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MCP_TOKEN_ENV } from './sessionTokens'
-import { renameWithRetry } from '../platform/fs'
+import { renameWithRetry, writeFileAtomicSync } from '../platform/fs'
 
 // Windows briefly locks files (antivirus, indexer); retried there, a plain rename elsewhere.
 const renameFile = renameWithRetry(process.platform)
@@ -33,11 +33,8 @@ function serversOf(json: Json): Json {
   return current && typeof current === 'object' && !Array.isArray(current) ? (current as Json) : {}
 }
 
-function writeConfig(configDir: string, file: string, json: Json): void {
-  mkdirSync(configDir, { recursive: true })
-  const tmp = `${file}.claudedeck-tmp`
-  writeFileSync(tmp, JSON.stringify(json, null, 2), { encoding: 'utf8', mode: 0o600 })
-  renameFile(tmp, file)
+function writeConfig(file: string, json: Json): void {
+  writeFileAtomicSync(file, JSON.stringify(json, null, 2), renameFile, 0o600)
 }
 
 /**
@@ -53,7 +50,7 @@ export function registerMcpInConfig(configDir: string, url: string): boolean {
   if (JSON.stringify(servers[MCP_SERVER_NAME]) === JSON.stringify(entry)) return false
 
   json.mcpServers = { ...servers, [MCP_SERVER_NAME]: entry }
-  writeConfig(configDir, file, json)
+  writeConfig(file, json)
   return true
 }
 
@@ -68,6 +65,6 @@ export function unregisterMcpInConfig(configDir: string): boolean {
   const rest = { ...servers }
   delete rest[MCP_SERVER_NAME]
   json.mcpServers = rest
-  writeConfig(configDir, file, json)
+  writeConfig(file, json)
   return true
 }

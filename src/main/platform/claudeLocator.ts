@@ -137,6 +137,6 @@ export function windowsLocator(fs: LocatorFs = nodeLocatorFs): ClaudeLocator {
   }
 }
 
-export function claudeLocator(os: OsName): ClaudeLocator {
-  return os === 'win32' ? windowsLocator() : posixLocator
+export function claudeLocator(os: OsName, fs: LocatorFs = nodeLocatorFs): ClaudeLocator {
+  return os === 'win32' ? windowsLocator(fs) : posixLocator
 }

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -46,7 +46,7 @@ describe('registerMcpInConfig', () => {
     expect((read().mcpServers as Record<string, { url: string }>).claudedeck.url).toBe(
       'http://127.0.0.1:2/mcp'
     )
-    expect(existsSync(join(dir, '.claude.json.claudedeck-tmp'))).toBe(false)
+    expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([])
   })
 
   it('replaces an old entry that carried a literal token', () => {

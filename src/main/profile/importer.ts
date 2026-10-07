@@ -357,23 +357,24 @@ export { cloneCopy, type CopyRunner }
  * so a symlinked folder is copied as a real folder; with `dereference` nested symlinks are copied
  * as files too, so later edits in the profile never write through a link into the source.
  * Without it links are copied verbatim (relative links stay relative). `roots`: see CopyRunner.
- * A failed clone falls back to a plain Node copy.
+ * A failed clone falls back to `fallback`, a plain Node copy.
  */
 export async function copyEntry(
   src: string,
   dest: string,
   dereference: boolean,
   run: CopyRunner = platform.copyRunner,
-  roots: readonly string[] = []
+  roots: readonly string[] = [],
+  fallback: CopyRunner = nodeCopy
 ): Promise<void> {
   const real = await realpath(src)
   try {
     await run(real, dest, dereference, roots)
   } catch (error) {
     // The plain copy is already the fallback; running it again would repeat the same failure.
-    if (run === nodeCopy) throw error
+    if (run === fallback) throw error
     await rm(dest, { recursive: true, force: true })
-    await nodeCopy(real, dest, dereference, roots)
+    await fallback(real, dest, dereference, roots)
   }
 }
 
@@ -558,14 +559,15 @@ async function freshDir(base: string): Promise<string> {
  * Copies the chosen categories from `sourceDir` into `targetDir`. Each item is built next to its
  * destination first; only once that succeeded is the existing item moved to a timestamped backup
  * folder and the new one renamed into place, so a failure never leaves an item missing.
- * `sourceDir` is only ever read.
+ * `sourceDir` is only ever read. `run` copies an entry, `fallback` takes over when it fails.
  */
 export async function importProfile(
   sourceDir: string,
   targetDir: string,
   categories: ProfileCategory[],
   now: Date = new Date(),
-  run: CopyRunner = platform.copyRunner
+  run: CopyRunner = platform.copyRunner,
+  fallback: CopyRunner = nodeCopy
 ): Promise<ProfileImportResult> {
   const source = resolve(sourceDir)
   const target = resolve(targetDir)
@@ -640,14 +642,16 @@ export async function importProfile(
       } else if (category === 'instructions') {
         const text = await readFile(src, 'utf8')
         for (const rel of await instructionImports(source, text)) {
-          await replaceItem(rel, (tmp) => copyEntry(join(source, rel), tmp, true, run))
+          await replaceItem(rel, (tmp) =>
+            copyEntry(join(source, rel), tmp, true, run, [], fallback)
+          )
         }
         await replaceItem(entry, (tmp) => writeFile(tmp, withGuidelinesImport(text), 'utf8'))
       } else {
         const follow = followsLinks(category)
         const relocation = follow ? null : await relocationFor(source, target, entry)
         await replaceItem(entry, async (tmp) => {
-          await copyEntry(src, tmp, follow, run, [source])
+          await copyEntry(src, tmp, follow, run, [source], fallback)
           if (!relocation) return
           await relocateLinks(tmp, relocation)
           if (category === 'plugins') await rewritePluginIndexes(tmp, relocation.profileRoots)

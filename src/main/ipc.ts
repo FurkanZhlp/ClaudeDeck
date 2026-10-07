@@ -22,6 +22,7 @@ import type { PtyManager } from './pty/ptyManager'
 import { isSize, isText, type IpcTools } from './ipcUtil'
 import { MCP_TOKEN_ENV } from './mcp/sessionTokens'
 import { platform } from './platform'
+import { withEnvVars } from './platform/env'
 import type { Repository } from './state/repository'
 
 interface Deps {
@@ -254,7 +255,9 @@ export function registerIpc({
             file: launch.file,
             args: launch.args,
             cwd: project.path,
-            env: mcpToken ? { ...launch.env, [MCP_TOKEN_ENV]: mcpToken } : launch.env,
+            env: mcpToken
+              ? withEnvVars(launch.env, { [MCP_TOKEN_ENV]: mcpToken }, platform.os)
+              : launch.env,
             cols,
             rows,
             accountId: account.id

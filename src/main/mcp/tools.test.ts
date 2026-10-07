@@ -372,16 +372,32 @@ describe('project folders on Windows', () => {
     '\\\\server\\share\\code',
     '//server/share',
     '\\\\wsl$\\Ubuntu\\home',
-    '\\\\?\\C:\\code'
+    '\\\\?\\C:\\code',
+    '\\\\?\\C:\\Windows',
+    '\\??\\UNC\\x\\y',
+    '\\??\\C:\\code',
+    '\\\\.\\C:\\code',
+    '\\code',
+    'C:code'
   ])('refuses %s before resolving it', (path) => {
     expect(reason(path)).toBe('Path not allowed')
     expect(realpath).not.toHaveBeenCalled()
   })
 
-  it('refuses a local path that resolves onto a share', () => {
+  it('refuses a local path that resolves onto a share or a device path', () => {
     realpath.mockImplementationOnce(() => '\\\\server\\share\\x')
     expect(reason('Z:\\x')).toBe('Path not allowed')
+    realpath.mockImplementationOnce(() => '\\\\?\\UNC\\server\\share')
+    expect(reason('Z:\\y')).toBe('Path not allowed')
   })
+
+  it.each(['C:\\PROGRA~1', 'C:\\Windows.', 'C:\\Program Files.\\x', 'E:\\code\\app '])(
+    'refuses %s when the resolved path keeps an ambiguous name',
+    (path) => {
+      expect(reason(path)).toBe('Path not allowed')
+      expect(realpath).toHaveBeenCalledWith(path)
+    }
+  )
 
   it('accepts ordinary folders, including ones under the home folder', () => {
     expect(resolveWin('C:\\Users\\Me\\code\\app')).toBe('C:\\Users\\Me\\code\\app')

@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
-import { renameSync, rmSync, type RmOptions } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync, type RmOptions } from 'node:fs'
 import { cp, lstat, realpath, rename, rm, stat, symlink } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -84,7 +85,40 @@ export const RETRY_CODES: ReadonlySet<string> = new Set(['EPERM', 'EBUSY', 'EACC
 /** Waits between attempts (about 1.2 s in total). */
 export const RETRY_DELAYS_MS: readonly number[] = [25, 50, 100, 200, 350, 500]
 
-const isRetryable = (error: unknown): boolean => RETRY_CODES.has(errorCode(error) ?? '')
+/** Codes that may also be a real denial rather than a passing lock. */
+const PERMISSION_CODES: ReadonlySet<string> = new Set(['EPERM', 'EACCES'])
+/** Total wait a batch of operations (a folder relocation) may spend on retries. */
+export const BATCH_RETRY_BUDGET_MS = 2000
+
+/**
+ * Wait shared by the operations of one batch, so moving many locked files cannot block the
+ * thread for `RETRY_DELAYS_MS` per file. Within a budget EPERM/EACCES are retried only once
+ * (a lock usually clears within the first backoff; a lasting one is a real denial), EBUSY
+ * keeps the full schedule until the budget is spent.
+ */
+export interface RetryBudget {
+  remainingMs: number
+}
+
+export const retryBudget = (ms: number = BATCH_RETRY_BUDGET_MS): RetryBudget => ({
+  remainingMs: ms
+})
+
+/** Wait before the next attempt, or null to give up and rethrow. */
+function nextDelay(
+  error: unknown,
+  attempt: number,
+  delays: readonly number[],
+  budget?: RetryBudget
+): number | null {
+  const code = errorCode(error) ?? ''
+  if (!RETRY_CODES.has(code) || attempt >= delays.length) return null
+  if (!budget) return delays[attempt]
+  if ((attempt >= 1 && PERMISSION_CODES.has(code)) || budget.remainingMs <= 0) return null
+  const ms = Math.min(delays[attempt], budget.remainingMs)
+  budget.remainingMs -= ms
+  return ms
+}
 
 /** Blocks the thread; only used between attempts of a synchronous file operation. */
 export function sleepSync(ms: number): void {
@@ -96,14 +130,16 @@ const sleepAsync = (ms: number): Promise<void> => new Promise((r) => setTimeout(
 export function retrySync<T>(
   op: () => T,
   sleep: (ms: number) => void = sleepSync,
-  delays: readonly number[] = RETRY_DELAYS_MS
+  delays: readonly number[] = RETRY_DELAYS_MS,
+  budget?: RetryBudget
 ): T {
   for (let attempt = 0; ; attempt++) {
     try {
       return op()
     } catch (error) {
-      if (attempt >= delays.length || !isRetryable(error)) throw error
-      sleep(delays[attempt])
+      const delay = nextDelay(error, attempt, delays, budget)
+      if (delay === null) throw error
+      sleep(delay)
     }
   }
 }
@@ -117,8 +153,9 @@ export async function retryAsync<T>(
     try {
       return await op()
     } catch (error) {
-      if (attempt >= delays.length || !isRetryable(error)) throw error
-      await sleep(delays[attempt])
+      const delay = nextDelay(error, attempt, delays)
+      if (delay === null) throw error
+      await sleep(delay)
     }
   }
 }
@@ -145,17 +182,43 @@ export function rmWithRetry(
   return (path, options) => retrySync(() => op(path, options), deps.sleep)
 }
 
+/** Sync rename; `budget` caps the retry wait shared by a batch of renames (see RetryBudget). */
+export type RenameSync = (from: string, to: string, budget?: RetryBudget) => void
+
 /**
  * Rename for atomic writes (temp file + rename) and folder moves. POSIX rename is atomic and not
  * blocked by open handles; Windows retries EPERM/EBUSY/EACCES.
  */
-export function renameWithRetry(
-  os: OsName,
-  deps: SyncFsDeps = {}
-): (from: string, to: string) => void {
+export function renameWithRetry(os: OsName, deps: SyncFsDeps = {}): RenameSync {
   const op = deps.rename ?? renameSync
   if (os !== 'win32') return (from, to) => op(from, to)
-  return (from, to) => retrySync(() => op(from, to), deps.sleep)
+  return (from, to, budget) => retrySync(() => op(from, to), deps.sleep, RETRY_DELAYS_MS, budget)
+}
+
+/**
+ * Writes `file` through a uniquely named temp file next to it, so readers never see a
+ * half-written file and concurrent writers never share a temp file. The temp file is removed
+ * again when writing or renaming fails.
+ */
+export function writeFileAtomicSync(
+  file: string,
+  content: string,
+  rename: (from: string, to: string) => void,
+  mode?: number
+): void {
+  mkdirSync(dirname(file), { recursive: true })
+  const tmp = `${file}.${randomUUID()}.tmp`
+  try {
+    writeFileSync(tmp, content, { encoding: 'utf8', mode })
+    rename(tmp, file)
+  } catch (error) {
+    try {
+      unlinkSync(tmp)
+    } catch {
+      // never created, or already renamed
+    }
+    throw error
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { renameWithRetry } from '../platform/fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { renameWithRetry, writeFileAtomicSync } from '../platform/fs'
 
 // Windows briefly locks files (antivirus, indexer); retried there, a plain rename elsewhere.
 const renameFile = renameWithRetry(process.platform)
@@ -13,10 +13,7 @@ export const guidelinesPath = (configDir: string): string =>
 
 /** Writes through a temp file so readers never see a half-written file. */
 export function writeFileAtomic(file: string, content: string, mode?: number): void {
-  mkdirSync(dirname(file), { recursive: true })
-  const tmp = `${file}.claudedeck-tmp`
-  writeFileSync(tmp, content, { encoding: 'utf8', mode })
-  renameFile(tmp, file)
+  writeFileAtomicSync(file, content, renameFile, mode)
 }
 
 /** Reads the version from a first line like `<!-- claudedeck-guidelines v3 -->`. */

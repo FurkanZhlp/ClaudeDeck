@@ -10,11 +10,13 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DomainError } from '../../shared/errors'
 import {
   existingNotePath,
+  isInside,
+  isListedNoteName,
   isSafeMemoryDir,
   isValidNoteName,
   listNotes,
@@ -22,6 +24,7 @@ import {
   relocateMemory,
   writeNote
 } from './notesStore'
+import { isWindows, posixOnly } from '../../test/platform'
 
 let root: string
 
@@ -79,6 +82,17 @@ describe('note names', () => {
     'a\\b.md',
     '/etc/x.md',
     'a\0.md',
+    'a.md.',
+    'a.md '
+  ])('rejects %s everywhere', (name) => {
+    expect(isValidNoteName(name)).toBe(false)
+    expect(isListedNoteName(name, 'darwin')).toBe(false)
+    expect(isListedNoteName(name, 'win32')).toBe(false)
+    expect(codeOf(() => readNote(root, name))).toBe('INVALID')
+    expect(codeOf(() => writeNote(root, name, 'x'))).toBe('INVALID')
+  })
+
+  it.each([
     'a:b.md',
     'what?.md',
     'star*.md',
@@ -97,12 +111,20 @@ describe('note names', () => {
     'lpt9.md',
     'com¹.md',
     'CONIN$.md',
-    'a.md.',
-    'a.md '
-  ])('rejects %s', (name) => {
+    'PROGRA~1.md',
+    'notes~2.md',
+    'AB~10',
+    'x~1.backup.md'
+  ])('refuses to write %s, lists it only outside Windows', (name) => {
     expect(isValidNoteName(name)).toBe(false)
-    expect(codeOf(() => readNote(root, name))).toBe('INVALID')
     expect(codeOf(() => writeNote(root, name, 'x'))).toBe('INVALID')
+    const shortName = /~\d/.test(name)
+    expect(isListedNoteName(name, 'win32')).toBe(shortName && name.endsWith('.md'))
+    expect(isListedNoteName(name, 'darwin')).toBe(name.endsWith('.md'))
+    if (!isWindows)
+      expect(codeOf(() => readNote(root, name))).toBe(
+        name.endsWith('.md') ? 'NOT_FOUND' : 'INVALID'
+      )
   })
 
   it.each([
@@ -112,12 +134,43 @@ describe('note names', () => {
     'com10.md',
     'lpt.md',
     'çalışma notu.md',
-    'a.b.md'
-  ])('accepts %s', (name) => expect(isValidNoteName(name)).toBe(true))
+    'a.b.md',
+    'my~notes.md',
+    'long-name~1.md'
+  ])('accepts %s', (name) => {
+    expect(isValidNoteName(name)).toBe(true)
+    expect(isListedNoteName(name, 'darwin')).toBe(true)
+    expect(isListedNoteName(name, 'win32')).toBe(true)
+  })
+
+  // A colon cannot be part of a Windows file name (it would name an alternate data stream).
+  posixOnly('keeps existing notes with non-portable names visible and readable', () => {
+    const name = 'Q&A: deploy.md'
+    const dir = files(join(root, 'm'), { [name]: 'answers' })
+    expect(listNotes(dir).map((n) => n.name)).toEqual([name])
+    expect(readNote(dir, name)).toBe('answers')
+    expect(codeOf(() => writeNote(dir, name, 'x'))).toBe('INVALID')
+  })
 
   it('rejects non-strings', () => {
     expect(isValidNoteName(undefined)).toBe(false)
     expect(codeOf(() => readNote(root, 42 as unknown as string))).toBe('INVALID')
+  })
+})
+
+describe('isInside', () => {
+  it('needs a path strictly below the root', () => {
+    expect(isInside('/a/projects', '/a/projects/k/memory', posix)).toBe(true)
+    expect(isInside('/a/projects', '/a/projects', posix)).toBe(false)
+    expect(isInside('/a/projects', '/a/projects-x/k', posix)).toBe(false)
+    expect(isInside('/a/projects', '/a', posix)).toBe(false)
+  })
+
+  it('treats another Windows drive as outside', () => {
+    expect(isInside('C:\\cfg\\projects', 'C:\\cfg\\projects\\k\\memory', win32)).toBe(true)
+    expect(isInside('C:\\cfg\\projects', 'D:\\cfg\\projects\\k\\memory', win32)).toBe(false)
+    expect(isInside('C:\\cfg\\projects', 'D:\\', win32)).toBe(false)
+    expect(isInside('C:\\cfg\\projects', 'C:\\cfg', win32)).toBe(false)
   })
 })
 

@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { DomainError } from '../../shared/errors'
 import type { Account, OptimizeState } from '../../shared/types'
 import { createSessionTokens, MCP_TOKEN_ENV, type SessionTokens } from '../mcp/sessionTokens'
+import { createPlatform, platform } from '../platform'
 import { permissionRulePath } from '../platform/paths'
 import {
   buildClaudeArgs,
@@ -154,6 +155,47 @@ describe('optimize manager: start', () => {
     expect(env[MCP_TOKEN_ENV]).toMatch(/^[0-9a-f]{64}$/)
     expect(scopeOf()).toEqual({ kind: 'optimize', runId: expect.any(String), accountId: 'a1' })
     expect(emitted.map((s) => s.status)).toEqual(['running'])
+  })
+
+  it('merges the MCP variables into the Windows session env', async () => {
+    const claudeExe = 'C:\\Tools\\claude.exe'
+    const win = createPlatform('win32', {
+      isFile: (path) => path.toLowerCase() === claudeExe.toLowerCase(),
+      readText: () => null
+    })
+    const launch = vi.spyOn(platform, 'claudeLaunch').mockImplementation(win.claudeLaunch)
+    const defaults = vi.spyOn(platform, 'spawnDefaults').mockImplementation(win.spawnDefaults)
+    try {
+      const windows = new OptimizeManager({
+        ...deps,
+        os: 'win32',
+        tmpDir: root,
+        baseEnv: () =>
+          Promise.resolve({
+            Path: 'C:\\Tools',
+            USERPROFILE: 'C:\\Users\\me',
+            mcp_tool_timeout: '5',
+            Claudedeck_Mcp_Token: 'stale'
+          })
+      })
+      await windows.start('a1')
+      const { file, options } = last()
+      expect(file).toBe(claudeExe)
+      expect(options.detached).toBe(false)
+      const env = options.env as Record<string, string>
+      const spellings = (name: string): string[] =>
+        Object.keys(env).filter((key) => key.toUpperCase() === name)
+      expect(spellings('MCP_TOOL_TIMEOUT')).toEqual(['MCP_TOOL_TIMEOUT'])
+      expect(spellings(MCP_TOKEN_ENV)).toEqual([MCP_TOKEN_ENV])
+      expect(env.MCP_TOOL_TIMEOUT).toBe('86400000')
+      expect(env[MCP_TOKEN_ENV]).toMatch(/^[0-9a-f]{64}$/)
+      expect(env.CLAUDE_CONFIG_DIR).toBe(account.configDir)
+      expect(env.NoDefaultCurrentDirectoryInExePath).toBe('1')
+      expect(scopeOf()).toEqual({ kind: 'optimize', runId: expect.any(String), accountId: 'a1' })
+    } finally {
+      launch.mockRestore()
+      defaults.mockRestore()
+    }
   })
 
   it('never puts the token on the command line', async () => {

@@ -8,10 +8,10 @@ import {
   readdirSync,
   readlinkSync,
   symlinkSync,
-  chmodSync,
   utimesSync,
   writeFileSync
 } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -27,7 +27,7 @@ import {
   rewritePaths,
   summarizeSource
 } from './importer'
-import { expectMode, posixOnly } from '../../test/platform'
+import { expectMode } from '../../test/platform'
 
 const failingClone = async (): Promise<void> => {
   throw new Error('clone failed')
@@ -481,37 +481,42 @@ describe('symlinks', () => {
 })
 
 describe('import atomicity', () => {
-  // chmod 0o000 makes a file unreadable only on POSIX; Windows ignores the mode bits.
-  posixOnly('keeps the previous item when copying a category fails', async () => {
+  /** A copy that leaves a partial result behind and then fails, on every OS. */
+  const failingCopy = async (_src: string, dest: string): Promise<void> => {
+    await mkdir(dest, { recursive: true })
+    await writeFile(join(dest, 'partial.md'), 'half')
+    throw new Error('copy failed')
+  }
+
+  it('keeps the previous item when copying a category fails', async () => {
     const src = tempDir()
     const dst = tempDir()
     put(src, 'agents/ok.md', 'ok')
-    put(src, 'agents/locked.md', 'locked')
-    chmodSync(join(src, 'agents/locked.md'), 0o000)
     put(dst, 'agents/mine.md', 'mine')
-    try {
-      await expect(importProfile(src, dst, ['agents'])).rejects.toThrow(/agents/)
-    } finally {
-      chmodSync(join(src, 'agents/locked.md'), 0o644)
-    }
+    await expect(
+      importProfile(src, dst, ['agents'], new Date(), failingCopy, failingCopy)
+    ).rejects.toThrow(/agents/)
     expect(read(dst, 'agents/mine.md')).toBe('mine')
-    expect(existsSync(join(dst, 'agents.claudedeck-tmp'))).toBe(false)
-    expect(existsSync(join(dst, 'claudedeck'))).toBe(false)
+    expect(readdirSync(join(dst, 'agents'))).toEqual(['mine.md'])
+    expect(readdirSync(dst)).toEqual(['agents'])
   })
 
-  posixOnly('reports which category failed', async () => {
+  it('reports which category failed', async () => {
     const src = tempDir()
     const dst = tempDir()
-    put(src, 'commands/locked.md', 'x')
-    chmodSync(join(src, 'commands/locked.md'), 0o000)
-    try {
-      const error: unknown = await importProfile(src, dst, ['commands']).catch((e) => e)
-      expect(error).toBeInstanceOf(ProfileImportError)
-      expect((error as ProfileImportError).category).toBe('commands')
-    } finally {
-      chmodSync(join(src, 'commands/locked.md'), 0o644)
-    }
+    put(src, 'commands/c.md', 'x')
+    const error: unknown = await importProfile(
+      src,
+      dst,
+      ['commands'],
+      new Date(),
+      failingCopy,
+      failingCopy
+    ).catch((e) => e)
+    expect(error).toBeInstanceOf(ProfileImportError)
+    expect((error as ProfileImportError).category).toBe('commands')
     expect(existsSync(join(dst, 'commands'))).toBe(false)
+    expect(readdirSync(dst)).toEqual([])
   })
 })
 

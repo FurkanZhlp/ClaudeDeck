@@ -22,6 +22,7 @@ describe('JsonStore', () => {
     store.save({ a: 2 })
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ a: 2 })
     expect(store.load()).toEqual({ a: 2, b: 'x' })
+    expect(readdirSync(join(dir, 'nested'))).toEqual(['config.json'])
   })
 
   it('bozuk dosyayı yedekleyip varsayılana döner', () => {

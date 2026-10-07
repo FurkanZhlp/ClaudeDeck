@@ -1,6 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
-import { renameWithRetry } from '../platform/fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { renameWithRetry, writeFileAtomicSync } from '../platform/fs'
 
 // Windows briefly locks files (antivirus, indexer); retried there, a plain rename elsewhere.
 const renameFile = renameWithRetry(process.platform)
@@ -24,9 +23,6 @@ export class JsonStore<T extends object> {
   }
 
   save(data: T): void {
-    mkdirSync(dirname(this.file), { recursive: true })
-    const tmp = `${this.file}.tmp`
-    writeFileSync(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 })
-    renameFile(tmp, this.file)
+    writeFileAtomicSync(this.file, JSON.stringify(data, null, 2), renameFile, 0o600)
   }
 }

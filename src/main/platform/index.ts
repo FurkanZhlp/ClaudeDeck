@@ -1,6 +1,6 @@
 import { resolveBaseEnv } from './env'
 import { copyRunner, rmWithRetry } from './fs'
-import { claudeLocator } from './claudeLocator'
+import { claudeLocator, nodeLocatorFs, type LocatorFs } from './claudeLocator'
 import { claudeLaunch, shellLaunch } from './launch'
 import { permissionRulePath } from './paths'
 import { killTree, spawnDefaults } from './processTree'
@@ -16,17 +16,20 @@ export type {
   Platform
 } from './types'
 
-/** Binds every platform function to one OS; tests build a win32 platform on a Mac. */
-export function createPlatform(os: OsName): Platform {
+/**
+ * Binds every platform function to one OS; tests build a win32 platform on a Mac and pass a
+ * fake `fs` for locating `claude.exe` and the shell.
+ */
+export function createPlatform(os: OsName, fs: LocatorFs = nodeLocatorFs): Platform {
   return {
     os,
     resolveBaseEnv: () => resolveBaseEnv(os),
     claudeLaunch: (configDir, claudeArgs, baseEnv) =>
-      claudeLaunch(os, configDir, claudeArgs, baseEnv),
-    shellLaunch: (configDir, baseEnv) => shellLaunch(os, configDir, baseEnv),
+      claudeLaunch(os, configDir, claudeArgs, baseEnv, fs),
+    shellLaunch: (configDir, baseEnv) => shellLaunch(os, configDir, baseEnv, fs),
     spawnDefaults: () => spawnDefaults(os),
     killTree: killTree(os),
-    claudeLocator: claudeLocator(os),
+    claudeLocator: claudeLocator(os, fs),
     permissionRulePath: (abs) => permissionRulePath(abs, os),
     rmWithRetry: rmWithRetry(os),
     copyRunner: copyRunner(os)

@@ -7,7 +7,7 @@ import { DomainError } from '../../shared/errors'
 import type { NoteFile, Project, SessionKind } from '../../shared/types'
 import { memoryDir } from '../notes/memoryPath'
 import type { OsName } from '../platform/types'
-import { isRootPath, isWindowsUncPath, isWithin, samePath } from '../platform/paths'
+import { isRootPath, isWithin, samePath, splitPath } from '../platform/paths'
 import type { Repository } from '../state/repository'
 import type { McpScope, McpScopeKind, SessionScope } from './sessionTokens'
 
@@ -99,6 +99,19 @@ const WINDOWS_BLOCKED_ROOTS: readonly (readonly [string, string])[] = [
   ['ProgramW6432', 'C:\\Program Files'],
   ['ProgramData', 'C:\\ProgramData']
 ]
+
+/**
+ * The only Windows form a project folder is accepted in: drive letter and separator. Rules out
+ * UNC shares, device and NT namespace paths (`\\?\`, `\\.\`, `\??\`) and drive-relative paths.
+ */
+const WINDOWS_DRIVE_PATH = /^[A-Za-z]:[\\/]/
+
+/**
+ * A resolved Windows segment that is still a short name (`PROGRA~1`) or one Windows silently
+ * trims (`x.`, `x `): it may name another folder than it reads, so it is refused.
+ */
+const isAmbiguousSegment = (segment: string): boolean =>
+  segment.includes('~') || /[. ]$/.test(segment)
 
 const id = z.string().trim().min(1).max(200)
 const absPath = z.string().trim().min(1).max(4096).refine(isAbsolute, 'Path must be absolute')
@@ -247,20 +260,29 @@ export function isBlockedProjectFolder(
   )
 }
 
-/** Realpath of an existing directory that is safe to use as a project folder. */
+/** Resolved Windows folder that is a plain drive path made of unambiguous names. */
+const isCanonicalWindowsFolder = (real: string): boolean =>
+  WINDOWS_DRIVE_PATH.test(real) &&
+  !splitPath(real, nodePath.win32).slice(1).some(isAmbiguousSegment)
+
+/**
+ * Realpath of an existing directory that is safe to use as a project folder. On Windows the
+ * native realpath is used: it expands 8.3 short names and returns the canonical case.
+ */
 export function resolveProjectFolder(path: string, deps: ProjectFolderDeps = {}): string {
   const os = deps.os ?? process.platform
-  const realpath = deps.realpath ?? realpathSync
-  // Checked before touching the path: resolving a share would reach the network.
-  if (os === 'win32' && isWindowsUncPath(path)) throw new ToolError('Path not allowed')
+  const realpath = deps.realpath ?? (os === 'win32' ? realpathSync.native : realpathSync)
+  // Only drive paths are resolved, so the given path itself never names a share or a device.
+  // Resolving it can still reach the network: a mapped drive letter, or a junction or symlink
+  // onto a share, is only recognised (and refused) from its result below.
+  if (os === 'win32' && !WINDOWS_DRIVE_PATH.test(path)) throw new ToolError('Path not allowed')
   let real: string
   try {
     real = realpath(path)
   } catch {
     throw new DomainError('PATH_MISSING')
   }
-  // A local path may still resolve onto a share (mapped drive link, junction).
-  if (os === 'win32' && isWindowsUncPath(real)) throw new ToolError('Path not allowed')
+  if (os === 'win32' && !isCanonicalWindowsFolder(real)) throw new ToolError('Path not allowed')
   const isDirectory = deps.isDirectory ?? ((dir: string) => statSync(dir).isDirectory())
   if (!isDirectory(real)) throw new ToolError('Path is not a directory')
   let home = deps.home ?? homedir()
