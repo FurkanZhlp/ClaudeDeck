@@ -733,5 +733,45 @@
       "builtins": "Bu proje için yerleşik kurallar",
       "customRules": "Bu projeye özel ek kurallar"
     }
+  },
+  "agents": {
+    "show": "Ajanları göster",
+    "hide": "Ajanları gizle",
+    "runningCount_one": "{{count}} çalışıyor",
+    "runningCount_other": "{{count}} çalışıyor",
+    "title": "Ajanlar",
+    "close": "Ajanları kapat",
+    "back": "Ajanlara dön",
+    "backToList": "Listeye dön",
+    "breadcrumb": "Konum",
+    "listLabel": "Bu sekmedeki ajanlar",
+    "loading": "Ajanlar yükleniyor",
+    "loadFailed": "Ajanlar yüklenemedi.",
+    "emptyTitle": "Henüz ajan yok",
+    "emptyBody": "Bu Claude sekmesinde başlatılan alt ajanlar, çalışırken burada görünür.",
+    "status": {
+      "running": "Çalışıyor",
+      "idle": "Beklemede",
+      "done": "Tamamlandı"
+    },
+    "elapsed": "geçen süre {{time}}",
+    "foreground": "Ön planda",
+    "background": "Arka planda",
+    "currentTool": "{{tool}} kullanılıyor",
+    "queued": "Test kuyruğunda",
+    "transcript": "Ajan dökümü",
+    "older": "Daha eskileri göster",
+    "loadingTranscript": "Döküm yükleniyor",
+    "emptyTranscript": "Henüz kayıt yok.",
+    "openFailed": "Bu ajanın dökümü açılamadı.",
+    "jumpToLatest": "En yeniye git",
+    "thinking": "Düşünüyor",
+    "input": "Girdi",
+    "result": "Sonuç",
+    "error": "Hata",
+    "noOutput": "Çıktı yok",
+    "toolDone": "Tamamlandı",
+    "toolFailed": "Başarısız",
+    "toolRunning": "Çalışıyor"
   }
 }

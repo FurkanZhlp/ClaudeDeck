@@ -733,5 +733,45 @@
       "builtins": "Built-in rules for this project",
       "customRules": "Extra rules for this project"
     }
+  },
+  "agents": {
+    "show": "Show agents",
+    "hide": "Hide agents",
+    "runningCount_one": "{{count}} running",
+    "runningCount_other": "{{count}} running",
+    "title": "Agents",
+    "close": "Close agents",
+    "back": "Back to agents",
+    "backToList": "Back to the list",
+    "breadcrumb": "Location",
+    "listLabel": "Agents in this tab",
+    "loading": "Loading agents",
+    "loadFailed": "Agents could not be loaded.",
+    "emptyTitle": "No agents yet",
+    "emptyBody": "Subagents started in this Claude tab appear here while they work.",
+    "status": {
+      "running": "Running",
+      "idle": "Idle",
+      "done": "Done"
+    },
+    "elapsed": "elapsed {{time}}",
+    "foreground": "Foreground",
+    "background": "Background",
+    "currentTool": "Using {{tool}}",
+    "queued": "In the test queue",
+    "transcript": "Agent transcript",
+    "older": "Show older",
+    "loadingTranscript": "Loading transcript",
+    "emptyTranscript": "Nothing recorded yet.",
+    "openFailed": "This agent's transcript could not be opened.",
+    "jumpToLatest": "Jump to latest",
+    "thinking": "Thinking",
+    "input": "Input",
+    "result": "Result",
+    "error": "Error",
+    "noOutput": "No output",
+    "toolDone": "Completed",
+    "toolFailed": "Failed",
+    "toolRunning": "Running"
   }
 }
