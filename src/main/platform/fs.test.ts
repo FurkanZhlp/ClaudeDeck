@@ -210,6 +210,17 @@ describe('writeFileAtomicSync', () => {
     expect(readdirSync(dir)).toEqual(['x.json'])
     expect(readFileSync(file, 'utf8')).toBe('old')
   })
+  it('leaves the file alone when the check before the rename fails', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claudedeck-atomic-'))
+    const file = join(dir, 'x.json')
+    writeFileSync(file, 'old')
+    const rename = renameWithRetry(process.platform)
+    expect(writeFileAtomicSync(file, 'new', rename, undefined, () => false)).toBe(false)
+    expect(readdirSync(dir)).toEqual(['x.json'])
+    expect(readFileSync(file, 'utf8')).toBe('old')
+    expect(writeFileAtomicSync(file, 'new', rename, undefined, () => true)).toBe(true)
+    expect(readFileSync(file, 'utf8')).toBe('new')
+  })
 })
 
 describe('safeSymlink', () => {

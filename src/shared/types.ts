@@ -438,6 +438,8 @@ export interface AgentSummary {
   lastActivityAt: number
   /** Tool of the last tool_use without a result. */
   currentTool?: string
+  /** Single line preview (max 120 chars) of that call's main input: Bash command, file path. */
+  currentToolInput?: string
   /** Test queue run this agent is waiting on or running. */
   queuedRunId?: string
 }

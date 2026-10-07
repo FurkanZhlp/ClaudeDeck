@@ -5,7 +5,7 @@ import type { AgentSummary } from '../../shared/types'
 import { isText, type IpcTools } from '../ipcUtil'
 import type { Repository } from '../state/repository'
 import { AgentSessionWatcher, type AgentWatcherOptions, type SessionLocation } from './agentWatcher'
-import { isSafeId, projectDirCandidates } from './subagentPaths'
+import { isSafeId, sessionLocation } from './subagentPaths'
 
 const UPDATE_DEBOUNCE_MS = 250
 
@@ -25,6 +25,29 @@ interface Deps {
   /** Timing and fs.watch switches (tests). */
   watcherOptions?: Pick<AgentWatcherOptions, 'timing' | 'watchFiles' | 'now'>
   updateDebounceMs?: number
+}
+
+/**
+ * Transcript location of a Claude tab under its project's account; null for shell tabs, tabs
+ * without a Claude session id yet, and unknown tabs. Shared by the agent viewer and the test
+ * queue's background completion watch.
+ */
+export function resolveTabSession(
+  repo: Pick<Repository, 'session' | 'project' | 'account'>,
+  sessionId: string
+): ResolvedSession | null {
+  try {
+    const session = repo.session(sessionId)
+    if (session.kind !== 'claude' || !isSafeId(session.claudeSessionId)) return null
+    const project = repo.project(session.projectId)
+    const account = repo.account(project.accountId)
+    return {
+      accountId: account.id,
+      ...sessionLocation(account.configDir, project.path, session.claudeSessionId)
+    }
+  } catch {
+    return null
+  }
 }
 
 export interface AgentsIpc {
@@ -65,18 +88,7 @@ export function registerAgentsIpc({
     if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
   }
 
-  const defaultResolve = (sessionId: string): ResolvedSession | null => {
-    const session = repo.session(sessionId)
-    if (session.kind !== 'claude' || !session.claudeSessionId) return null
-    const project = repo.project(session.projectId)
-    const account = repo.account(project.accountId)
-    return {
-      accountId: account.id,
-      claudeSessionId: session.claudeSessionId,
-      projectDirs: projectDirCandidates(account.configDir, project.path)
-    }
-  }
-  const resolve = resolveSession ?? defaultResolve
+  const resolve = resolveSession ?? ((sessionId: string) => resolveTabSession(repo, sessionId))
 
   /** A Claude tab that exists; shell tabs have no agents. */
   const claudeSession = (sessionId: unknown): string => {

@@ -1,9 +1,13 @@
-import { posix, win32 } from 'node:path'
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   agentFiles,
   agentIdOfFile,
   isSafeId,
+  locateSessionTranscript,
+  sessionLocation,
   projectDirCandidates,
   sessionTranscriptFile,
   subagentsDir,
@@ -62,5 +66,52 @@ describe('subagentPaths', () => {
     expect(agentIdOfFile('agent-.jsonl')).toBeNull()
     expect(agentIdOfFile('agent-a.b.jsonl')).toBeNull()
     expect(agentIdOfFile('notes.jsonl')).toBeNull()
+  })
+})
+
+describe('locateSessionTranscript', () => {
+  const setup = (): { config: string; project: string } => {
+    const config = realpathSync(mkdtempSync(join(tmpdir(), 'cd-locate-')))
+    const project = join(config, 'code', 'app')
+    mkdirSync(project, { recursive: true })
+    return { config, project }
+  }
+
+  it('prefers the candidate holding the transcript and falls back to the first', () => {
+    const { config, project } = setup()
+    const location = sessionLocation(config, project, SID)
+    expect(locateSessionTranscript(location)).toBe(
+      sessionTranscriptFile(location.projectDirs[0], SID)
+    )
+    const link = join(config, 'link')
+    try {
+      symlinkSync(project, link, 'junction')
+    } catch {
+      return
+    }
+    const viaLink = sessionLocation(config, link, SID)
+    expect(viaLink.projectDirs).toHaveLength(2)
+    mkdirSync(viaLink.projectDirs[1], { recursive: true })
+    writeFileSync(sessionTranscriptFile(viaLink.projectDirs[1], SID), '')
+    expect(locateSessionTranscript(viaLink)).toBe(
+      sessionTranscriptFile(viaLink.projectDirs[1], SID)
+    )
+  })
+
+  it('refuses unsafe ids and folders that lead out of projects/', () => {
+    const { config, project } = setup()
+    expect(locateSessionTranscript(sessionLocation(config, project, '../x'))).toBeNull()
+    const location = sessionLocation(config, project, SID)
+    mkdirSync(join(config, 'projects'), { recursive: true })
+    const outside = join(config, 'outside')
+    mkdirSync(outside)
+    try {
+      symlinkSync(outside, location.projectDirs[0], 'junction')
+    } catch {
+      return
+    }
+    expect(
+      locateSessionTranscript({ ...location, projectDirs: [location.projectDirs[0]] })
+    ).toBeNull()
   })
 })

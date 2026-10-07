@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -79,7 +80,11 @@ beforeEach(() => {
   projectDir = join(root, 'projects', '-work-demo')
   parentFile = join(projectDir, `${SID}.jsonl`)
   subDir = join(projectDir, SID, 'subagents')
-  location = { projectDirs: [join(root, 'projects', '-missing'), projectDir], claudeSessionId: SID }
+  location = {
+    projectDirs: [join(root, 'projects', '-missing'), projectDir],
+    projectsRoot: join(root, 'projects'),
+    claudeSessionId: SID
+  }
   clock = at('10:00:20.000')
   received = []
   watcher = makeWatcher()
@@ -91,13 +96,65 @@ afterEach(() => {
 })
 
 describe('AgentSessionWatcher', () => {
+  it('ignores a project folder whose real path leaves the projects folder', async () => {
+    const outside = join(root, 'elsewhere')
+    mkdirSync(join(outside, SID, 'subagents'), { recursive: true })
+    writeFileSync(join(outside, `${SID}.jsonl`), '')
+    copyFileSync(
+      join(FIXTURES, 'agent-sample.jsonl'),
+      join(outside, SID, 'subagents', 'agent-aout0000000000001.jsonl')
+    )
+    mkdirSync(join(root, 'projects'), { recursive: true })
+    try {
+      symlinkSync(outside, projectDir, 'junction')
+    } catch {
+      return // links refused (Windows without rights)
+    }
+    location = {
+      projectDirs: [projectDir],
+      projectsRoot: join(root, 'projects'),
+      claudeSessionId: SID
+    }
+    await watcher.start()
+    await new Promise((done) => setTimeout(done, 100))
+    expect(watcher.summaries()).toEqual([])
+  })
+
+  it('skips symlinked agent files', async () => {
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(parentFile, '')
+    location = {
+      projectDirs: [projectDir],
+      projectsRoot: join(root, 'projects'),
+      claudeSessionId: SID
+    }
+    mkdirSync(subDir, { recursive: true })
+    const secret = join(root, 'secret.jsonl')
+    copyFileSync(join(FIXTURES, 'agent-sample.jsonl'), secret)
+    try {
+      symlinkSync(secret, join(subDir, 'agent-alink000000000001.jsonl'))
+      symlinkSync(secret, join(subDir, 'agent-alink000000000001.meta.json'))
+    } catch {
+      return
+    }
+    await watcher.start()
+    const listed = summary('alink000000000001')
+    expect(listed?.model ?? null).toBeNull()
+    expect(listed?.description ?? '').toBe('')
+    await expect(watcher.open('alink000000000001')).resolves.toEqual({ events: [], cursor: null })
+  })
+
   it('waits for the session id and its folders, then lists agents', async () => {
     location = null
     await watcher.start()
     expect(watcher.summaries()).toEqual([])
     mkdirSync(projectDir, { recursive: true })
     writeFileSync(parentFile, '')
-    location = { projectDirs: [projectDir], claudeSessionId: SID }
+    location = {
+      projectDirs: [projectDir],
+      projectsRoot: join(root, 'projects'),
+      claudeSessionId: SID
+    }
     writeAgent('afg00000000000001', {
       agentType: 'code-reviewer',
       description: 'Review code',
@@ -118,6 +175,7 @@ describe('AgentSessionWatcher', () => {
       depth: 1,
       status: 'running',
       currentTool: 'Grep',
+      currentToolInput: 'TODO',
       startedAt: at('10:00:01.500'),
       lastActivityAt: at('10:00:10.000')
     })
@@ -276,7 +334,11 @@ describe('AgentSessionWatcher', () => {
     watcher.suspend()
     expect(watcher.summaries()).toEqual([])
     rmSync(join(projectDir, SID), { recursive: true })
-    location = { projectDirs: [projectDir], claudeSessionId: SID }
+    location = {
+      projectDirs: [projectDir],
+      projectsRoot: join(root, 'projects'),
+      claudeSessionId: SID
+    }
     writeAgent('anew0000000000001', { toolUseId: 'toolu_n' }, textLine(at('10:00:06.000'), 'y'))
     await vi.waitFor(
       () => expect(watcher.summaries().map((s) => s.agentId)).toEqual(['anew0000000000001']),

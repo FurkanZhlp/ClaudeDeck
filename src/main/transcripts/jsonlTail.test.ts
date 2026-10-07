@@ -1,12 +1,15 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { appendFileSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { posixOnly } from '../../test/platform'
 import {
   MAX_LINE_BYTES,
   createTail,
   feedTail,
   nextLineStart,
+  openRegularFile,
   readLinesBefore,
   readNewLines,
   type JsonlLine
@@ -149,5 +152,54 @@ describe('file reading', () => {
     const page = await readLinesBefore(file, Number.MAX_SAFE_INTEGER, 0)
     expect(page.lines).toEqual([])
     expect(page.end).toBe(line(1).length * 2)
+  })
+})
+
+describe('special files', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'cd-jsonl-special-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  /** Symlinks need Developer Mode or admin rights on Windows; skipped when refused. */
+  const link = (target: string, path: string): boolean => {
+    try {
+      symlinkSync(target, path)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  it('never follows a symlinked transcript', async () => {
+    const secret = join(dir, 'secret.jsonl')
+    writeFileSync(secret, line(1))
+    const path = join(dir, 'agent-x.jsonl')
+    if (!link(secret, path)) return
+    expect(await openRegularFile(path)).toBeNull()
+    expect(await readNewLines(path, createTail())).toEqual([])
+    expect((await readLinesBefore(path, Number.MAX_SAFE_INTEGER, 1024)).lines).toEqual([])
+  })
+
+  posixOnly('refuses a FIFO without blocking', async () => {
+    const path = join(dir, 'agent-fifo.jsonl')
+    execFileSync('mkfifo', [path])
+    expect(await openRegularFile(path)).toBeNull()
+    expect(await readNewLines(path, createTail())).toEqual([])
+    expect((await readLinesBefore(path, Number.MAX_SAFE_INTEGER, 1024)).lines).toEqual([])
+  })
+
+  it('opens a regular file', async () => {
+    const path = join(dir, 'agent-ok.jsonl')
+    writeFileSync(path, line(1))
+    const fh = await openRegularFile(path)
+    expect(fh).not.toBeNull()
+    await fh?.close()
+    expect(await openRegularFile(join(dir, 'missing.jsonl'))).toBeNull()
   })
 })

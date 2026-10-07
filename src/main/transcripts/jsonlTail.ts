@@ -1,4 +1,5 @@
-import { open, stat, type FileHandle } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { lstat, open, type FileHandle } from 'node:fs/promises'
 
 /** Lines longer than this are skipped (counted in `skippedLines`), never buffered whole. */
 export const MAX_LINE_BYTES = 1024 * 1024
@@ -100,12 +101,35 @@ export function feedTail(state: TailState, chunk: Buffer): JsonlLine[] {
   return lines
 }
 
-async function openIfExists(path: string): Promise<FileHandle | null> {
+// Windows has neither flag (undefined there); the lstat and fstat checks still apply.
+const OPEN_FLAGS =
+  fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)
+
+/**
+ * Opens a regular file for reading, or null. Symlinks, FIFOs, sockets and devices are refused
+ * (lstat before, fstat after opening; O_NOFOLLOW closes the race in between, O_NONBLOCK keeps
+ * a FIFO swapped in from blocking the open), so a planted link or pipe in a transcript folder
+ * never makes ClaudeDeck read elsewhere or hang.
+ */
+export async function openRegularFile(path: string): Promise<FileHandle | null> {
   try {
-    return await open(path, 'r')
+    if (!(await lstat(path)).isFile()) return null
   } catch {
     return null
   }
+  let fh: FileHandle
+  try {
+    fh = await open(path, OPEN_FLAGS)
+  } catch {
+    return null
+  }
+  try {
+    if ((await fh.stat()).isFile()) return fh
+  } catch {
+    // treated as not a regular file
+  }
+  await fh.close().catch(() => undefined)
+  return null
 }
 
 async function readRange(fh: FileHandle, from: number, to: number): Promise<Buffer> {
@@ -124,24 +148,15 @@ async function readRange(fh: FileHandle, from: number, to: number): Promise<Buff
  * A missing file yields nothing and keeps the state.
  */
 export async function readNewLines(path: string, state: TailState): Promise<JsonlLine[]> {
-  let size: number
-  let ino: number
-  try {
-    const info = await stat(path)
-    size = info.size
-    ino = info.ino
-  } catch {
-    return []
-  }
-  const replaced = state.ino !== null && ino !== 0 && ino !== state.ino
-  if (replaced || size < state.offset) resetTail(state)
-  state.ino = ino
-  if (size === state.offset) return []
-
-  const fh = await openIfExists(path)
+  const fh = await openRegularFile(path)
   if (!fh) return []
   const lines: JsonlLine[] = []
   try {
+    const { size, ino } = await fh.stat()
+    const replaced = state.ino !== null && ino !== 0 && ino !== state.ino
+    if (replaced || size < state.offset) resetTail(state)
+    state.ino = ino
+    if (size === state.offset) return []
     while (state.offset < size) {
       const chunk = await readRange(
         fh,
@@ -189,7 +204,7 @@ export async function readLinesBefore(
   bytes: number
 ): Promise<LinesPage> {
   const none: LinesPage = { lines: [], start: null, end: 0 }
-  const fh = await openIfExists(path)
+  const fh = await openRegularFile(path)
   if (!fh) return none
   try {
     const size = (await fh.stat()).size

@@ -1,10 +1,12 @@
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { lstat, readdir, realpath } from 'node:fs/promises'
 import { watch as fsWatch, type FSWatcher, type Stats } from 'node:fs'
 import { DomainError } from '../../shared/errors'
 import type { AgentEvent, AgentOpenResult, AgentSummary } from '../../shared/types'
+import { isWithin } from '../platform/paths'
 import {
   createTail,
   nextLineStart,
+  openRegularFile,
   readLinesBefore,
   readNewLines,
   type JsonlLine,
@@ -21,7 +23,8 @@ import {
   isSafeId,
   sessionTranscriptFile,
   subagentsDirIn,
-  type AgentFiles
+  type AgentFiles,
+  type SessionLocation
 } from './subagentPaths'
 import {
   applyActivity,
@@ -67,13 +70,7 @@ const DEFAULT_TIMING: WatcherTiming = {
   parentPollMs: 2000
 }
 
-/** Where a tab's transcripts may live; main derives it, the renderer never sends paths. */
-export interface SessionLocation {
-  /** Candidate `<configDir>/projects/<key>` folders, preferred first. */
-  projectDirs: string[]
-  /** The tab's `--session-id`. */
-  claudeSessionId: string
-}
+export type { SessionLocation }
 
 export interface AgentWatcherOptions {
   /** Null while the tab has no Claude session id yet; called again until it resolves. */
@@ -173,11 +170,22 @@ interface Located {
   subDir: string
 }
 
+/** Links are not followed: a planted symlink never reveals another file's times. */
 const statOrNull = async (path: string): Promise<Stats | null> => {
   try {
-    return await stat(path)
+    return await lstat(path)
   } catch {
     return null
+  }
+}
+
+/** The real path of `path` lies inside the real path of `root`. */
+async function realWithin(path: string, root: string): Promise<boolean> {
+  try {
+    const [real, realRoot] = await Promise.all([realpath(path), realpath(root)])
+    return isWithin(real, realRoot)
+  } catch {
+    return false
   }
 }
 
@@ -197,12 +205,15 @@ function trimToLines(entries: RingEntry[], max: number): RingEntry[] {
 }
 
 async function readMeta(path: string): Promise<AgentMeta | null> {
+  const fh = await openRegularFile(path)
+  if (!fh) return null
   try {
-    const info = await stat(path)
-    if (info.size > META_MAX_BYTES) return null
-    return parseAgentMeta(JSON.parse(await readFile(path, 'utf8')))
+    if ((await fh.stat()).size > META_MAX_BYTES) return null
+    return parseAgentMeta(JSON.parse(await fh.readFile('utf8')))
   } catch {
     return null
+  } finally {
+    await fh.close().catch(() => undefined)
   }
 }
 
@@ -214,6 +225,7 @@ export class AgentSessionWatcher {
   private readonly timing: WatcherTiming
   private readonly now: () => number
   private located: Located | null = null
+  private projectsRoot = ''
   private records = new Map<string, AgentRecord>()
   private signals = new CompletionSignals()
   private openState: OpenState | null = null
@@ -387,6 +399,11 @@ export class AgentSessionWatcher {
       const found = (await statOrNull(parentFile)) || (await statOrNull(subDir))
       if (gen !== this.generation) return null
       if (!found) continue
+      // A project folder linked to somewhere outside the account's projects is not read.
+      const inside = await realWithin(dir, location.projectsRoot)
+      if (gen !== this.generation) return null
+      if (!inside) continue
+      this.projectsRoot = location.projectsRoot
       this.located = { parentFile, subDir }
       this.stopParent = watchSessionTranscript(
         parentFile,
@@ -431,6 +448,7 @@ export class AgentSessionWatcher {
     if (!located || gen !== this.generation) return
     let names: string[]
     try {
+      if (!(await realWithin(located.subDir, this.projectsRoot))) throw new Error('outside')
       names = await readdir(located.subDir)
     } catch {
       this.opts.onChange()
@@ -503,6 +521,7 @@ export class AgentSessionWatcher {
       )
       if (gen !== this.generation) return
       rec.tail = createTail(page.end)
+      rec.activity.partial = page.start !== null
       this.applyLines(rec, page.lines, false)
     }
     const lines = await readNewLines(rec.files.transcript, rec.tail)

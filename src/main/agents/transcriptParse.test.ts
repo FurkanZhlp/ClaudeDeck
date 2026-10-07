@@ -14,7 +14,10 @@ import {
   clip,
   createActivity,
   currentTool,
+  currentToolInput,
   deriveStatus,
+  toolInputPreview,
+  TOOL_PREVIEW_LIMIT,
   lineEvents,
   parseAgentMeta
 } from './transcriptParse'
@@ -185,6 +188,34 @@ describe('parseAgentMeta', () => {
   })
 })
 
+describe('toolInputPreview', () => {
+  it('picks the main argument as one short line', () => {
+    expect(toolInputPreview({ command: 'pnpm   test\n  --run', timeout: 5 })).toBe(
+      'pnpm test --run'
+    )
+    expect(toolInputPreview({ file_path: '/work/a.ts', limit: 10 })).toBe('/work/a.ts')
+    expect(toolInputPreview({ pattern: 'TODO', path: 'src' })).toBe('TODO')
+    expect(toolInputPreview({ url: 'https://example.com' })).toBe('https://example.com')
+    expect(toolInputPreview({ other: 1 })).toBeUndefined()
+    expect(toolInputPreview('x')).toBeUndefined()
+    const long = toolInputPreview({ command: `echo \u001b[31m${'x'.repeat(500)}` }) as string
+    expect(long.length).toBeLessThanOrEqual(TOOL_PREVIEW_LIMIT + 1)
+    expect(long).not.toContain('\u001b')
+  })
+
+  it('is kept for the pending call and shown in running summaries', () => {
+    const activity = createActivity()
+    applyActivity(activity, {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'pnpm test' } }]
+      }
+    })
+    expect(currentTool(activity)).toBe('Bash')
+    expect(currentToolInput(activity)).toBe('pnpm test')
+  })
+})
+
 describe('buildSummary', () => {
   const base = {
     agentId: 'a1',
@@ -201,6 +232,18 @@ describe('buildSummary', () => {
     resolvedModel: 'resolved',
     now: 300
   }
+
+  it('starts at the first timestamp, bounded by the file time when only the end was read', () => {
+    const activity = createActivity()
+    lines.forEach((l) => applyActivity(activity, l.value))
+    const first = activity.firstAt as number
+    expect(buildSummary({ ...base, activity, createdAt: first - 5000 }).startedAt).toBe(first)
+    activity.partial = true
+    expect(buildSummary({ ...base, activity, createdAt: first - 5000 }).startedAt).toBe(
+      first - 5000
+    )
+    expect(buildSummary({ ...base, activity, createdAt: first + 5000 }).startedAt).toBe(first)
+  })
 
   it('falls back to file times and the resolved model', () => {
     expect(buildSummary({ ...base, activity: createActivity() })).toEqual({
@@ -223,6 +266,7 @@ describe('buildSummary', () => {
     expect(running).toMatchObject({
       status: 'running',
       currentTool: 'Grep',
+      currentToolInput: 'TODO',
       queuedRunId: 'r1',
       model: 'claude-sonnet-5'
     })

@@ -204,13 +204,20 @@ export function writeFileAtomicSync(
   file: string,
   content: string,
   rename: (from: string, to: string) => void,
-  mode?: number
-): void {
+  mode?: number,
+  /** Checked right before the rename; false leaves `file` alone and returns false. */
+  beforeRename?: () => boolean
+): boolean {
   mkdirSync(dirname(file), { recursive: true })
   const tmp = `${file}.${randomUUID()}.tmp`
   try {
     writeFileSync(tmp, content, { encoding: 'utf8', mode })
+    if (beforeRename && !beforeRename()) {
+      unlinkSync(tmp)
+      return false
+    }
     rename(tmp, file)
+    return true
   } catch (error) {
     try {
       unlinkSync(tmp)

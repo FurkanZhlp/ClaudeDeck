@@ -4,6 +4,8 @@ import type { JsonlLine } from '../transcripts/jsonlTail'
 export const TEXT_LIMIT = 4096
 export const INPUT_LIMIT = 1024
 export const RESULT_LIMIT = 2048
+/** Single line preview of the pending tool's main argument in summaries. */
+export const TOOL_PREVIEW_LIMIT = 120
 /** No activity and no pending tool call for this long: the agent is shown as idle. */
 export const IDLE_AFTER_MS = 60_000
 /** A pending tool call without any activity for this long no longer keeps an agent running. */
@@ -70,6 +72,33 @@ function inputPreview(input: unknown): string | undefined {
   } catch {
     return undefined
   }
+}
+
+/** Input fields that best describe a call, by preference (Bash command, file path, …). */
+const PREVIEW_FIELDS = [
+  'command',
+  'file_path',
+  'notebook_path',
+  'pattern',
+  'path',
+  'url',
+  'query',
+  'description',
+  'prompt'
+]
+
+/** One line, at most TOOL_PREVIEW_LIMIT characters, of the call's main argument. */
+export function toolInputPreview(input: unknown): string | undefined {
+  if (!isRecord(input)) return undefined
+  for (const field of PREVIEW_FIELDS) {
+    const value = input[field]
+    if (typeof value !== 'string') continue
+    const line = clip(value.slice(0, TOOL_PREVIEW_LIMIT * 4), TOOL_PREVIEW_LIMIT * 4)
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (line) return clip(line, TOOL_PREVIEW_LIMIT)
+  }
+  return undefined
 }
 
 function resultText(content: unknown): string {
@@ -165,14 +194,22 @@ export function lineEvents(line: JsonlLine): AgentEvent[] {
 export interface AgentActivity {
   model: string | null
   firstAt: number | null
+  /** Only the transcript's end was read, so `firstAt` may be later than the real start. */
+  partial: boolean
   lastAt: number | null
-  /** tool_use id → tool name, in call order, for calls without a result yet. */
-  pending: Map<string, string>
+  /** tool_use id → tool name and input preview, in call order, for calls without a result yet. */
+  pending: Map<string, PendingTool>
+}
+
+export interface PendingTool {
+  name: string
+  input?: string
 }
 
 export const createActivity = (): AgentActivity => ({
   model: null,
   firstAt: null,
+  partial: false,
   lastAt: null,
   pending: new Map()
 })
@@ -194,7 +231,10 @@ export function applyActivity(activity: AgentActivity, value: Record<string, unk
     if (!isRecord(block) || typeof block.type !== 'string') continue
     if (block.type === 'tool_use' && typeof block.id === 'string') {
       activity.pending.delete(block.id)
-      activity.pending.set(block.id, str(block.name, 128) ?? 'tool')
+      const pending: PendingTool = { name: str(block.name, 128) ?? 'tool' }
+      const input = toolInputPreview(block.input)
+      if (input) pending.input = input
+      activity.pending.set(block.id, pending)
       if (activity.pending.size > MAX_PENDING) {
         const oldest = activity.pending.keys().next().value
         if (oldest !== undefined) activity.pending.delete(oldest)
@@ -205,12 +245,19 @@ export function applyActivity(activity: AgentActivity, value: Record<string, unk
   }
 }
 
-/** Tool of the last call still waiting for its result. */
-export function currentTool(activity: AgentActivity): string | undefined {
-  let last: string | undefined
-  for (const name of activity.pending.values()) last = name
+const lastPending = (activity: AgentActivity): PendingTool | undefined => {
+  let last: PendingTool | undefined
+  for (const tool of activity.pending.values()) last = tool
   return last
 }
+
+/** Tool of the last call still waiting for its result. */
+export const currentTool = (activity: AgentActivity): string | undefined =>
+  lastPending(activity)?.name
+
+/** Input preview of that call (`pnpm test`, a file path), when it has one. */
+export const currentToolInput = (activity: AgentActivity): string | undefined =>
+  lastPending(activity)?.input
 
 export interface StatusInput {
   /** Latest completion signal for this agent (epoch ms), or null. */
@@ -253,7 +300,14 @@ export interface SummaryInput {
 
 export function buildSummary(input: SummaryInput): AgentSummary {
   const { meta, activity } = input
-  const startedAt = activity.firstAt ?? input.createdAt
+  // Summary mode may read only a transcript's end; then its first timestamp can be later than
+  // the start, and the file's creation time bounds it.
+  const startedAt =
+    activity.firstAt === null
+      ? input.createdAt
+      : activity.partial
+        ? Math.min(activity.firstAt, input.createdAt)
+        : activity.firstAt
   const lastActivityAt = Math.max(activity.lastAt ?? input.modifiedAt, startedAt)
   const doneAt = meta?.stoppedByUser ? (input.doneAt ?? lastActivityAt) : input.doneAt
   const summary: AgentSummary = {
@@ -272,8 +326,11 @@ export function buildSummary(input: SummaryInput): AgentSummary {
     startedAt,
     lastActivityAt
   }
-  const tool = currentTool(activity)
-  if (tool && summary.status === 'running') summary.currentTool = tool
+  const tool = lastPending(activity)
+  if (tool && summary.status === 'running') {
+    summary.currentTool = tool.name
+    if (tool.input) summary.currentToolInput = tool.input
+  }
   if (input.queuedRunId) summary.queuedRunId = input.queuedRunId
   return summary
 }
