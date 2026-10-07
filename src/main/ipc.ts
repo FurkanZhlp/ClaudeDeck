@@ -23,6 +23,7 @@ import {
 import type { PtyManager } from './pty/ptyManager'
 import { isSize, isText, type IpcTools } from './ipcUtil'
 import { MCP_TOKEN_ENV } from './mcp/sessionTokens'
+import { HOOK_URL_ENV } from './testQueue/hookScript'
 import { platform } from './platform'
 import { withEnvVars } from './platform/env'
 import type { Repository } from './state/repository'
@@ -65,6 +66,10 @@ interface Deps {
   applyLaunchAtLogin: (enabled: boolean) => void
   /** Global or project test queue settings changed (hooks and scheduler follow). */
   onTestQueueSettingsChange?: () => void
+  /** Test queue hook base URL for Claude tabs; null while the server is not running. */
+  hookUrl?: () => string | null
+  /** An account is about to be removed: app-managed hooks come out of its settings.json. */
+  onAccountRemoving?: (account: Account) => void
 }
 
 function completeOnboarding(configDir: string): void {
@@ -94,9 +99,17 @@ export function registerIpc({
   onAccountsChange,
   forgetUsage,
   applyLaunchAtLogin,
-  onTestQueueSettingsChange
+  onTestQueueSettingsChange,
+  hookUrl,
+  onAccountRemoving
 }: Deps): void {
   const { handle, trusted } = ipcTools
+
+  /** Env of a Claude tab: its MCP token and, while the server runs, the hook URL next to it. */
+  const tabVars = (token: string): Record<string, string> => {
+    const url = hookUrl?.() ?? null
+    return url ? { [MCP_TOKEN_ENV]: token, [HOOK_URL_ENV]: url } : { [MCP_TOKEN_ENV]: token }
+  }
 
   handle(IPC.stateGet, () => repo.get())
 
@@ -118,6 +131,7 @@ export function registerIpc({
     // Proje başka hesaba geçmiş ama eski hesapla çalışan oturum olabilir.
     if (ptys.hasAccount(id)) throw new DomainError('ACCOUNT_RUNNING')
     cancelOptimize(id)
+    onAccountRemoving?.(account)
     const state = repo.removeAccount(id)
     forgetUsage(id)
     onAccountsChange()
@@ -272,9 +286,7 @@ export function registerIpc({
             file: launch.file,
             args: launch.args,
             cwd: project.path,
-            env: mcpToken
-              ? withEnvVars(launch.env, { [MCP_TOKEN_ENV]: mcpToken }, platform.os)
-              : launch.env,
+            env: mcpToken ? withEnvVars(launch.env, tabVars(mcpToken), platform.os) : launch.env,
             cols,
             rows,
             accountId: account.id

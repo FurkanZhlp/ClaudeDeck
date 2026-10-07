@@ -1,12 +1,14 @@
 import { app, BrowserWindow, dialog, Menu, nativeTheme, net, session, shell } from 'electron'
 import { rmSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { cpus, homedir } from 'node:os'
 import { join } from 'node:path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { IPC } from '../shared/ipc'
 import { resolveLanguage } from '../shared/language'
 import { createTranslator, type Translate } from '../shared/translate'
-import { AccountService } from './accounts/accountService'
+import { AccountService, transcriptPath } from './accounts/accountService'
+import { registerAgentsIpc, type AgentsIpc } from './agents/agentsIpc'
+import { watchSessionTranscript } from './transcripts/sessionTranscript'
 import { platform } from './platform'
 import { registerIpc } from './ipc'
 import { buildMenu } from './menu'
@@ -41,6 +43,15 @@ import { registerAppIpc } from './tray/appIpc'
 import { createMenuBar, type MenuBar } from './tray/menuBar'
 import { TRAY_CHANNELS } from './tray/trayChannels'
 import { loginItemSettings, wasOpenedAtLogin } from './window/loginItem'
+import { runFile } from './platform/processList'
+import { createSystemLoad, nodeSystemLoadDeps } from './platform/systemLoad'
+import { builtinPatternList, classify, fingerprint } from './testQueue/classifier'
+import { testQueueRoutes } from './testQueue/hookRoutes'
+import { hookBaseUrl } from './testQueue/hookScript'
+import { createStopProcess } from './testQueue/stopProcess'
+import { createTestQueueHooks } from './testQueue/testQueueHooks'
+import { registerTestQueueIpc } from './testQueue/testQueueIpc'
+import { createTestQueueService } from './testQueue/testQueueService'
 import { titleBarOverlay, windowBackground, windowChrome } from './window/windowChrome'
 
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000
@@ -75,6 +86,7 @@ let menuBar: MenuBar | null = null
 let selectedAccountId: string | null = null
 let quitting = false
 let notes: NotesIpc | null = null
+let agents: AgentsIpc | null = null
 let mcp: { url: string; stop: () => Promise<void> } | null = null
 // Per-tab MCP tokens; each Claude tab only reaches its own project.
 const mcpTokens = createSessionTokens()
@@ -95,9 +107,59 @@ const ptys = new PtyManager({
   data: (id, data) => send(IPC.ptyData, id, data),
   exit: (id, exitCode) => {
     mcpTokens.revoke(id)
+    // A SIGKILLed claude leaves its hook's curl behind; end the tab's waiters here.
+    testQueue.dropSession(id)
     send(IPC.ptyExit, id, exitCode)
   }
 })
+
+// Test runs of Claude tabs wait for a slot through a PreToolUse hook that long-polls the MCP server.
+const testQueue = createTestQueueService({
+  settings: () => repo.get().settings.testQueue,
+  project: (id) => repo.get().projects.find((p) => p.id === id),
+  classify,
+  fingerprint,
+  isLive: (sessionId) => ptys.has(sessionId),
+  ptyPid: (sessionId) => ptys.pid(sessionId),
+  listProcesses: () => platform.listProcesses(),
+  killTree: createStopProcess(platform.os, platform.killTree),
+  load: createSystemLoad(nodeSystemLoadDeps(platform.os)),
+  cpuCount: () => cpus().length,
+  onSnapshot: (snapshot) => send(IPC.testQueueUpdate, snapshot),
+  // Background runs end with a task notification in the tab's parent transcript.
+  watchTranscript: (sessionId, onEvent) => {
+    const state = repo.get()
+    const session = state.sessions.find((s) => s.id === sessionId)
+    const project = session && state.projects.find((p) => p.id === session.projectId)
+    const account = project && state.accounts.find((a) => a.id === project.accountId)
+    if (!session?.claudeSessionId || !project || !account) return null
+    const path = transcriptPath(account.configDir, project.path, session.claudeSessionId)
+    // A short scan of recent lines covers a notice written right before watching started.
+    return watchSessionTranscript(path, onEvent, { initialScanBytes: 64 * 1024 })
+  },
+  // Process discovery goes through CIM on Windows, which takes about a second per call.
+  processCheckMs: platform.os === 'win32' ? 5000 : 2000
+})
+// The hooks in each account's settings.json follow `settings.testQueue.enabled`.
+const testQueueHooks = createTestQueueHooks({
+  accounts: () => repo.get().accounts,
+  projects: () => repo.get().projects,
+  settings: () => repo.get().settings.testQueue,
+  lastCallAt: (accountId) => testQueue.lastCallAt(accountId),
+  run: runFile
+})
+
+/**
+ * Revokes tabs' MCP tokens; their queued and running tests go with them and their subagent
+ * watchers release file handles (they find the files again when still watched).
+ */
+function revokeTabs(sessionIds: string[]): void {
+  for (const id of sessionIds) {
+    mcpTokens.revoke(id)
+    testQueue.dropSession(id)
+    agents?.forgetSession(id)
+  }
+}
 
 // Headless profile optimization runs; they outlive the renderer and talk to Claude via MCP.
 const optimize = new OptimizeManager({
@@ -109,7 +171,12 @@ const optimize = new OptimizeManager({
   prompt: optimizePrompt,
   guidelinesText,
   emit: (state) => send(IPC.optimizeUpdate, state),
-  onGuidelinesUpdated: (update) => send(IPC.profileGuidelinesUpdated, update)
+  onGuidelinesUpdated: (update) => send(IPC.profileGuidelinesUpdated, update),
+  // settingsGuard put `hooks` back as it was before the run; make sure ours match the settings.
+  onRunEnded: (accountId) => {
+    const account = repo.get().accounts.find((a) => a.id === accountId)
+    if (account) testQueueHooks.sync(account)
+  }
 })
 
 /** Registers or removes ClaudeDeck as a login item; only meaningful for the packaged app. */
@@ -150,6 +217,7 @@ function prepareAccount(account: Account): void {
   } catch (error) {
     console.warn('[usage] could not prepare account', account.id, error)
   }
+  testQueueHooks.sync(account)
 }
 
 /** Native confirmation for MCP actions that change the app; Cancel is the default. */
@@ -194,7 +262,8 @@ async function startMcp(): Promise<void> {
     notes: { list: listNotes, read: readNote, write: writeNote },
     requestOpenSession: (sessionId) => send(IPC.sessionOpenRequest, sessionId),
     notifyStateChanged: () => broadcast(IPC.stateChanged, repo.get()),
-    confirm: confirmMcpRequest
+    confirm: confirmMcpRequest,
+    testQueue
   })
   // Older builds stored a long-lived token here; tokens are per tab and in memory now.
   rmSync(join(userData, 'mcp.json'), { force: true })
@@ -202,7 +271,8 @@ async function startMcp(): Promise<void> {
     mcp = await startMcpServer({
       tools: { ...tools, ...createOptimizeTools(optimize.port) },
       tokens: mcpTokens,
-      version: app.getVersion()
+      version: app.getVersion(),
+      routes: testQueueRoutes({ service: testQueue, isLive: (id) => ptys.has(id) })
     })
   } catch (error) {
     console.error('[mcp] server did not start', error)
@@ -349,7 +419,9 @@ function onMainWindowClosed(): void {
   // The terminal views are gone with the window; leave no orphaned processes behind.
   ptys.killAll()
   mcpTokens.revokeAll('session')
+  testQueue.dropAll()
   notes?.reset()
+  agents?.reset()
   app.dock?.hide()
 }
 
@@ -399,7 +471,9 @@ function createWindow(): void {
     ptys.killAll()
     // Optimization runs keep going across reloads; only tab tokens die with their tabs.
     mcpTokens.revokeAll('session')
+    testQueue.dropAll()
     notes?.reset()
+    agents?.reset()
   })
 
   loadRenderer(win)
@@ -467,6 +541,9 @@ app.whenReady().then(() => {
     openUpdate: openUpdatePage,
     prepareAccount,
     onProjectMoved: (before, after, projectId) => {
+      // Open subagent watchers would block moving the transcripts on Windows.
+      for (const s of repo.get().sessions)
+        if (s.projectId === projectId) agents?.forgetSession(s.id)
       try {
         notes?.relocateForProjectChange(before, after, projectId)
       } catch (error) {
@@ -481,14 +558,21 @@ app.whenReady().then(() => {
       }
     },
     issueMcpToken: (scope) => mcpTokens.issue(scope),
-    revokeMcpTokens: (sessionIds) => sessionIds.forEach((id) => mcpTokens.revoke(id)),
+    revokeMcpTokens: revokeTabs,
     onUsageSettingsChange: syncMenuBar,
     onAccountsChange: syncMenuBar,
     // Called on account removal before its folder is deleted (an open watcher blocks rm on Windows).
-    forgetUsage: (accountId) => usage.forget(accountId),
+    forgetUsage: (accountId) => {
+      usage.forget(accountId)
+      agents?.forgetAccount(accountId)
+    },
     applyLaunchAtLogin,
-    // Wired to the test queue service and hook installer in a later phase.
-    onTestQueueSettingsChange: () => {},
+    onTestQueueSettingsChange: () => {
+      testQueueHooks.syncAll()
+      testQueue.settingsChanged()
+    },
+    hookUrl: () => (mcp ? hookBaseUrl(mcp.url) : null),
+    onAccountRemoving: (account) => testQueueHooks.remove(account),
     cancelOptimize: (accountId) => {
       if (optimize.isActive(accountId)) void optimize.cancel(accountId)
     }
@@ -529,6 +613,21 @@ app.whenReady().then(() => {
     }
   })
   registerOptimizeIpc({ handle: ipcTools.handle, manager: optimize })
+  agents = registerAgentsIpc({
+    repo,
+    ipcTools,
+    getWindow: () => mainWindow,
+    queuedRunId: (sessionId, agentId) => testQueue.runIdForAgent(sessionId, agentId)
+  })
+  registerTestQueueIpc({
+    handle: ipcTools.handle,
+    service: testQueue,
+    hooks: testQueueHooks,
+    settings: () => repo.get().settings.testQueue,
+    project: (id) => repo.project(id),
+    classify,
+    builtins: builtinPatternList
+  })
   registerUsageIpc({ handle: ipcTools.handle, service: usage, poller: usagePoller, repo })
   registerStatsIpc({ handle: ipcTools.handle, service: stats })
   registerMcpIpc({
@@ -571,11 +670,13 @@ app.on('before-quit', () => {
   quitting = true
   menuBar?.dispose()
   ptys.killAll()
+  testQueue.dispose()
   optimize.disposeAll()
   usagePoller.stop()
   usage.dispose()
   stats.dispose()
   mcpTokens.revokeAll()
   notes?.dispose()
+  agents?.dispose()
   void mcp?.stop()
 })
