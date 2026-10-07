@@ -22,6 +22,7 @@ let waits = 0
 let hold: AbortSignal[] | null = null
 const tokens = createSessionTokens()
 let token: string
+const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH'
 /** Folder with a fake `curl` that exits 2. */
 let fakeCurlDir: string
 
@@ -154,7 +155,8 @@ describe.runIf(shell)('generated hook script', { timeout: 30_000 }, () => {
     const { stdout, status } = await runHook('pre', JSON.stringify(payload), {
       CLAUDEDECK_MCP_TOKEN: token,
       CLAUDEDECK_HOOK_URL: hookBaseUrl(server.url),
-      PATH: `${fakeCurlDir}${delimiter}${process.env.PATH ?? ''}`
+      // Windows spells it `Path`; a second `PATH` key would be ignored there.
+      [pathKey]: `${fakeCurlDir}${delimiter}${process.env[pathKey] ?? ''}`
     })
     expect({ stdout, status }).toEqual({ stdout: '', status: 0 })
     expect(received).toEqual([])
