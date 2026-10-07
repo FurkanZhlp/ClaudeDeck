@@ -225,8 +225,15 @@ function AgentRow({
         </span>
         <span className="mt-1 block truncate text-[12.5px] leading-snug text-fg">{title}</span>
         {agent.currentTool && (
-          <span className="mt-0.5 block truncate font-mono text-[11px] text-muted">
-            {t('agents.currentTool', { tool: agent.currentTool })}
+          <span
+            className="mt-0.5 block truncate font-mono text-[11px] text-muted"
+            title={agent.currentToolInput}
+          >
+            {t('agents.currentTool', {
+              tool: agent.currentToolInput
+                ? `${agent.currentTool} · ${agent.currentToolInput}`
+                : agent.currentTool
+            })}
           </span>
         )}
         {agent.queuedRunId && (
