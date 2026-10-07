@@ -49,7 +49,14 @@ export function installScrollbarVisibility(): () => void {
     next.forEach((el) => el.classList.add(HOVER_CLASS))
     hovered = next
   }
-  const onOver = (event: MouseEvent): void => setHovered(scrollableAncestors(event.target))
+  const onOver = (event: MouseEvent): void => {
+    // Rows under a scrolling terminal fire mouseover constantly; skip the style lookups there.
+    if (event.target instanceof Element && !outsideTerminal(event.target)) {
+      if (hovered.length > 0) setHovered([])
+      return
+    }
+    setHovered(scrollableAncestors(event.target))
+  }
   const onLeave = (): void => setHovered([])
 
   document.addEventListener('scroll', onScroll, { capture: true, passive: true })
