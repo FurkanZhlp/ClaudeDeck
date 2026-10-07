@@ -1,5 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { isWindows, primaryModifier } from '../platform'
@@ -11,6 +12,8 @@ interface Entry {
   host: HTMLDivElement
   opened: boolean
   pending: { resume: boolean } | null
+  /** GPU renderer; only the terminal on screen holds one (see enableWebgl). */
+  webgl?: WebglAddon | null
 }
 
 const THEME: ITheme = {
@@ -49,7 +52,11 @@ function create(id: string): Entry {
   const host = document.createElement('div')
   host.style.width = '100%'
   host.style.height = '100%'
-  const entry: Entry = { term, fit, host, opened: false, pending: null }
+  const entry: Entry = { term, fit, host, opened: false, pending: null, webgl: null }
+  // Fall back to the DOM renderer as soon as the GPU drops the context. The addon itself waits
+  // three seconds for a restore that rarely comes, showing a blank canvas meanwhile. Context
+  // events do not bubble, so they are caught on the way down.
+  host.addEventListener('webglcontextlost', () => onWebglLost(id, entry), { capture: true })
   entries.set(id, entry)
   return entry
 }
@@ -73,6 +80,57 @@ function windowsClipboardKeys(term: Terminal, event: KeyboardEvent): boolean {
   // with bracketed paste support), instead of xterm sending ^V. No clipboard read permission.
   if (key === 'v') return false
   return true
+}
+
+/**
+ * The WebGL renderer: xterm's DOM renderer re-lays out every visible row on each scroll step
+ * (about 10 ms a frame with styled Claude output, far more with some emoji), the GPU renderer
+ * draws the same frame in about 1.5 ms. Chromium allows only 16 live WebGL contexts and drops the
+ * oldest beyond that, and every session keeps its terminal alive, so only the terminal on screen
+ * holds a context: it is created on attach and released on detach.
+ */
+let webglFailures = 0
+/** After this many lost or failed contexts, terminals stay on the DOM renderer. */
+const MAX_WEBGL_FAILURES = 3
+
+function enableWebgl(entry: Entry): void {
+  if (entry.webgl || !entry.opened || webglFailures >= MAX_WEBGL_FAILURES) return
+  // A context created for a host without a size starts with a zero-sized canvas.
+  if (!entry.host.isConnected || entry.host.clientWidth === 0) return
+  try {
+    const addon = new WebglAddon()
+    entry.term.loadAddon(addon)
+    entry.webgl = addon
+  } catch (error) {
+    webglFailures = MAX_WEBGL_FAILURES
+    console.warn('[terminal] WebGL renderer unavailable, using the DOM renderer', error)
+  }
+}
+
+function disableWebgl(entry: Entry): void {
+  const addon = entry.webgl
+  entry.webgl = null
+  addon?.dispose()
+}
+
+function onWebglLost(id: string, entry: Entry): void {
+  // Our own dispose on detach also ends in a lost context; that one is not a failure.
+  const lost = entry.webgl
+  if (!lost) return
+  webglFailures++
+  // Disposing inside the event handler would tear down the canvas that is dispatching it.
+  setTimeout(() => {
+    if (entry.webgl !== lost) return
+    disableWebgl(entry)
+    if (entry.host.isConnected) enableWebgl(entry)
+    resizePty(id)
+  })
+}
+
+/** The two renderers measure cells differently, so a renderer switch changes cols and rows. */
+function resizePty(id: string): void {
+  const size = fit(id)
+  if (size) window.api.pty.resize(id, size.cols, size.rows)
 }
 
 function ensure(id: string): Entry {
@@ -106,15 +164,20 @@ export function attach(id: string, container: HTMLElement): void {
     entry.term.open(entry.host)
     entry.opened = true
   }
+  enableWebgl(entry)
 }
 
 export function detach(id: string): void {
-  entries.get(id)?.host.remove()
+  const entry = entries.get(id)
+  if (!entry) return
+  entry.host.remove()
+  disableWebgl(entry)
 }
 
 export function fit(id: string): { cols: number; rows: number } | null {
   const entry = entries.get(id)
   if (!entry?.opened || !entry.host.isConnected) return null
+  enableWebgl(entry)
   try {
     entry.fit.fit()
   } catch {
@@ -134,6 +197,7 @@ export function write(id: string, data: string): void {
 export function dispose(id: string): void {
   const entry = entries.get(id)
   if (!entry) return
+  disableWebgl(entry)
   entry.term.dispose()
   entry.host.remove()
   entries.delete(id)
