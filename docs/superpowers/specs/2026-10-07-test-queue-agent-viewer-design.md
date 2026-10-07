@@ -250,3 +250,14 @@ during reservation, background run, app quit, `disableAllHooks` project, Windows
    button is only enabled when exactly one matching process tree is found, otherwise the panel
    offers "release" only. Uses `platform.killTree`.
 3. Agent viewer: per-tab panel only in v1.
+4. Agents can see and manage the queue through the ClaudeDeck MCP server (session tokens only,
+   not optimize runs):
+   - `get_test_queue`: mode, limit, load, and runs. Runs of the caller's own account show
+     project, tab, agent type, command and times; runs of other accounts are counted only
+     (no commands or project names), matching the existing MCP account scoping.
+   - `cancel_test_run(runId)`: cancels a waiting run (the waiting hook receives the deny) or
+     stops a running one (same rules as the panel's Stop). Allowed only for runs started by the
+     caller's own tab, including its subagents; anything else returns "Not allowed".
+   - `move_test_run` / `run_now` are not exposed to agents (queue priority stays with the user).
+   - Counted by the existing per-tab MCP rate limit; no confirmation dialog (only affects the
+     caller's own runs).
