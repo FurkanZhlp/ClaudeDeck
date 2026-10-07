@@ -1,11 +1,12 @@
 name: Release
 
 # Push a tag `v<version>` matching package.json to build and publish a release:
-#   1. create (or reuse) a DRAFT GitHub release for the tag,
+#   1. check the tag commit is on main, then create (or reuse) a DRAFT GitHub release for the tag,
 #   2. build each platform on its own native runner (read-only token) and keep the installers as
 #      workflow artifacts,
-#   3. upload all installers to the draft from a single job that holds the write token,
-#   4. publish the draft only when every build and the upload succeeded.
+#   3. upload all installers plus SHA256SUMS to the draft from a single job that holds the write token,
+#   4. publish the draft only when every build and the upload succeeded (marked latest only if its
+#      version is not older than the current latest release).
 # A failed build leaves the draft unpublished, so the in-app update check (releases/latest) never
 # sees a half-filled release. Builds are unsigned for now.
 
@@ -31,9 +32,19 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Full history so origin/main is available for the ancestry check below. The token is only
+      # used during checkout (persist-credentials: false).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check tag commit is on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $TAG ($GITHUB_SHA) is not on main"
+            exit 1
+          fi
 
       - name: Check tag matches package.json version
         run: |
@@ -43,14 +54,20 @@ jobs:
             exit 1
           fi
 
-      # Reuses an existing release for the tag (e.g. a draft with hand-written notes, or a re-run).
+      # Reuses an existing DRAFT release for the tag (e.g. hand-written notes, or a re-run). A release
+      # that is already published is never touched, so its assets cannot be clobbered.
       # Otherwise notes come from the annotated tag message, or are generated from merged PRs/commits.
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists, reusing it."
+            is_draft="$(gh release view "$TAG" --json isDraft -q .isDraft)"
+            if [ "$is_draft" != "true" ]; then
+              echo "::error::Release $TAG is already published, refusing to overwrite it"
+              exit 1
+            fi
+            echo "Draft release $TAG already exists, reusing it."
             exit 0
           fi
           version="${TAG#v}"
@@ -75,7 +92,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:mac --arm64 --publish never
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -113,7 +129,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       # One arch per run, so the installer is named claudedeck-<version>-<arch>-setup.exe, which
       # the Windows update check looks for.
@@ -137,6 +152,11 @@ jobs:
           pattern: release-*
           path: assets
           merge-multiple: true
+      - name: Generate SHA256SUMS
+        working-directory: assets
+        run: |
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
       - name: Upload to draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -151,7 +171,19 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Publish draft as latest
+      # Only mark as latest when this version is >= the current latest release, so re-running an old
+      # tag cannot demote the real latest release.
+      - name: Publish draft
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$TAG" --draft=false --latest
+        run: |
+          version="${TAG#v}"
+          latest_tag="$(gh release view --json tagName -q .tagName 2>/dev/null || true)"
+          latest=true
+          if [ -n "$latest_tag" ]; then
+            if ! npx --yes semver@7.7.2 -p -r ">=${latest_tag#v}" "$version" >/dev/null; then
+              latest=false
+            fi
+          fi
+          echo "Current latest: ${latest_tag:-none}, publishing $TAG with --latest=$latest"
+          gh release edit "$TAG" --draft=false --latest="$latest"
