@@ -26,6 +26,7 @@ import type {
   AgentOpenResult,
   AgentSummary,
   ClassifyResult,
+  TestQueueBuiltin,
   ProjectTestQueue,
   TestQueueHookStatus,
   TestQueueSettingsPatch,
@@ -168,6 +169,8 @@ export interface Api {
     /** Classifies a command with the current rules (plus the project's when given). */
     classify(command: string, projectId?: string): Promise<ClassifyResult>
     hookStatus(): Promise<TestQueueHookStatus>
+    /** Built-in patterns, then the built-in exclusions (group `exclusions`), in display order. */
+    builtins(): Promise<TestQueueBuiltin[]>
   }
   /** Live subagent transcripts of Claude tabs; main derives every path (main window only). */
   agents: {

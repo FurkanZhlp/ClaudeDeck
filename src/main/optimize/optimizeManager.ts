@@ -25,6 +25,7 @@ import { renameWithRetryAsync } from '../platform/fs'
 import { ensureGuidelines } from '../profile/guidelines'
 import { copyEntry, type CopyRunner } from '../profile/importer'
 import { APP_MANAGED_USAGE_FILES } from '../usage/statuslineScript'
+import { HOOK_SCRIPT_FILE } from '../testQueue/hookScript'
 import { readSettingsText, restoreProtectedSettings } from './settingsGuard'
 
 type Env = Record<string, string>
@@ -104,7 +105,9 @@ const FINISH_EXIT_GRACE_MS = 60_000
 export const APP_MANAGED_FILES = [
   'claudedeck/guidelines.md',
   'claudedeck/backups/**',
-  ...APP_MANAGED_USAGE_FILES.map((name) => `claudedeck/${name}`)
+  ...APP_MANAGED_USAGE_FILES.map((name) => `claudedeck/${name}`),
+  // Runs on every Bash call of the account once the test queue is on.
+  `claudedeck/${HOOK_SCRIPT_FILE}`
 ]
 
 /**
@@ -289,6 +292,8 @@ export interface OptimizeManagerDeps {
   guidelinesText: string
   emit(state: OptimizeState): void
   onGuidelinesUpdated?(update: GuidelinesUpdate): void
+  /** The run's claude exited and protected settings were checked (re-sync app hooks). */
+  onRunEnded?(accountId: string): void
   spawn?: Spawner
   /** Kills the run's whole process group. */
   killTree?: (child: ChildProcess, signal: NodeJS.Signals) => void
@@ -730,6 +735,11 @@ export class OptimizeManager {
       run.state.finishedAt = at
     }
     if (restored.length > 0) this.reportRestored(run, restored)
+    try {
+      this.deps.onRunEnded?.(run.state.accountId)
+    } catch (error) {
+      console.warn('[optimize] run end hook failed', run.id, error)
+    }
     this.emit(run)
     console.info('[optimize] exited', run.state.accountId, run.id, run.state.status)
   }

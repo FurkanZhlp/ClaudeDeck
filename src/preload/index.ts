@@ -111,7 +111,8 @@ const api: Api = {
     release: (runId) => call(IPC.testQueueRelease, runId),
     stop: (runId) => call(IPC.testQueueStop, runId),
     classify: (command, projectId) => call(IPC.testQueueClassify, command, projectId),
-    hookStatus: () => call(IPC.testQueueHookStatus)
+    hookStatus: () => call(IPC.testQueueHookStatus),
+    builtins: () => call(IPC.testQueueBuiltins)
   },
   agents: {
     watch: (sessionId) => call(IPC.agentsWatch, sessionId),

@@ -76,6 +76,7 @@ export const IPC = {
   testQueueStop: 'testQueue:stop',
   testQueueClassify: 'testQueue:classify',
   testQueueHookStatus: 'testQueue:hookStatus',
+  testQueueBuiltins: 'testQueue:builtins',
   agentsWatch: 'agents:watch',
   agentsUnwatch: 'agents:unwatch',
   agentsList: 'agents:list',

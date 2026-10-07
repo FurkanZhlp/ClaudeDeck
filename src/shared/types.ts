@@ -377,6 +377,33 @@ export interface TestQueueHookStatus {
   hooksDisabledProjectIds: string[]
 }
 
+/** Ecosystem a built-in pattern belongs to; `exclusions` holds the built-in exclusions. */
+export type TestQueueBuiltinGroup =
+  | 'javascript'
+  | 'python'
+  | 'go'
+  | 'rust'
+  | 'jvm'
+  | 'dotnet'
+  | 'ruby'
+  | 'php'
+  | 'beam'
+  | 'mobile'
+  | 'native'
+  | 'haskell'
+  | 'taskRunners'
+  | 'exclusions'
+
+/** A built-in pattern or exclusion for the Settings list (switched off via `disabledBuiltins`). */
+export interface TestQueueBuiltin {
+  id: string
+  group: TestQueueBuiltinGroup
+  /** English label from the classifier; the UI may map `id` to its own locale key instead. */
+  label: string
+  /** A command it matches (or, for an exclusion, one it lets through). */
+  example: string
+}
+
 /** Result of classifying a command ("try a command" in Settings). */
 export interface ClassifyResult {
   isTest: boolean
