@@ -515,5 +515,223 @@
         }
       }
     }
+  },
+  "testQueue": {
+    "title": "Test queue",
+    "idle": "Test queue is empty",
+    "runningCount": "{{running}}/{{limit}} running",
+    "waitingCount_one": "{{count}} waiting",
+    "waitingCount_other": "{{count}} waiting",
+    "loadTooltip": "CPU {{cpu}}% busy, {{memory}}% memory available",
+    "mode": {
+      "fixed": "Fixed",
+      "auto": "Automatic"
+    },
+    "limit_one": "limit {{count}}",
+    "limit_other": "limit {{count}}",
+    "running": "Running",
+    "waiting": "Waiting",
+    "noRunning": "No test is running.",
+    "noWaiting": "No test is waiting.",
+    "unit": {
+      "hour": "{{count}} h",
+      "minute": "{{count}} min",
+      "second": "{{count}} s"
+    },
+    "waitedFor": "Waiting for {{time}}",
+    "ranFor": "Running for {{time}}",
+    "state": {
+      "starting": "Starting",
+      "background": "Background"
+    },
+    "unknownProject": "Unknown project",
+    "forced": "Started manually",
+    "actions": {
+      "moveUp": "Move up",
+      "runNow": "Run now",
+      "cancel": "Cancel",
+      "stop": "Stop",
+      "release": "Release slot",
+      "releaseHint": "frees the slot without stopping the process"
+    },
+    "badge": {
+      "waiting": "Test waiting in the queue, position {{position}}",
+      "hooksDisabled": "Hooks are disabled for this project, so the test queue does not apply here"
+    },
+    "loading": "Loading...",
+    "groups": {
+      "javascript": "JavaScript and TypeScript",
+      "python": "Python",
+      "go": "Go",
+      "rust": "Rust",
+      "jvm": "Java, Kotlin, Scala and Clojure",
+      "dotnet": ".NET",
+      "ruby": "Ruby",
+      "php": "PHP",
+      "beam": "Elixir and Erlang",
+      "mobile": "Swift, Xcode, Flutter and Dart",
+      "native": "C, C++, Zig and Bazel",
+      "haskell": "Haskell",
+      "taskRunners": "Task runners (make, just, task)",
+      "exclusions": "Exclusions (version, help and list flags)"
+    },
+    "builtinsOn": "{{on}}/{{total}} on",
+    "builtinLabels": {
+      "js": {
+        "script": "npm, pnpm, yarn and bun test scripts",
+        "tap": "node-tap and tape",
+        "cypress": "Cypress (run)",
+        "node-test": "Node.js test runner",
+        "monorepo": "Monorepo test tasks (turbo, nx, lerna)",
+        "deno": "Deno test and test tasks"
+      },
+      "py": {
+        "unittest": "unittest (python -m unittest)",
+        "django": "Django (manage.py test)"
+      },
+      "jvm": {
+        "maven": "Maven test and verify",
+        "gradle": "Gradle test and check"
+      },
+      "ruby": {
+        "rake": "rake test and spec"
+      },
+      "php": {
+        "composer": "Composer test scripts"
+      },
+      "beam": {
+        "rebar3": "rebar3 eunit and ct"
+      },
+      "native": {
+        "bazel": "bazel test and coverage"
+      },
+      "haskell": {
+        "test": "stack test and cabal test"
+      },
+      "task": {
+        "make": "make test and check",
+        "just": "just test and check",
+        "task": "task test and check"
+      },
+      "exclude": {
+        "lone-v": "A lone -v (version)",
+        "go-list": "-list (go test)"
+      }
+    },
+    "offGlobally": "Turned off in the global settings",
+    "example": "e.g. {{command}}",
+    "exclusionExample": "Not queued: {{command}}",
+    "rules": {
+      "none": "No custom rules yet.",
+      "kindLabel": "Rule type",
+      "kind": {
+        "prefix": "Prefix",
+        "regex": "Regex"
+      },
+      "targetLabel": "Regex is tested against",
+      "target": {
+        "canonical": "Normalized command",
+        "raw": "Raw command"
+      },
+      "patternLabel": "Rule",
+      "placeholder": {
+        "prefix": "make e2e*",
+        "regex": "^make (e2e|integration)"
+      },
+      "add": "Add rule",
+      "remove": "Remove rule {{pattern}}",
+      "removeShort": "Remove rule",
+      "empty": "Enter a rule.",
+      "tooLong": "A rule can be at most {{max}} characters.",
+      "regex": "This regular expression is not valid: {{detail}}",
+      "rejected": "The rule could not be saved. Check that it is valid and not a duplicate.",
+      "full": "You can add at most {{max}} rules.",
+      "help": {
+        "prefix": "Matched word by word; a trailing * accepts any further words. Text in quotes never counts as a command.",
+        "regex": "JavaScript regular expression. The normalized command has wrappers such as env, npx and cd removed."
+      }
+    },
+    "try": {
+      "title": "Try a command",
+      "label": "Command to try",
+      "placeholder": "e.g. pnpm --filter web test",
+      "match": "Queued as a test by \"{{rule}}\" ({{source}}):",
+      "source": {
+        "builtin": "built-in",
+        "custom": "custom rule",
+        "project": "project rule"
+      },
+      "excluded": "Not queued: \"{{rule}}\" matches, but {{flag}} is excluded.",
+      "noMatch": "Not queued: no rule matches this command.",
+      "truncated": "Only the first 16 KB were checked."
+    },
+    "hooks": {
+      "title": "Hook status",
+      "installed": "Hook installed",
+      "notInstalled": "Not installed",
+      "lastCall": "last call {{time}}",
+      "noCalls": "no calls yet",
+      "refresh": "Refresh hook status",
+      "managedOnly": "Your organization's managed settings only allow managed hooks, so the test queue cannot work on this computer.",
+      "projectsDisabled": "Hooks are disabled in these projects, so their tests are not queued: {{projects}}",
+      "bashOnly": "The queue covers commands Claude runs with the Bash tool, including those of subagents.",
+      "bashOnlyWindows": "The queue covers the Bash tool. Without Git Bash, Claude uses the PowerShell tool on this computer and the queue does not apply.",
+      "problemShort": {
+        "noGitBash": "Git Bash not found",
+        "invalidSettings": "settings.json is invalid",
+        "writeFailed": "Could not write"
+      },
+      "problem": {
+        "noGitBash": "The queue covers the Bash tool; this computer uses PowerShell because Git Bash is not installed, so no hook was added.",
+        "invalidSettings": "This account's settings.json is not valid JSON. ClaudeDeck does not change it; fix the file to install the hook.",
+        "writeFailed": "The hook could not be written to this account's settings.json."
+      }
+    },
+    "settings": {
+      "enabled": "Queue test runs",
+      "enabledHint": "ClaudeDeck adds a hook to each account's Claude settings that makes test commands wait for a free slot. Turning this off removes the hook.",
+      "mode": "Concurrency",
+      "modeHint": {
+        "fixed": "A fixed number of tests run at the same time.",
+        "auto": "New tests start while CPU and memory have room."
+      },
+      "maxConcurrent": "Tests at the same time",
+      "autoMax": "Upper limit",
+      "autoMaxHint": "Leave empty to choose from the number of processor cores.",
+      "automatic": "Auto",
+      "maxWait": "Maximum wait",
+      "maxWaitHint": "After this, the test is turned away and Claude is told to run it again.",
+      "unitMinutes": "min",
+      "unitSeconds": "s",
+      "advanced": "Advanced",
+      "cpuHigh": "Busy CPU threshold",
+      "cpuHighHint": "No new test starts above this CPU usage.",
+      "cpuResume": "Resume below",
+      "cpuResumeHint": "Tests start again once CPU usage drops below this.",
+      "minMemory": "Minimum free memory",
+      "minMemoryHint": "No new test starts while less memory than this is available.",
+      "rampUp": "Time between starts",
+      "rampUpHint": "Lets the load of a new test show before the next one starts.",
+      "startGrace": "Start grace period",
+      "startGraceHint": "A started test with no sign of running frees its slot after this.",
+      "backgroundHold": "Background hold limit",
+      "backgroundHoldHint": "Longest a background test without a visible process keeps its slot.",
+      "builtins": "Built-in rules",
+      "customRules": "Custom rules"
+    },
+    "project": {
+      "modeLabel": "Queue in this project",
+      "mode": {
+        "inherit": "Global",
+        "off": "Off"
+      },
+      "modeHint": {
+        "inherit": "Global rules apply, plus the changes below.",
+        "off": "Tests from this project's tabs never wait in the queue."
+      },
+      "globalOff": "The test queue is turned off in Settings; these choices apply once it is on.",
+      "builtins": "Built-in rules for this project",
+      "customRules": "Extra rules for this project"
+    }
   }
 }

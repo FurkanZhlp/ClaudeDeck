@@ -515,5 +515,223 @@
         }
       }
     }
+  },
+  "testQueue": {
+    "title": "Test kuyruğu",
+    "idle": "Test kuyruğu boş",
+    "runningCount": "{{running}}/{{limit}} çalışıyor",
+    "waitingCount_one": "{{count}} bekliyor",
+    "waitingCount_other": "{{count}} bekliyor",
+    "loadTooltip": "İşlemci %{{cpu}} meşgul, belleğin %{{memory}} kadarı boş",
+    "mode": {
+      "fixed": "Sabit",
+      "auto": "Otomatik"
+    },
+    "limit_one": "sınır {{count}}",
+    "limit_other": "sınır {{count}}",
+    "running": "Çalışanlar",
+    "waiting": "Bekleyenler",
+    "noRunning": "Çalışan test yok.",
+    "noWaiting": "Bekleyen test yok.",
+    "unit": {
+      "hour": "{{count}} sa",
+      "minute": "{{count}} dk",
+      "second": "{{count}} sn"
+    },
+    "waitedFor": "{{time}} bekliyor",
+    "ranFor": "{{time}} çalışıyor",
+    "state": {
+      "starting": "Başlıyor",
+      "background": "Arka planda"
+    },
+    "unknownProject": "Bilinmeyen proje",
+    "forced": "Elle başlatıldı",
+    "actions": {
+      "moveUp": "Yukarı taşı",
+      "runNow": "Şimdi çalıştır",
+      "cancel": "İptal et",
+      "stop": "Durdur",
+      "release": "Yeri boşalt",
+      "releaseHint": "işlemi durdurmadan yeri serbest bırakır"
+    },
+    "badge": {
+      "waiting": "Test kuyrukta bekliyor, sıra {{position}}",
+      "hooksDisabled": "Bu projede hook'lar kapalı olduğu için test kuyruğu burada çalışmaz"
+    },
+    "loading": "Yükleniyor...",
+    "groups": {
+      "javascript": "JavaScript ve TypeScript",
+      "python": "Python",
+      "go": "Go",
+      "rust": "Rust",
+      "jvm": "Java, Kotlin, Scala ve Clojure",
+      "dotnet": ".NET",
+      "ruby": "Ruby",
+      "php": "PHP",
+      "beam": "Elixir ve Erlang",
+      "mobile": "Swift, Xcode, Flutter ve Dart",
+      "native": "C, C++, Zig ve Bazel",
+      "haskell": "Haskell",
+      "taskRunners": "Görev çalıştırıcılar (make, just, task)",
+      "exclusions": "İstisnalar (sürüm, yardım ve listeleme seçenekleri)"
+    },
+    "builtinsOn": "{{on}}/{{total}} açık",
+    "builtinLabels": {
+      "js": {
+        "script": "npm, pnpm, yarn ve bun test betikleri",
+        "tap": "node-tap ve tape",
+        "cypress": "Cypress (run)",
+        "node-test": "Node.js test çalıştırıcısı",
+        "monorepo": "Monorepo test görevleri (turbo, nx, lerna)",
+        "deno": "Deno test ve test görevleri"
+      },
+      "py": {
+        "unittest": "unittest (python -m unittest)",
+        "django": "Django (manage.py test)"
+      },
+      "jvm": {
+        "maven": "Maven test ve verify",
+        "gradle": "Gradle test ve check"
+      },
+      "ruby": {
+        "rake": "rake test ve spec"
+      },
+      "php": {
+        "composer": "Composer test betikleri"
+      },
+      "beam": {
+        "rebar3": "rebar3 eunit ve ct"
+      },
+      "native": {
+        "bazel": "bazel test ve coverage"
+      },
+      "haskell": {
+        "test": "stack test ve cabal test"
+      },
+      "task": {
+        "make": "make test ve check",
+        "just": "just test ve check",
+        "task": "task test ve check"
+      },
+      "exclude": {
+        "lone-v": "Tek başına -v (sürüm)",
+        "go-list": "-list (go test)"
+      }
+    },
+    "offGlobally": "Genel ayarlarda kapalı",
+    "example": "örnek: {{command}}",
+    "exclusionExample": "Kuyruğa alınmaz: {{command}}",
+    "rules": {
+      "none": "Henüz özel kural yok.",
+      "kindLabel": "Kural türü",
+      "kind": {
+        "prefix": "Önek",
+        "regex": "Regex"
+      },
+      "targetLabel": "Regex'in uygulanacağı metin",
+      "target": {
+        "canonical": "Sadeleştirilmiş komut",
+        "raw": "Ham komut"
+      },
+      "patternLabel": "Kural",
+      "placeholder": {
+        "prefix": "make e2e*",
+        "regex": "^make (e2e|integration)"
+      },
+      "add": "Kural ekle",
+      "remove": "{{pattern}} kuralını kaldır",
+      "removeShort": "Kuralı kaldır",
+      "empty": "Lütfen bir kural girin.",
+      "tooLong": "Bir kural en fazla {{max}} karakter olabilir.",
+      "regex": "Bu düzenli ifade geçerli değil: {{detail}}",
+      "rejected": "Kural kaydedilemedi. Geçerli olduğunu ve tekrar etmediğini kontrol edin.",
+      "full": "En fazla {{max}} kural ekleyebilirsiniz.",
+      "help": {
+        "prefix": "Kelime kelime eşleşir; sondaki * sonraki tüm kelimeleri kabul eder. Tırnak içindeki metin hiçbir zaman komut sayılmaz.",
+        "regex": "JavaScript düzenli ifadesi. Sadeleştirilmiş komutta env, npx ve cd gibi sarmalayıcılar çıkarılmıştır."
+      }
+    },
+    "try": {
+      "title": "Bir komut deneyin",
+      "label": "Denenecek komut",
+      "placeholder": "örnek: pnpm --filter web test",
+      "match": "\"{{rule}}\" kuralıyla test olarak kuyruğa alınır ({{source}}):",
+      "source": {
+        "builtin": "yerleşik",
+        "custom": "özel kural",
+        "project": "proje kuralı"
+      },
+      "excluded": "Kuyruğa alınmaz: \"{{rule}}\" eşleşiyor, ancak {{flag}} istisna kapsamında.",
+      "noMatch": "Kuyruğa alınmaz: bu komutla eşleşen kural yok.",
+      "truncated": "Yalnızca ilk 16 KB kontrol edildi."
+    },
+    "hooks": {
+      "title": "Hook durumu",
+      "installed": "Hook kurulu",
+      "notInstalled": "Kurulu değil",
+      "lastCall": "son çağrı {{time}}",
+      "noCalls": "henüz çağrı yok",
+      "refresh": "Hook durumunu yenile",
+      "managedOnly": "Kurumunuzun yönetilen ayarları yalnızca yönetilen hook'lara izin veriyor; bu nedenle test kuyruğu bu bilgisayarda çalışamaz.",
+      "projectsDisabled": "Şu projelerde hook'lar kapalı olduğu için testleri kuyruğa alınmaz: {{projects}}",
+      "bashOnly": "Kuyruk, Claude'un Bash aracıyla çalıştırdığı komutları kapsar; alt ajanlarınkiler de buna dahildir.",
+      "bashOnlyWindows": "Kuyruk Bash aracını kapsar. Git Bash yoksa Claude bu bilgisayarda PowerShell aracını kullanır ve kuyruk devreye girmez.",
+      "problemShort": {
+        "noGitBash": "Git Bash bulunamadı",
+        "invalidSettings": "settings.json geçersiz",
+        "writeFailed": "Yazılamadı"
+      },
+      "problem": {
+        "noGitBash": "Kuyruk Bash aracını kapsar; Git Bash kurulu olmadığı için bu bilgisayar PowerShell kullanıyor, bu yüzden hook eklenmedi.",
+        "invalidSettings": "Bu hesabın settings.json dosyası geçerli bir JSON değil. ClaudeDeck dosyayı değiştirmez; hook'un kurulması için dosyayı düzeltin.",
+        "writeFailed": "Hook bu hesabın settings.json dosyasına yazılamadı."
+      }
+    },
+    "settings": {
+      "enabled": "Test çalıştırmalarını sıraya al",
+      "enabledHint": "ClaudeDeck, her hesabın Claude ayarlarına test komutlarını boş yer açılana kadar bekleten bir hook ekler. Kapattığınızda hook kaldırılır.",
+      "mode": "Eşzamanlılık",
+      "modeHint": {
+        "fixed": "Aynı anda sabit sayıda test çalışır.",
+        "auto": "İşlemci ve bellekte yer oldukça yeni testler başlar."
+      },
+      "maxConcurrent": "Aynı anda çalışacak test",
+      "autoMax": "Üst sınır",
+      "autoMaxHint": "Boş bırakırsanız işlemci çekirdeği sayısına göre belirlenir.",
+      "automatic": "Otomatik",
+      "maxWait": "En uzun bekleme",
+      "maxWaitHint": "Bu süre dolunca test geri çevrilir ve Claude'a yeniden çalıştırması söylenir.",
+      "unitMinutes": "dk",
+      "unitSeconds": "sn",
+      "advanced": "Gelişmiş",
+      "cpuHigh": "Yoğun işlemci eşiği",
+      "cpuHighHint": "İşlemci kullanımı bunun üzerindeyken yeni test başlamaz.",
+      "cpuResume": "Devam eşiği",
+      "cpuResumeHint": "İşlemci kullanımı bunun altına inince testler yeniden başlar.",
+      "minMemory": "En az boş bellek",
+      "minMemoryHint": "Boş bellek bunun altındayken yeni test başlamaz.",
+      "rampUp": "Başlatmalar arası süre",
+      "rampUpHint": "Yeni testin yükü görünmeden bir sonraki başlamaz.",
+      "startGrace": "Başlama toleransı",
+      "startGraceHint": "Başlatılan ama çalıştığına dair iz görülmeyen test, bu süreden sonra yerini bırakır.",
+      "backgroundHold": "Arka plan tutma sınırı",
+      "backgroundHoldHint": "Görünür işlemi olmayan bir arka plan testi yerini en fazla bu kadar tutar.",
+      "builtins": "Yerleşik kurallar",
+      "customRules": "Özel kurallar"
+    },
+    "project": {
+      "modeLabel": "Bu projede kuyruk",
+      "mode": {
+        "inherit": "Genel",
+        "off": "Kapalı"
+      },
+      "modeHint": {
+        "inherit": "Genel kurallar ve aşağıdaki değişiklikler geçerlidir.",
+        "off": "Bu projenin sekmelerindeki testler kuyrukta beklemez."
+      },
+      "globalOff": "Test kuyruğu Ayarlar'da kapalı; bu seçimler açıldığında geçerli olur.",
+      "builtins": "Bu proje için yerleşik kurallar",
+      "customRules": "Bu projeye özel ek kurallar"
+    }
   }
 }

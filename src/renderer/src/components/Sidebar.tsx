@@ -4,6 +4,8 @@ import type { Account } from '@shared/types'
 import { useOnboarding } from '../onboarding/onboardingStore'
 import { OptimizeBadge } from '../optimize/OptimizeBadge'
 import { useOptimizeBadgeState } from '../optimize/optimizeStore'
+import { TestQueueIndicator } from '../testQueue/TestQueueIndicator'
+import { TestQueueTabBadge } from '../testQueue/TestQueueTabBadge'
 import { UsagePanel } from '../usage/UsagePanel'
 import { useApp } from '../store'
 import { SessionIcon, StatusDot } from '../ui/SessionIcon'
@@ -114,6 +116,9 @@ export function Sidebar(): React.JSX.Element | null {
                             >
                               <SessionIcon kind={session.kind} size={12} />
                               <span className="min-w-0 flex-1 truncate">{session.title}</span>
+                              {session.kind === 'claude' && (
+                                <TestQueueTabBadge sessionId={session.id} projectId={project.id} />
+                              )}
                               <StatusDot run={running[session.id]} />
                             </button>
                           </li>
@@ -125,6 +130,7 @@ export function Sidebar(): React.JSX.Element | null {
               })}
           </nav>
 
+          <TestQueueIndicator />
           <UsagePanel />
         </aside>
       </div>

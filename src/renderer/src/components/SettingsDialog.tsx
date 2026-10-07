@@ -6,6 +6,7 @@ import { ProfileSection } from '../onboarding/ProfileSection'
 import {
   AboutSettingsSection,
   GeneralSettingsSection,
+  TestQueueSettingsSection,
   UsageSettingsSection
 } from './PreferenceSections'
 import { useOnboarding } from '../onboarding/onboardingStore'
@@ -76,6 +77,7 @@ function SettingsContent(): React.JSX.Element | null {
 
       <UsageSettingsSection />
       <GeneralSettingsSection />
+      <TestQueueSettingsSection />
 
       <section className="mt-6 space-y-2">
         <h3 className={sectionTitleClass}>{t('settings.language')}</h3>
