@@ -2,8 +2,10 @@ name: Release
 
 # Push a tag `v<version>` matching package.json to build and publish a release:
 #   1. create (or reuse) a DRAFT GitHub release for the tag,
-#   2. build each platform on its own native runner and upload the artifacts to the draft,
-#   3. publish the draft only when every build succeeded.
+#   2. build each platform on its own native runner (read-only token) and keep the installers as
+#      workflow artifacts,
+#   3. upload all installers to the draft from a single job that holds the write token,
+#   4. publish the draft only when every build and the upload succeeded.
 # A failed build leaves the draft unpublished, so the in-app update check (releases/latest) never
 # sees a half-filled release. Builds are unsigned for now.
 
@@ -29,7 +31,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Check tag matches package.json version
         run: |
@@ -59,30 +63,34 @@ jobs:
     needs: draft
     runs-on: macos-latest
     permissions:
-      contents: write
+      contents: read
     env:
       # Unsigned and not notarized, same as the manual release flow so far.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:mac --arm64 --publish never
-      - name: Upload to draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" dist/*.dmg --clobber
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-mac-arm64
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 1
 
   win:
     name: build Windows ${{ matrix.arch }}
     needs: draft
     runs-on: ${{ matrix.runner }}
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -98,9 +106,11 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -108,14 +118,35 @@ jobs:
       # One arch per run, so the installer is named claudedeck-<version>-<arch>-setup.exe, which
       # the Windows update check looks for.
       - run: pnpm build:win --${{ matrix.arch }} --publish never
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-win-${{ matrix.arch }}
+          path: dist/claudedeck-*-${{ matrix.arch }}-setup.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  upload:
+    name: upload assets to draft
+    needs: [mac-arm64, win]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-*
+          path: assets
+          merge-multiple: true
       - name: Upload to draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" "dist/claudedeck-${TAG#v}-${{ matrix.arch }}-setup.exe" --clobber
+        run: |
+          ls -l assets
+          gh release upload "$TAG" assets/* --clobber
 
   publish:
     name: publish release
-    needs: [mac-arm64, win]
+    needs: upload
     runs-on: ubuntu-latest
     permissions:
       contents: write
