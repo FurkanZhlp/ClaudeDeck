@@ -1,13 +1,13 @@
 import { NotebookText } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../ui/Button'
-import { useNotes } from './notesStore'
+import { useSidePanel } from '../ui/sidePanelStore'
 import { useNoteList } from './useNoteList'
 
 export function NotesToggle({ projectId }: { projectId: string }): React.JSX.Element {
   const { t } = useTranslation()
-  const open = useNotes((s) => s.open)
-  const toggle = useNotes((s) => s.toggle)
+  const open = useSidePanel((s) => s.panel === 'notes')
+  const toggle = useSidePanel((s) => s.toggle)
   const count = useNoteList(projectId).notes?.length ?? 0
   const label = open ? t('notes.hide') : t('notes.show')
 
@@ -18,7 +18,7 @@ export function NotesToggle({ projectId }: { projectId: string }): React.JSX.Ele
       aria-label={count > 0 ? `${label}, ${t('notes.count', { count })}` : label}
       data-tooltip={label}
       className={`relative px-2 ${open ? 'bg-panel text-fg' : ''}`}
-      onClick={toggle}
+      onClick={() => toggle('notes')}
     >
       <NotebookText size={15} aria-hidden />
       {count > 0 && (

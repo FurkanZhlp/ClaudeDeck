@@ -1,18 +1,16 @@
 import { create } from 'zustand'
+import { useSidePanel } from '../ui/sidePanelStore'
 
 interface NotesStore {
-  open: boolean
   /** Last selected note name per project id. */
   selected: Record<string, string>
-  toggle: () => void
+  /** Shows or hides the notes panel (visibility lives in the shared side panel store). */
   setOpen: (open: boolean) => void
   select: (projectId: string, name: string) => void
 }
 
 export const useNotes = create<NotesStore>((set) => ({
-  open: false,
   selected: {},
-  toggle: () => set((s) => ({ open: !s.open })),
-  setOpen: (open) => set({ open }),
+  setOpen: (open) => useSidePanel.getState().setOpen('notes', open),
   select: (projectId, name) => set((s) => ({ selected: { ...s.selected, [projectId]: name } }))
 }))

@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next'
+import { AgentsPanel } from '../agents/AgentsPanel'
 import { NotesPanel } from '../notes/NotesPanel'
-import { useNotes } from '../notes/notesStore'
 import { useApp } from '../store'
+import { useSidePanel } from '../ui/sidePanelStore'
 import { AccountEmpty } from './AccountEmpty'
 import { SessionPane } from './SessionPane'
 import { SessionTabs } from './SessionTabs'
@@ -13,7 +14,8 @@ export function Workspace(): React.JSX.Element {
   const sessionId = useApp((s) => s.selectedSessionId)
   const projectExists = useApp((s) => !!s.data?.projects.some((p) => p.id === s.selectedProjectId))
   const account = useApp((s) => s.data?.accounts.find((a) => a.id === s.selectedAccountId))
-  const notesOpen = useNotes((s) => s.open)
+  const sessionKind = useApp((s) => s.data?.sessions.find((x) => x.id === sessionId)?.kind)
+  const sidePanel = useSidePanel((s) => s.panel)
 
   if (!account) return <Welcome />
   if (!projectId || !projectExists) return <AccountEmpty account={account} />
@@ -31,7 +33,11 @@ export function Workspace(): React.JSX.Element {
             </div>
           )}
         </div>
-        {notesOpen && <NotesPanel key={projectId} projectId={projectId} />}
+        {sidePanel === 'notes' && <NotesPanel key={projectId} projectId={projectId} />}
+        {/* Agents belong to a Claude tab; on a shell tab the panel waits until one is selected. */}
+        {sidePanel === 'agents' && sessionId && sessionKind === 'claude' && (
+          <AgentsPanel key={sessionId} sessionId={sessionId} />
+        )}
       </div>
     </div>
   )

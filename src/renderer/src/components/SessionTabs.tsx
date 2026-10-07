@@ -1,6 +1,7 @@
 import { AlertTriangle, Plus, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
+import { AgentsToggle } from '../agents/AgentsToggle'
 import { NotesToggle } from '../notes/NotesToggle'
 import { useApp } from '../store'
 import { Button } from '../ui/Button'
@@ -15,6 +16,7 @@ export function SessionTabs({ projectId }: { projectId: string }): React.JSX.Ele
     (s) => s.data?.projects.find((p) => p.id === projectId)?.accountId
   )
   const selectedSessionId = useApp((s) => s.selectedSessionId)
+  const selectedIsClaude = sessions.some((x) => x.id === selectedSessionId && x.kind === 'claude')
   const running = useApp((s) => s.running)
   const selectSession = useApp((s) => s.selectSession)
   const createSession = useApp((s) => s.createSession)
@@ -88,6 +90,9 @@ export function SessionTabs({ projectId }: { projectId: string }): React.JSX.Ele
           <Plus size={14} />
           {t('session.newShell')}
         </Button>
+        {selectedSessionId && selectedIsClaude && (
+          <AgentsToggle key={selectedSessionId} sessionId={selectedSessionId} />
+        )}
         <NotesToggle projectId={projectId} />
       </div>
     </div>
