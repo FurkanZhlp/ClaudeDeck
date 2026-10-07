@@ -416,3 +416,59 @@ describe('project folders on Windows', () => {
     expect(findProjectByPath(projects, 'C:\\code\\monorepo', 'win32')).toBeUndefined()
   })
 })
+
+describe('MCP tools: test queue', () => {
+  const view = {
+    mode: 'auto' as const,
+    limit: 2,
+    load: null,
+    runs: [],
+    otherAccountsRunning: 1,
+    otherAccountsWaiting: 0
+  }
+
+  it('reports the queue as unavailable when it is not wired', async () => {
+    expect(await tools.get_test_queue.call({}, scope)).toMatchObject({
+      isError: true,
+      content: [{ text: 'The test queue is not available.' }]
+    })
+  })
+
+  it("returns the caller's view and cancels only through the caller's scope", async () => {
+    const agentView = vi.fn(() => view)
+    const cancelOwn = vi.fn((_s: SessionScope, runId: string) =>
+      runId === 'mine'
+        ? Promise.resolve('cancelled' as const)
+        : runId === 'stuck'
+          ? Promise.reject(new DomainError('INVALID'))
+          : Promise.reject(new DomainError('NOT_FOUND'))
+    )
+    const queued = createTools({
+      repo,
+      notes,
+      notifyStateChanged,
+      requestOpenSession,
+      confirm,
+      testQueue: { agentView, cancelOwn }
+    })
+    expect(data(await queued.get_test_queue.call({}, scope))).toEqual(view)
+    expect(agentView).toHaveBeenCalledWith(scope)
+
+    expect(data(await queued.cancel_test_run.call({ runId: 'mine' }, scope))).toEqual({
+      runId: 'mine',
+      result: 'cancelled'
+    })
+    expect(cancelOwn).toHaveBeenCalledWith(scope, 'mine')
+    expect(await queued.cancel_test_run.call({ runId: 'theirs' }, scope)).toMatchObject(NOT_ALLOWED)
+    const stuck = await queued.cancel_test_run.call({ runId: 'stuck' }, scope)
+    expect(stuck.isError).toBe(true)
+    expect(stuck.content[0].text).toMatch(/cannot be stopped/)
+    expect((await queued.cancel_test_run.call({}, scope)).isError).toBe(true)
+  })
+
+  it('is never available to optimize runs', async () => {
+    const run = { kind: 'optimize' as const, runId: 'r1', accountId: 'id1' }
+    expect(tools.get_test_queue.scopeKind).toBe('session')
+    expect(await tools.cancel_test_run.call({ runId: 'x' }, run)).toMatchObject(NOT_ALLOWED)
+  })
+})

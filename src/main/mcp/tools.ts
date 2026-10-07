@@ -4,7 +4,7 @@ import * as nodePath from 'node:path'
 import { isAbsolute, type PlatformPath } from 'node:path'
 import { z } from 'zod'
 import { DomainError } from '../../shared/errors'
-import type { NoteFile, Project, SessionKind } from '../../shared/types'
+import type { NoteFile, Project, SessionKind, TestQueueAgentView } from '../../shared/types'
 import { memoryDir } from '../notes/memoryPath'
 import type { OsName } from '../platform/types'
 import { isRootPath, isWithin, samePath, splitPath } from '../platform/paths'
@@ -34,8 +34,17 @@ export type ConfirmRequest =
       requestedBy: SessionScope
     }
 
+/** The test queue as a tab may see and touch it (see TestQueueService). */
+export interface TestQueueAccess {
+  agentView(scope: SessionScope): TestQueueAgentView
+  /** Cancels a waiting run or stops a running one of the caller's own tab. */
+  cancelOwn(scope: SessionScope, runId: string): Promise<'cancelled' | 'stopped'>
+}
+
 export interface ToolDeps {
   repo: Repository
+  /** Absent when the queue is not wired (tests); its tools then report it as unavailable. */
+  testQueue?: TestQueueAccess
   notes: NotesAccess
   requestOpenSession(sessionId: string): void
   notifyStateChanged(): void
@@ -70,6 +79,8 @@ export type ToolName =
   | 'write_note'
   | 'create_project'
   | 'open_session'
+  | 'get_test_queue'
+  | 'cancel_test_run'
 
 export type Tools = Record<ToolName, Tool>
 
@@ -137,6 +148,7 @@ export class TextReply {
 }
 
 const notAllowed = (): ToolError => new ToolError('Not allowed')
+const QUEUE_UNAVAILABLE = 'The test queue is not available.'
 
 // Returned by a handler when the user said no; reported as a normal (non-error) result.
 const DECLINED = Symbol('declined')
@@ -483,6 +495,33 @@ export function createTools(deps: ToolDeps): Tools {
         deps.notifyStateChanged()
         deps.requestOpenSession(session.id)
         return { id: session.id, title: session.title, kind: session.kind }
+      }
+    ),
+
+    get_test_queue: define(
+      "Show ClaudeDeck's test queue: mode, concurrency limit, system load, and the test runs of this account (running and waiting). Other accounts' runs are only counted.",
+      {},
+      (_, scope) => {
+        if (!deps.testQueue) throw new ToolError(QUEUE_UNAVAILABLE)
+        return deps.testQueue.agentView(scope)
+      }
+    ),
+
+    cancel_test_run: define(
+      'Cancel a waiting test run, or stop a running one, started by this tab or its subagents. The run id comes from get_test_queue.',
+      { runId: id },
+      async (args, scope) => {
+        if (!deps.testQueue) throw new ToolError(QUEUE_UNAVAILABLE)
+        try {
+          return { runId: args.runId, result: await deps.testQueue.cancelOwn(scope, args.runId) }
+        } catch (error) {
+          if (!(error instanceof DomainError)) throw error
+          // Unknown and foreign runs look the same, so other tabs' run ids reveal nothing.
+          if (error.code === 'NOT_FOUND') throw notAllowed()
+          throw new ToolError(
+            'This run cannot be stopped: no single matching process was found. The user can release it in ClaudeDeck.'
+          )
+        }
       }
     )
   }

@@ -1,13 +1,14 @@
 import { mkdtempSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '../../shared/types'
 import { JsonStore } from '../state/jsonStore'
 import { emptyState, Repository } from '../state/repository'
-import { canUseRandomPort, startMcpServer, type RunningMcpServer } from './server'
+import { allowLongPolls, canUseRandomPort, startMcpServer, type RunningMcpServer } from './server'
 import { createSessionTokens, type SessionScope, type SessionTokens } from './sessionTokens'
 import { createOptimizeTools } from './optimizeTools'
 import { createTools, type Tools } from './tools'
@@ -96,8 +97,10 @@ describe('MCP server', () => {
     try {
       const { tools: listed } = await client.listTools()
       expect(listed.map((t) => t.name).sort()).toEqual([
+        'cancel_test_run',
         'create_project',
         'get_project',
+        'get_test_queue',
         'list_accounts',
         'list_notes',
         'list_projects',
@@ -206,6 +209,137 @@ describe('MCP server', () => {
       tokens.revoke('run1')
       await both.stop()
     }
+  })
+})
+
+describe('hook routes', () => {
+  const PRE = '/hooks/test-queue/pre'
+  let hooks: RunningMcpServer
+  let base: string
+  let calls: { scope: SessionScope; payload: unknown; signal: AbortSignal }[]
+  let release: ((body: string) => void) | null = null
+  const finish = (body: string): void => {
+    const done = release as ((body: string) => void) | null
+    done?.(body)
+  }
+
+  beforeAll(async () => {
+    hooks = await startMcpServer({
+      tools,
+      tokens,
+      preferredPort: 0,
+      routeRateLimit: { limit: 5, windowMs: 60_000 },
+      routes: {
+        [PRE]: {
+          maxBodyBytes: 1024,
+          handle: (s, payload, signal) => {
+            calls.push({ scope: s, payload, signal })
+            if ((payload as { wait?: boolean } | undefined)?.wait) {
+              return new Promise<string>((done) => {
+                release = done
+              })
+            }
+            return '{"ok":true}'
+          }
+        }
+      }
+    })
+    base = hooks.url.replace(/\/mcp$/, '')
+  })
+
+  afterAll(async () => {
+    await hooks?.stop()
+  })
+
+  const hook = (
+    body: unknown,
+    init: { headers?: Record<string, string>; signal?: AbortSignal } = {}
+  ): Promise<Response> =>
+    fetch(`${base}${PRE}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...init.headers },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+      signal: init.signal
+    })
+
+  it('answers a session token with the handler reply', async () => {
+    calls = []
+    const token = tokens.issue({ ...scope, sessionId: 'hook1' })
+    const res = await hook({ t: token, e: 'pre', p: { tool_name: 'Bash' } })
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('{"ok":true}')
+    expect(calls[0].scope).toMatchObject({ kind: 'session', sessionId: 'hook1' })
+    expect(calls[0].payload).toEqual({ tool_name: 'Bash' })
+  })
+
+  it('refuses bad tokens, optimize tokens, Origin and oversized bodies with empty bodies', async () => {
+    calls = []
+    const run = tokens.issue({ kind: 'optimize', runId: 'hookrun', accountId: scope.accountId })
+    const cases: [Promise<Response>, number][] = [
+      [hook({ t: 'nope', p: {} }), 401],
+      [hook({ p: {} }), 401],
+      [hook({ t: run, p: {} }), 401],
+      [hook('not json'), 400],
+      [hook({ t: tokens.issue({ ...scope, sessionId: 'hook2' }), p: 'x'.repeat(2000) }), 413],
+      [
+        hook(
+          { t: tokens.issue({ ...scope, sessionId: 'hook3' }), p: {} },
+          { headers: { Origin: 'https://evil.example' } }
+        ),
+        403
+      ]
+    ]
+    for (const [pending, status] of cases) {
+      const res = await pending
+      expect(res.status).toBe(status)
+      expect(await res.text()).toBe('')
+    }
+    expect(calls).toEqual([])
+    expect((await fetch(`${base}${PRE}`)).status).toBe(405)
+    tokens.revoke('hookrun')
+  })
+
+  it('rate limits hook calls per tab with an empty body', async () => {
+    const token = tokens.issue({ ...scope, sessionId: 'hook4' })
+    const statuses: number[] = []
+    for (let i = 0; i < 6; i++) statuses.push((await hook({ t: token, p: {} })).status)
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 429])
+  })
+
+  it('keeps a long-poll open and signals when the client goes away', async () => {
+    calls = []
+    release = null
+    const token = tokens.issue({ ...scope, sessionId: 'hook5' })
+    const controller = new AbortController()
+    const pending = hook({ t: token, p: { wait: true } }, { signal: controller.signal }).catch(
+      () => null
+    )
+    await vi.waitFor(() => expect(calls).toHaveLength(1))
+    await new Promise((done) => setTimeout(done, 300))
+    expect(calls[0].signal.aborted).toBe(false)
+    controller.abort()
+    await pending
+    await vi.waitFor(() => expect(calls[0].signal.aborted).toBe(true))
+    finish('')
+  })
+
+  it('turns the idle socket timeout off for long-polls', () => {
+    const server = createServer()
+    server.timeout = 5000
+    allowLongPolls(server)
+    expect(server.timeout).toBe(0)
+  })
+
+  it('answers a long-poll once the handler resolves', async () => {
+    calls = []
+    release = null
+    const token = tokens.issue({ ...scope, sessionId: 'hook6' })
+    const pending = hook({ t: token, p: { wait: true } })
+    await vi.waitFor(() => expect(release).not.toBeNull())
+    finish('{"hookSpecificOutput":{}}')
+    const res = await pending
+    expect(await res.text()).toBe('{"hookSpecificOutput":{}}')
+    expect(calls[0].signal.aborted).toBe(false)
   })
 })
 
