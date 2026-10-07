@@ -1,0 +1,8 @@
+{
+  "agentType": "code-reviewer",
+  "description": "Review code",
+  "toolUseId": "toolu_fg0001",
+  "spawnDepth": 1,
+  "requestShape": "foreground",
+  "requestNonInteractive": true
+}
