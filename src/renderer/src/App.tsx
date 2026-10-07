@@ -45,6 +45,12 @@ export default function App(): React.JSX.Element {
     return unsubscribe
   }, [])
 
+  // The menu bar can follow the account selected here.
+  const selectedAccountId = useApp((s) => s.selectedAccountId)
+  useEffect(() => {
+    window.api.app.setSelectedAccount(selectedAccountId)
+  }, [selectedAccountId])
+
   if (!ready) return <div className="drag h-full" />
 
   return (

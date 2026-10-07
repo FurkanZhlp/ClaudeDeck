@@ -136,7 +136,7 @@ export function NotesPanel({ projectId }: { projectId: string }): React.JSX.Elem
             current={current}
             onSelect={(name) => select(projectId, name)}
           />
-          <div ref={previewRef} className="min-h-0 flex-1 overflow-y-auto bg-elevated">
+          <div ref={previewRef} className="scroll-area min-h-0 flex-1 overflow-y-auto bg-elevated">
             {visible &&
               (visible.content.trim() ? (
                 <article className="notes-markdown">

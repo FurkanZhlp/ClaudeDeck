@@ -79,7 +79,24 @@
     "removeConfirm": "Delete account \"{{name}}\"?",
     "removeFiles": "Also sign out and delete the account's local files",
     "language": "Language",
-    "languageSystem": "System language"
+    "languageSystem": "System language",
+    "general": "General",
+    "launchAtLogin": "Open ClaudeDeck at login",
+    "launchAtLoginHint": "With the menu bar on, it starts in the menu bar without opening a window.",
+    "launchAtLoginDev": "Only applies to the installed app.",
+    "usage": "Usage",
+    "usageDisplay": "Show usage as",
+    "displayUsed": "Used",
+    "displayRemaining": "Remaining",
+    "trayEnabled": "Show in menu bar",
+    "trayEnabledHint": "Closing the window keeps ClaudeDeck running in the menu bar.",
+    "trayMetric": "Menu bar text",
+    "metricSession": "Session",
+    "metricWeekly": "Weekly",
+    "metricBoth": "Both",
+    "trayAccount": "Menu bar account",
+    "trayAccountAuto": "Closest to limit",
+    "trayAccountSelected": "Selected account"
   },
   "login": {
     "title": "Sign in for {{name}}",
@@ -458,7 +475,13 @@
       "updated": "Updated {{time}}",
       "nextUpdate": "Next update in ~{{time}}",
       "refresh": "Refresh now",
-      "refreshing": "Refreshing"
+      "refreshing": "Refreshing",
+      "used": "{{percent}} used"
     }
+  },
+  "tray": {
+    "open": "Open ClaudeDeck",
+    "quit": "Quit",
+    "noAccounts": "Add an account in ClaudeDeck to see its usage here."
   }
 }

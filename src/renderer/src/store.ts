@@ -7,7 +7,8 @@ import type {
   Language,
   ProjectInput,
   SessionKind,
-  UpdateInfo
+  UpdateInfo,
+  UsageSettings
 } from '@shared/types'
 import i18n from './i18n'
 import * as pool from './terminal/terminalPool'
@@ -40,6 +41,8 @@ interface AppStore {
   setError: (code: string | null) => void
   setNotice: (message: string | null) => void
   setLanguage: (language: Language | null) => Promise<void>
+  setUsageSettings: (patch: Partial<UsageSettings>) => Promise<void>
+  setLaunchAtLogin: (enabled: boolean) => Promise<void>
   refreshStatus: (accountId: string) => Promise<void>
   /** Creates the account and selects it; returns its id so the caller can start onboarding. */
   createAccount: (input: AccountInput) => Promise<string | null>
@@ -71,7 +74,7 @@ import.meta.hot?.dispose(() => {
 // Aynı hesap için çakışan durum sorgularında yalnızca en sonuncusu uygulanır.
 const statusRequests: Record<string, number> = {}
 
-function applyLanguage(state: AppState): void {
+export function applyLanguage(state: AppState): void {
   const language = resolveLanguage(state.settings.language, navigator.language)
   void i18n.changeLanguage(language)
   document.documentElement.lang = language
@@ -200,6 +203,16 @@ export const useApp = create<AppStore>((set, get) => {
       if (!data) return
       set({ data })
       applyLanguage(data)
+    },
+
+    async setUsageSettings(patch) {
+      const data = await guard(() => window.api.settings.setUsage(patch))
+      if (data) set({ data })
+    },
+
+    async setLaunchAtLogin(enabled) {
+      const data = await guard(() => window.api.settings.setLaunchAtLogin(enabled))
+      if (data) set({ data })
     },
 
     async refreshStatus(accountId) {

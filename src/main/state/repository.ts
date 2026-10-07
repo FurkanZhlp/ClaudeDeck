@@ -108,7 +108,17 @@ export class Repository {
   removeAccount(id: string): AppState {
     this.account(id)
     if (this.state.projects.some((p) => p.accountId === id)) throw new DomainError('ACCOUNT_IN_USE')
-    return this.commit({ ...this.state, accounts: this.state.accounts.filter((a) => a.id !== id) })
+    const { settings } = this.state
+    // The menu bar must not keep pointing at an account that no longer exists.
+    const usage =
+      settings.usage.trayAccount === id
+        ? { ...settings.usage, trayAccount: 'auto' }
+        : settings.usage
+    return this.commit({
+      ...this.state,
+      accounts: this.state.accounts.filter((a) => a.id !== id),
+      settings: { ...settings, usage }
+    })
   }
 
   createProject(input: ProjectInput): AppState {

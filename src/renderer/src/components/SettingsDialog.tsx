@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Account, Language } from '@shared/types'
 import { ProfileSection } from '../onboarding/ProfileSection'
+import { GeneralSettingsSection, UsageSettingsSection } from './PreferenceSections'
 import { useOnboarding } from '../onboarding/onboardingStore'
 import { useApp } from '../store'
 import { AccountDot } from '../ui/AccountDot'
@@ -68,6 +69,9 @@ function SettingsContent(): React.JSX.Element | null {
           </Button>
         </form>
       </section>
+
+      <UsageSettingsSection />
+      <GeneralSettingsSection />
 
       <section className="mt-6 space-y-2">
         <h3 className={sectionTitleClass}>{t('settings.language')}</h3>

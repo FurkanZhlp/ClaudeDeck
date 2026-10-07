@@ -56,7 +56,7 @@ export function Modal({
             <X size={16} />
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+        <div className="scroll-area min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
       </div>
     </div>
   )

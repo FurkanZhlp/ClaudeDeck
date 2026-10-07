@@ -79,7 +79,24 @@
     "removeConfirm": "\"{{name}}\" hesabı silinsin mi?",
     "removeFiles": "Hesabın oturumunu kapat ve yerel dosyalarını da sil",
     "language": "Dil",
-    "languageSystem": "Sistem dili"
+    "languageSystem": "Sistem dili",
+    "general": "Genel",
+    "launchAtLogin": "Oturum açıldığında ClaudeDeck'i başlat",
+    "launchAtLoginHint": "Menü çubuğu açıksa pencere açılmadan menü çubuğunda başlar.",
+    "launchAtLoginDev": "Yalnızca yüklü uygulamada geçerlidir.",
+    "usage": "Kullanım",
+    "usageDisplay": "Kullanımı göster",
+    "displayUsed": "Kullanılan",
+    "displayRemaining": "Kalan",
+    "trayEnabled": "Menü çubuğunda göster",
+    "trayEnabledHint": "Pencereyi kapattığınızda ClaudeDeck menü çubuğunda çalışmaya devam eder.",
+    "trayMetric": "Menü çubuğu metni",
+    "metricSession": "Oturum",
+    "metricWeekly": "Haftalık",
+    "metricBoth": "İkisi de",
+    "trayAccount": "Menü çubuğu hesabı",
+    "trayAccountAuto": "Sınıra en yakın",
+    "trayAccountSelected": "Seçili hesap"
   },
   "login": {
     "title": "{{name}} için giriş",
@@ -458,7 +475,13 @@
       "updated": "Güncellendi: {{time}}",
       "nextUpdate": "Sonraki güncelleme: ~{{time}} sonra",
       "refresh": "Şimdi yenile",
-      "refreshing": "Yenileniyor"
+      "refreshing": "Yenileniyor",
+      "used": "{{percent}} kullanıldı"
     }
+  },
+  "tray": {
+    "open": "ClaudeDeck'i aç",
+    "quit": "Çık",
+    "noAccounts": "Kullanımı burada görmek için ClaudeDeck'te bir hesap ekleyin."
   }
 }

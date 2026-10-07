@@ -16,6 +16,7 @@ import { emptyState, Repository } from './state/repository'
 import { checkForUpdate, RELEASES_URL } from './updates/updateChecker'
 import type { Account, GuidelinesUpdate, McpInfo, UpdateInfo } from '../shared/types'
 import icon from '../../resources/icon.png?asset'
+import trayIcon from '../../resources/trayTemplate.png?asset'
 import guidelinesText from '../../resources/claudedeck/guidelines.md?raw'
 import optimizePrompt from '../../resources/claudedeck/optimize-prompt.md?raw'
 import { createIpcTools } from './ipcUtil'
@@ -36,6 +37,9 @@ import { registerNotesIpc, type NotesIpc } from './notes/notesIpc'
 import { listNotes, readNote, writeNote } from './notes/notesStore'
 import { ensureGuidelines } from './profile/guidelines'
 import { registerProfileIpc } from './profile/profileIpc'
+import { registerAppIpc } from './tray/appIpc'
+import { createMenuBar, type MenuBar } from './tray/menuBar'
+import { TRAY_CHANNELS } from './tray/trayChannels'
 
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000
 
@@ -44,9 +48,16 @@ const accountsRoot = join(userData, 'accounts')
 const repo = new Repository(new JsonStore(join(userData, 'config.json'), emptyState), accountsRoot)
 const accounts = new AccountService(accountsRoot, resolveShellEnv)
 // Plan usage reported by Claude Code through a statusline hook installed per account.
-const usage = createUsageService({ repo, userDataDir: userData, send })
+const usage = createUsageService({
+  repo,
+  userDataDir: userData,
+  send: (channel, ...args) => {
+    broadcast(channel, ...args)
+    if (channel === IPC.usageUpdate) menuBar?.refresh()
+  }
+})
 // Tokens and API-equivalent cost from each account's local transcripts.
-const stats = createStatsService({ repo, send })
+const stats = createStatsService({ repo, send: broadcast })
 // Background `claude -p /usage` checks (no model call) keep usage fresh between Claude runs.
 const usagePoller = createUsagePoller({
   repo,
@@ -56,6 +67,11 @@ const usagePoller = createUsagePoller({
 })
 
 let mainWindow: BrowserWindow | null = null
+// macOS menu bar item with a usage popover; null until the app is ready or when turned off.
+let menuBar: MenuBar | null = null
+// Account selected in the main window, for the menu bar's 'selected' mode.
+let selectedAccountId: string | null = null
+let quitting = false
 let notes: NotesIpc | null = null
 let mcp: { url: string; stop: () => Promise<void> } | null = null
 // Per-tab MCP tokens; each Claude tab only reaches its own project.
@@ -65,6 +81,12 @@ let pendingGuidelineUpdates: GuidelinesUpdate[] = []
 
 function send(channel: string, ...args: unknown[]): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args)
+}
+
+/** Events both renderers mirror (usage, state); terminal traffic stays with `send`. */
+function broadcast(channel: string, ...args: unknown[]): void {
+  send(channel, ...args)
+  menuBar?.send(channel, ...args)
 }
 
 const ptys = new PtyManager({
@@ -169,7 +191,7 @@ async function startMcp(): Promise<void> {
     repo,
     notes: { list: listNotes, read: readNote, write: writeNote },
     requestOpenSession: (sessionId) => send(IPC.sessionOpenRequest, sessionId),
-    notifyStateChanged: () => send(IPC.stateChanged, repo.get()),
+    notifyStateChanged: () => broadcast(IPC.stateChanged, repo.get()),
     confirm: confirmMcpRequest
   })
   // Older builds stored a long-lived token here; tokens are per tab and in memory now.
@@ -280,6 +302,49 @@ async function confirmOpenExternal(raw: string): Promise<void> {
   if (response === 0) await shell.openExternal(url.toString())
 }
 
+/** Loads the renderer, optionally at a hash route (e.g. the menu bar popover). */
+function loadRenderer(win: BrowserWindow, hash = ''): void {
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    const url = process.env['ELECTRON_RENDERER_URL']
+    void win.loadURL(hash ? `${url}#${hash}` : url)
+  } else {
+    void win.loadFile(join(__dirname, '../renderer/index.html'), hash ? { hash } : undefined)
+  }
+}
+
+/**
+ * Brings the main window back, creating it again after it was closed. The Dock icon comes back
+ * first: a window shown while the app is still a menu bar only app would not take focus.
+ */
+async function showMainWindow(): Promise<void> {
+  menuBar?.hidePopover()
+  try {
+    await app.dock?.show()
+  } catch (error) {
+    console.warn('[dock]', error)
+  }
+  app.focus({ steal: true })
+  if (!mainWindow || mainWindow.isDestroyed()) return createWindow()
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+/** Main window closed while the menu bar keeps the app alive: free what only it used. */
+function onMainWindowClosed(): void {
+  mainWindow = null
+  if (quitting) return
+  if (!menuBar?.enabled()) {
+    app.quit()
+    return
+  }
+  // The terminal views are gone with the window; leave no orphaned processes behind.
+  ptys.killAll()
+  mcpTokens.revokeAll('session')
+  notes?.reset()
+  app.dock?.hide()
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1280,
@@ -298,11 +363,12 @@ function createWindow(): void {
   })
   mainWindow = win
 
-  win.on('ready-to-show', () => win.show())
-  win.on('focus', () => usagePoller.pollSoon())
-  win.on('closed', () => {
-    mainWindow = null
+  win.on('ready-to-show', () => {
+    win.show()
+    win.focus()
   })
+  win.on('focus', () => usagePoller.pollSoon())
+  win.on('closed', onMainWindowClosed)
   win.webContents.setWindowOpenHandler(({ url }) => {
     void confirmOpenExternal(url)
     return { action: 'deny' }
@@ -318,11 +384,7 @@ function createWindow(): void {
     notes?.reset()
   })
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  loadRenderer(win)
 }
 
 // One instance only: a second copy would fight over the MCP port and every account's .claude.json.
@@ -330,9 +392,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    if (!mainWindow) return
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.focus()
+    if (app.isReady()) void showMainWindow()
   })
 }
 
@@ -349,12 +409,42 @@ app.whenReady().then(() => {
     allowed(permission)
   )
 
+  // The main window may call every handler; the popover only what its view needs.
+  const ipcTools = createIpcTools({
+    main: () => mainWindow?.webContents,
+    tray: () => menuBar?.popoverContents(),
+    trayChannels: TRAY_CHANNELS
+  })
+  menuBar = createMenuBar({
+    iconPath: trayIcon,
+    preloadPath: join(__dirname, '../preload/index.js'),
+    loadRenderer,
+    settings: () => repo.get().settings.usage,
+    accounts: () => repo.get().accounts,
+    usage: () => usage.list(),
+    selectedAccount: () => selectedAccountId,
+    language: () => resolveLanguage(repo.get().settings.language, app.getLocale()),
+    translate: translator,
+    openMain: () => void showMainWindow(),
+    quit: () => app.quit(),
+    onPopoverShown: () => usagePoller.pollSoon()
+  })
+  // Settings and account names shown in the popover follow changes made in the main window.
+  const syncMenuBar = (): void => {
+    menuBar?.sync()
+    menuBar?.send(IPC.stateChanged, repo.get())
+  }
+
   registerIpc({
     repo,
     accounts,
     ptys,
     getWindow: () => mainWindow,
-    onLanguageChange: applyMenu,
+    ipcTools,
+    onLanguageChange: () => {
+      applyMenu()
+      syncMenuBar()
+    },
     checkUpdate: checkUpdateQuietly,
     openUpdate: openUpdatePage,
     prepareAccount,
@@ -374,15 +464,26 @@ app.whenReady().then(() => {
     },
     issueMcpToken: (scope) => mcpTokens.issue(scope),
     revokeMcpTokens: (sessionIds) => sessionIds.forEach((id) => mcpTokens.revoke(id)),
-    onUsageSettingsChange: () => {
-      // Menu bar wiring hooks in here.
-    },
+    onUsageSettingsChange: syncMenuBar,
+    onAccountsChange: syncMenuBar,
     applyLaunchAtLogin,
     cancelOptimize: (accountId) => {
       if (optimize.isActive(accountId)) void optimize.cancel(accountId)
     }
   })
-  const ipcTools = createIpcTools(() => mainWindow)
+  registerAppIpc({
+    handle: ipcTools.handle,
+    isMainSender: ipcTools.trusted,
+    setSelectedAccount: (accountId) => {
+      if (accountId === selectedAccountId) return
+      selectedAccountId = accountId
+      menuBar?.refresh()
+    },
+    trayAccount: () => menuBar?.account() ?? null,
+    openMain: () => void showMainWindow(),
+    quit: () => app.quit(),
+    packaged: () => app.isPackaged
+  })
   notes = registerNotesIpc({
     handle: ipcTools.handle,
     repo,
@@ -415,19 +516,40 @@ app.whenReady().then(() => {
   void resolveShellEnv()
   // Keep macOS in sync with the saved choice (e.g. after the app was moved or reinstalled).
   applyLaunchAtLogin(repo.get().settings.launchAtLogin)
-  createWindow()
+  menuBar.sync()
+  // Opened at login with the menu bar on: stay in the menu bar until the user asks for the window.
+  if (startsHidden()) app.dock?.hide()
+  else createWindow()
   usagePoller.start()
   setInterval(() => void checkUpdateQuietly(), UPDATE_INTERVAL_MS)
   // Geliştirme modunda Dock'ta Electron yerine uygulama ikonu görünsün.
   if (is.dev) app.dock?.setIcon(icon)
 
+  // The popover window may still exist, so only the main window counts here.
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (!mainWindow) void showMainWindow()
   })
 })
 
-app.on('window-all-closed', () => app.quit())
+/** Whether this launch came from the login item and the menu bar can host the app. */
+function startsHidden(): boolean {
+  const { launchAtLogin, usage: usageSettings } = repo.get().settings
+  if (!app.isPackaged || !launchAtLogin || !usageSettings.trayEnabled || !menuBar?.enabled()) {
+    return false
+  }
+  try {
+    return app.getLoginItemSettings().wasOpenedAtLogin === true
+  } catch {
+    return false
+  }
+}
+
+app.on('window-all-closed', () => {
+  if (!menuBar?.enabled()) app.quit()
+})
 app.on('before-quit', () => {
+  quitting = true
+  menuBar?.dispose()
   ptys.killAll()
   optimize.disposeAll()
   usagePoller.stop()

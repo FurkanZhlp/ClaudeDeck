@@ -22,11 +22,7 @@ export function formatDuration(ms: number, t: TFunction): string {
   return unit('minute', rest)
 }
 
-/** "%62" in Turkish, "62%" in English. */
-export const formatPercent = (value: number, language: string): string =>
-  new Intl.NumberFormat(language, { style: 'percent', maximumFractionDigits: 0 }).format(
-    value / 100
-  )
+export { formatPercent } from '@shared/usageDisplay'
 
 /** Local reset time; a weekday is added when it is not within the next day. */
 export function formatResetAt(resetsAt: number, language: string, now: number): string {

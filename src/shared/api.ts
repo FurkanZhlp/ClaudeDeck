@@ -138,4 +138,18 @@ export interface Api {
     stats(): Promise<AccountStats[]>
     onStats(cb: (stats: AccountStats) => void): Unsubscribe
   }
+  /** App level actions shared by the main window and the menu bar popover. */
+  app: {
+    /** The main window reports its selected account (menu bar 'selected' mode). */
+    setSelectedAccount(accountId: string | null): void
+    /** Account the menu bar currently shows, or null without accounts. */
+    trayAccount(): Promise<string | null>
+    /** Shows the main window, opening it again if it was closed. */
+    openMain(): Promise<null>
+    quit(): Promise<null>
+    /** False in development builds, where login items are not registered. */
+    packaged(): Promise<boolean>
+    /** The menu bar popover opened again (not on its first open, which loads the page). */
+    onTrayShown(cb: () => void): () => void
+  }
 }

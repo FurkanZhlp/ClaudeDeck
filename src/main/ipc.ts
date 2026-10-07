@@ -20,7 +20,7 @@ import {
 } from './accounts/accountService'
 import { buildSessionEnv, claudeCommand, defaultShell, resolveShellEnv } from './env/shellEnv'
 import type { PtyManager } from './pty/ptyManager'
-import { createIpcTools, isSize, isText } from './ipcUtil'
+import { isSize, isText, type IpcTools } from './ipcUtil'
 import { MCP_TOKEN_ENV } from './mcp/sessionTokens'
 import type { Repository } from './state/repository'
 
@@ -29,6 +29,8 @@ interface Deps {
   accounts: AccountService
   ptys: PtyManager
   getWindow: () => BrowserWindow | null
+  /** Handler registration and sender checks shared by every IPC module. */
+  ipcTools: IpcTools
   onLanguageChange: () => void
   checkUpdate: () => Promise<UpdateInfo | null>
   openUpdate: () => Promise<void>
@@ -49,6 +51,8 @@ interface Deps {
   cancelOptimize: (accountId: string) => void
   /** Usage display or menu bar settings changed. */
   onUsageSettingsChange: () => void
+  /** An account was created, renamed or removed (menu bar title and tooltip follow). */
+  onAccountsChange: () => void
   /** Applies the login item setting to macOS (packaged app only). */
   applyLaunchAtLogin: (enabled: boolean) => void
 }
@@ -66,6 +70,7 @@ export function registerIpc({
   accounts,
   ptys,
   getWindow,
+  ipcTools,
   onLanguageChange,
   checkUpdate,
   openUpdate,
@@ -76,9 +81,10 @@ export function registerIpc({
   revokeMcpTokens,
   cancelOptimize,
   onUsageSettingsChange,
+  onAccountsChange,
   applyLaunchAtLogin
 }: Deps): void {
-  const { handle, trusted } = createIpcTools(getWindow)
+  const { handle, trusted } = ipcTools
 
   handle(IPC.stateGet, () => repo.get())
 
@@ -86,11 +92,14 @@ export function registerIpc({
     const result = repo.createAccount({ name: input?.name, color: input?.color })
     accounts.ensureConfigDir(result.account)
     prepareAccount(result.account)
+    onAccountsChange()
     return result
   })
-  handle(IPC.accountUpdate, (id: string, patch: Partial<AccountInput>) =>
-    repo.updateAccount(id, { name: patch?.name, color: patch?.color })
-  )
+  handle(IPC.accountUpdate, (id: string, patch: Partial<AccountInput>) => {
+    const state = repo.updateAccount(id, { name: patch?.name, color: patch?.color })
+    onAccountsChange()
+    return state
+  })
   handle(IPC.accountRemove, async (id: string, deleteFiles: boolean) => {
     const account = repo.account(id)
     ptys.kill(loginPtyId(id))
@@ -98,6 +107,7 @@ export function registerIpc({
     if (ptys.hasAccount(id)) throw new DomainError('ACCOUNT_RUNNING')
     cancelOptimize(id)
     const state = repo.removeAccount(id)
+    onAccountsChange()
     if (deleteFiles === true) {
       try {
         await accounts.destroy(account)

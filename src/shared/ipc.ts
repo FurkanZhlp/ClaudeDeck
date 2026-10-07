@@ -55,7 +55,13 @@ export const IPC = {
   usagePollNow: 'usage:pollNow',
   usagePlans: 'usage:plans',
   usageStats: 'usage:stats',
-  usageStatsUpdate: 'usage:statsUpdate'
+  usageStatsUpdate: 'usage:statsUpdate',
+  appSelectedAccount: 'app:selectedAccount',
+  appTrayAccount: 'app:trayAccount',
+  appOpenMain: 'app:openMain',
+  appQuit: 'app:quit',
+  appPackaged: 'app:packaged',
+  appTrayShown: 'app:trayShown'
 } as const
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; code: string }

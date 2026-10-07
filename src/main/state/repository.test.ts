@@ -73,6 +73,15 @@ describe('Repository', () => {
     expect(() => repo.removeAccount(account.id)).toThrowError('ACCOUNT_IN_USE')
   })
 
+  it('silinen hesap menü çubuğunda seçiliyse otomatiğe döner', () => {
+    const repo = make()
+    const a = repo.createAccount({ name: 'A', color: '#000' }).account
+    const b = repo.createAccount({ name: 'B', color: '#111' }).account
+    repo.setUsageSettings({ trayAccount: b.id })
+    expect(repo.removeAccount(a.id).settings.usage.trayAccount).toBe(b.id)
+    expect(repo.removeAccount(b.id).settings.usage.trayAccount).toBe('auto')
+  })
+
   it('proje hesabını değiştirir', () => {
     const repo = make()
     const a = repo.createAccount({ name: 'A', color: '#000' }).account

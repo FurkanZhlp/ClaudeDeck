@@ -7,7 +7,9 @@ import { forecast, type Forecast, type UsageWindowKind } from '@shared/usagePace
 import { formatRelative } from '../notes/relativeTime'
 import { useApp } from '../store'
 import { formatDuration, formatPercent, formatResetAt } from './format'
-import { LEVEL_COLOR, meterState } from './meter'
+import { displayPercent } from '@shared/usageDisplay'
+import { useUsageDisplay } from './display'
+import { LEVEL_COLOR, meterFill, meterState } from './meter'
 import { UsageDetails } from './UsageDetails'
 import { useAccountUsage, useUsage } from './usageStore'
 
@@ -161,11 +163,15 @@ function Meter({
 }): React.JSX.Element {
   const { t, i18n } = useTranslation()
   const reduced = useReducedMotion() ?? false
+  const display = useUsageDisplay()
   const language = i18n.language
   const label = t(`usage.${kind}`)
   const longLabel = t(`usage.${kind}Long`)
-  const { used, reset, level } = meterState(window, kind, now)
-  const percent = formatPercent(used, language)
+  const state = meterState(window, kind, now)
+  const { used, reset, level } = state
+  const shown = formatPercent(displayPercent(used, display), language)
+  const percent = display === 'used' ? shown : t('usage.details.left', { percent: shown })
+  const fill = meterFill(window, state, display)
 
   let detail: string
   let tooltip: string
@@ -191,9 +197,9 @@ function Meter({
       <span className="flex items-baseline justify-between gap-2 text-[11px]">
         <span className="text-muted">{label}</span>
         <span className="truncate tabular-nums">
-          {window && !reset && <span className="font-medium text-fg">{percent}</span>}
+          {window && <span className="font-medium text-fg">{percent}</span>}
           <span className="text-muted">
-            {window && !reset ? ' · ' : ''}
+            {window ? ' · ' : ''}
             {detail}
           </span>
         </span>
@@ -203,15 +209,15 @@ function Meter({
         aria-label={longLabel}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={Math.round(used)}
-        aria-valuetext={window && !reset ? `${percent}, ${detail}` : detail}
+        aria-valuenow={Math.round(fill)}
+        aria-valuetext={window ? `${percent}, ${detail}` : detail}
         className="mt-1 block h-1 overflow-hidden rounded-full bg-fg/10"
       >
         <motion.span
           className="block h-full origin-left rounded-full transition-colors duration-300"
           style={{ background: LEVEL_COLOR[level] }}
           initial={false}
-          animate={{ scaleX: used / 100 }}
+          animate={{ scaleX: fill / 100 }}
           transition={reduced ? { duration: 0 } : { duration: FILL_S, ease: EASE_OUT }}
         />
       </span>

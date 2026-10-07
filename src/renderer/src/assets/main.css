@@ -70,6 +70,58 @@ textarea {
   user-select: text;
 }
 
+/* Scrollbar thumb, derived from the text colour so it works in light and dark. */
+:root {
+  --scrollbar-thumb: color-mix(in srgb, var(--fg) 22%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--fg) 40%, transparent);
+}
+
+/* The menu bar popover sits on the elevated surface, edge to edge. */
+html[data-view='tray'] body {
+  background: var(--elevated);
+}
+
+/*
+ * Thin overlay-style scrollbars: a 6px rounded thumb on a transparent track that stays hidden
+ * until its scroll area is hovered or scrolling (classes set by ui/scrollbars.ts). The standard
+ * scrollbar-width/scrollbar-color properties would override these, so they are not used.
+ * xterm keeps its own scrollbar.
+ */
+:not(.xterm-viewport)::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+
+:not(.xterm-viewport)::-webkit-scrollbar-track,
+:not(.xterm-viewport)::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+:not(.xterm-viewport)::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: transparent;
+}
+
+:not(.xterm-viewport):hover::-webkit-scrollbar-thumb,
+.scrollbar-hover::-webkit-scrollbar-thumb,
+.scrollbar-active::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+}
+
+:not(.xterm-viewport)::-webkit-scrollbar-thumb:hover,
+:not(.xterm-viewport)::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+/* Reserves the scrollbar's space up front, so content does not jump when it starts to scroll. */
+.scroll-area {
+  scrollbar-gutter: stable;
+}
+
 .drag {
   -webkit-app-region: drag;
 }

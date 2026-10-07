@@ -98,6 +98,14 @@ const api: Api = {
     plans: () => call(IPC.usagePlans),
     stats: () => call(IPC.usageStats),
     onStats: (cb) => subscribe(IPC.usageStatsUpdate, cb)
+  },
+  app: {
+    setSelectedAccount: (accountId) => ipcRenderer.send(IPC.appSelectedAccount, accountId),
+    trayAccount: () => call(IPC.appTrayAccount),
+    openMain: () => call(IPC.appOpenMain),
+    quit: () => call(IPC.appQuit),
+    packaged: () => call(IPC.appPackaged),
+    onTrayShown: (cb) => subscribe(IPC.appTrayShown, cb)
   }
 }
 

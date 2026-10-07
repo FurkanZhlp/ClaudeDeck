@@ -1,4 +1,5 @@
-import type { UsageWindow } from '@shared/types'
+import type { UsageDisplay, UsageWindow } from '@shared/types'
+import { displayPercent } from '@shared/usageDisplay'
 import {
   PERIOD_MS,
   evaluatePace,
@@ -34,4 +35,17 @@ export function meterState(
       ? evaluatePace({ used, resetsAt: window.resetsAt, periodMs: PERIOD_MS[kind], now })
       : null
   return { used, reset, level: usageLevel(used, pace) }
+}
+
+/**
+ * Bar fill (0-100) for the display mode: used fills up, remaining shows what is left.
+ * A window that rolled over counts as unused (full in remaining mode, like the menu bar);
+ * only a missing window leaves the bar empty.
+ */
+export function meterFill(
+  window: UsageWindow | null,
+  state: MeterState,
+  display: UsageDisplay
+): number {
+  return window ? displayPercent(state.used, display) : 0
 }

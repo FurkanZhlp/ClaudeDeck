@@ -23,7 +23,9 @@ import {
   formatResetLabel,
   formatTokens
 } from './format'
-import { LEVEL_COLOR, meterState } from './meter'
+import { displayPercent } from '@shared/usageDisplay'
+import { useUsageDisplay } from './display'
+import { LEVEL_COLOR, meterFill, meterState } from './meter'
 import { COST_RANGES, dayKey, dayTime, rangeTotals, totalTokens, type CostRange } from './stats'
 import { useUsage } from './usageStore'
 
@@ -105,7 +107,6 @@ function Popover({ anchorRef, onClose }: Omit<Props, 'open'>): React.JSX.Element
   }, [anchorRef])
 
   useEffect(() => {
-    void useUsage.getState().hydrateDetails()
     ref.current?.focus({ preventScroll: true })
   }, [])
 
@@ -156,20 +157,28 @@ function Popover({ anchorRef, onClose }: Omit<Props, 'open'>): React.JSX.Element
         transition: { duration: reduced ? 0.1 : 0.16 }
       }}
     >
-      <DetailsContent />
+      <UsageDetailsContent />
     </motion.div>
   )
 }
 
-function DetailsContent(): React.JSX.Element {
+/**
+ * Cost overview, the selected account's limits and statistics, and a refresh footer.
+ * Shared by the sidebar popover and the menu bar popover; the parent is a flex column.
+ */
+export function UsageDetailsContent(): React.JSX.Element {
   const accounts = useApp((s) => s.data?.accounts) ?? []
   const selectedId = useApp((s) => s.selectedAccountId)
   const [viewedId, setViewedId] = useState(selectedId)
   const viewed = accounts.find((a) => a.id === viewedId) ?? accounts[0]
 
+  useEffect(() => {
+    void useUsage.getState().hydrateDetails()
+  }, [])
+
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-area min-h-0 flex-1 overflow-y-auto">
         <CostSection accounts={accounts} />
         {viewed && (
           <AccountSection account={viewed} accounts={accounts} onView={(id) => setViewedId(id)} />
@@ -370,13 +379,17 @@ function DetailMeter({
   const { t, i18n } = useTranslation()
   const reduced = useReducedMotion() ?? false
   const now = useUsage((s) => s.now)
+  const display = useUsageDisplay()
   const language = i18n.language
-  const { used, reset, level } = meterState(window, kind, now)
-  const left = 100 - used
-  const active = window !== null && !reset
+  const state = meterState(window, kind, now)
+  const { used, reset, level } = state
+  const fill = meterFill(window, state, display)
+  // A rolled over window reads as unused (0% used, 100% left) until the next report.
+  const active = window !== null
+  const percent = formatPercent(displayPercent(used, display), language)
 
   const value = active
-    ? t('usage.details.left', { percent: formatPercent(left, language) })
+    ? t(display === 'used' ? 'usage.details.used' : 'usage.details.left', { percent })
     : t('usage.details.noData')
   const detail = !window
     ? null
@@ -395,15 +408,15 @@ function DetailMeter({
         aria-label={label}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={Math.round(left)}
+        aria-valuenow={Math.round(fill)}
         aria-valuetext={detail ? `${value}, ${detail}` : value}
         className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-fg/10"
       >
         <motion.div
           className="h-full origin-left rounded-full"
           style={{ background: LEVEL_COLOR[level] }}
-          initial={{ scaleX: reduced ? (active ? left / 100 : 0) : 0 }}
-          animate={{ scaleX: active ? left / 100 : 0 }}
+          initial={{ scaleX: reduced ? fill / 100 : 0 }}
+          animate={{ scaleX: fill / 100 }}
           transition={reduced ? { duration: 0 } : { duration: 0.6, ease: EASE_OUT, delay: 0.1 }}
         />
       </div>
