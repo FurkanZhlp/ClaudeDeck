@@ -13,6 +13,8 @@ export const IPC = {
   settingsSetLanguage: 'settings:setLanguage',
   settingsSetUsage: 'settings:setUsage',
   settingsSetLaunchAtLogin: 'settings:setLaunchAtLogin',
+  settingsSetTestQueue: 'settings:setTestQueue',
+  projectSetTestQueue: 'project:setTestQueue',
   ptyStartSession: 'pty:startSession',
   ptyStartLogin: 'pty:startLogin',
   ptyWrite: 'pty:write',
@@ -64,7 +66,24 @@ export const IPC = {
   appVersion: 'app:version',
   appCheckUpdates: 'app:checkUpdates',
   appTrayShown: 'app:trayShown',
-  appTrayResize: 'app:trayResize'
+  appTrayResize: 'app:trayResize',
+  testQueueList: 'testQueue:list',
+  testQueueUpdate: 'testQueue:update',
+  testQueueCancel: 'testQueue:cancel',
+  testQueueMove: 'testQueue:move',
+  testQueueRunNow: 'testQueue:runNow',
+  testQueueRelease: 'testQueue:release',
+  testQueueStop: 'testQueue:stop',
+  testQueueClassify: 'testQueue:classify',
+  testQueueHookStatus: 'testQueue:hookStatus',
+  agentsWatch: 'agents:watch',
+  agentsUnwatch: 'agents:unwatch',
+  agentsList: 'agents:list',
+  agentsOpen: 'agents:open',
+  agentsClose: 'agents:close',
+  agentsOlder: 'agents:older',
+  agentsUpdate: 'agents:update',
+  agentsEvents: 'agents:events'
 } as const
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; code: string }

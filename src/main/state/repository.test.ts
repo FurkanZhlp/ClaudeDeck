@@ -135,6 +135,77 @@ describe('settings', () => {
       trayAccount: 'auto'
     })
     expect(settings.launchAtLogin).toBe(false)
+    expect(settings.testQueue).toEqual({
+      enabled: false,
+      mode: 'auto',
+      maxConcurrent: 2,
+      auto: {
+        maxConcurrent: null,
+        cpuHighPercent: 85,
+        cpuResumePercent: 65,
+        minAvailableMemoryPercent: 15,
+        rampUpSeconds: 20
+      },
+      maxWaitMinutes: 60,
+      startGraceSeconds: 120,
+      backgroundMaxHoldMinutes: 30,
+      disabledBuiltins: [],
+      customPatterns: []
+    })
+  })
+
+  it('deep merges test queue settings saved by older versions', () => {
+    const file = join(dir, 'config.json')
+    writeFileSync(
+      file,
+      JSON.stringify({
+        accounts: [],
+        projects: [],
+        sessions: [],
+        settings: { testQueue: { enabled: true, auto: { rampUpSeconds: 5 } } }
+      })
+    )
+    const { testQueue } = make().get().settings
+    expect(testQueue.enabled).toBe(true)
+    expect(testQueue.maxWaitMinutes).toBe(60)
+    expect(testQueue.auto).toMatchObject({ rampUpSeconds: 5, cpuHighPercent: 85 })
+  })
+
+  it('saves test queue settings with generated pattern ids', () => {
+    const repo = make()
+    const state = repo.setTestQueueSettings({
+      enabled: true,
+      mode: 'fixed',
+      maxConcurrent: 0,
+      customPatterns: [{ id: '', kind: 'prefix', pattern: 'make e2e' }]
+    })
+    expect(state.settings.testQueue).toMatchObject({
+      enabled: true,
+      mode: 'fixed',
+      maxConcurrent: 1,
+      customPatterns: [{ id: 'id1', kind: 'prefix', pattern: 'make e2e' }]
+    })
+    expect(make().get().settings.testQueue.mode).toBe('fixed')
+    expect(() =>
+      repo.setTestQueueSettings({ customPatterns: [{ id: 'x', kind: 'regex', pattern: '[' }] })
+    ).toThrowError('INVALID')
+  })
+
+  it('stores project test queue overrides and drops them when back to defaults', () => {
+    const repo = make()
+    const { account } = repo.createAccount({ name: 'A', color: '#000' })
+    const projectId = repo.createProject({ name: 'P', path: dir, accountId: account.id })
+      .projects[0].id
+    expect(repo.setProjectTestQueue(projectId, { mode: 'off' }).projects[0].testQueue).toEqual({
+      mode: 'off',
+      disabledBuiltins: [],
+      customPatterns: []
+    })
+    expect(repo.updateProject(projectId, { name: 'Q' }).projects[0].testQueue?.mode).toBe('off')
+    expect(repo.setProjectTestQueue(projectId, { mode: 'inherit' }).projects[0]).not.toHaveProperty(
+      'testQueue'
+    )
+    expect(() => repo.setProjectTestQueue('missing', { mode: 'off' })).toThrowError('NOT_FOUND')
   })
   it('validates usage settings', () => {
     const repo = make()

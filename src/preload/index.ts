@@ -29,7 +29,8 @@ const api: Api = {
   projects: {
     create: (input) => call(IPC.projectCreate, input),
     update: (id, patch) => call(IPC.projectUpdate, id, patch),
-    remove: (id) => call(IPC.projectRemove, id)
+    remove: (id) => call(IPC.projectRemove, id),
+    setTestQueue: (id, patch) => call(IPC.projectSetTestQueue, id, patch)
   },
   sessions: {
     create: (projectId, kind, title) => call(IPC.sessionCreate, projectId, kind, title),
@@ -40,7 +41,8 @@ const api: Api = {
   settings: {
     setLanguage: (language) => call(IPC.settingsSetLanguage, language),
     setUsage: (patch) => call(IPC.settingsSetUsage, patch),
-    setLaunchAtLogin: (enabled) => call(IPC.settingsSetLaunchAtLogin, enabled)
+    setLaunchAtLogin: (enabled) => call(IPC.settingsSetLaunchAtLogin, enabled),
+    setTestQueue: (patch) => call(IPC.settingsSetTestQueue, patch)
   },
   pty: {
     startSession: (sessionId, resume, cols, rows) =>
@@ -99,6 +101,27 @@ const api: Api = {
     plans: () => call(IPC.usagePlans),
     stats: () => call(IPC.usageStats),
     onStats: (cb) => subscribe(IPC.usageStatsUpdate, cb)
+  },
+  testQueue: {
+    list: () => call(IPC.testQueueList),
+    onUpdate: (cb) => subscribe(IPC.testQueueUpdate, cb),
+    cancel: (runId) => call(IPC.testQueueCancel, runId),
+    move: (runId, position) => call(IPC.testQueueMove, runId, position),
+    runNow: (runId) => call(IPC.testQueueRunNow, runId),
+    release: (runId) => call(IPC.testQueueRelease, runId),
+    stop: (runId) => call(IPC.testQueueStop, runId),
+    classify: (command, projectId) => call(IPC.testQueueClassify, command, projectId),
+    hookStatus: () => call(IPC.testQueueHookStatus)
+  },
+  agents: {
+    watch: (sessionId) => call(IPC.agentsWatch, sessionId),
+    unwatch: (sessionId) => call(IPC.agentsUnwatch, sessionId),
+    list: (sessionId) => call(IPC.agentsList, sessionId),
+    open: (sessionId, agentId) => call(IPC.agentsOpen, sessionId, agentId),
+    close: (sessionId, agentId) => call(IPC.agentsClose, sessionId, agentId),
+    older: (sessionId, agentId, cursor) => call(IPC.agentsOlder, sessionId, agentId, cursor),
+    onUpdate: (cb) => subscribe(IPC.agentsUpdate, cb),
+    onEvents: (cb) => subscribe(IPC.agentsEvents, cb)
   },
   app: {
     platform: process.platform,

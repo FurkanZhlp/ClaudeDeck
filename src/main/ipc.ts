@@ -9,7 +9,9 @@ import type {
   AccountInput,
   Language,
   ProjectInput,
+  ProjectTestQueue,
   SessionKind,
+  TestQueueSettingsPatch,
   UpdateInfo,
   UsageSettings
 } from '../shared/types'
@@ -61,6 +63,8 @@ interface Deps {
   forgetUsage: (accountId: string) => void
   /** Applies the login item setting to macOS (packaged app only). */
   applyLaunchAtLogin: (enabled: boolean) => void
+  /** Global or project test queue settings changed (hooks and scheduler follow). */
+  onTestQueueSettingsChange?: () => void
 }
 
 function completeOnboarding(configDir: string): void {
@@ -89,7 +93,8 @@ export function registerIpc({
   onUsageSettingsChange,
   onAccountsChange,
   forgetUsage,
-  applyLaunchAtLogin
+  applyLaunchAtLogin,
+  onTestQueueSettingsChange
 }: Deps): void {
   const { handle, trusted } = ipcTools
 
@@ -195,6 +200,18 @@ export function registerIpc({
     if (typeof enabled !== 'boolean') throw new DomainError('INVALID')
     const state = repo.setLaunchAtLogin(enabled)
     applyLaunchAtLogin(enabled)
+    return state
+  })
+
+  handle(IPC.settingsSetTestQueue, (patch: TestQueueSettingsPatch) => {
+    const state = repo.setTestQueueSettings(patch)
+    onTestQueueSettingsChange?.()
+    return state
+  })
+
+  handle(IPC.projectSetTestQueue, (id: string, patch: Partial<ProjectTestQueue>) => {
+    const state = repo.setProjectTestQueue(id, patch)
+    onTestQueueSettingsChange?.()
     return state
   })
 

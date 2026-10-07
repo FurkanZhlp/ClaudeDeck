@@ -487,6 +487,8 @@ app.whenReady().then(() => {
     // Called on account removal before its folder is deleted (an open watcher blocks rm on Windows).
     forgetUsage: (accountId) => usage.forget(accountId),
     applyLaunchAtLogin,
+    // Wired to the test queue service and hook installer in a later phase.
+    onTestQueueSettingsChange: () => {},
     cancelOptimize: (accountId) => {
       if (optimize.isActive(accountId)) void optimize.cancel(accountId)
     }

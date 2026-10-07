@@ -9,17 +9,26 @@ import type {
   Language,
   Project,
   ProjectInput,
+  ProjectTestQueue,
   Session,
   SessionKind,
   Settings,
+  TestQueueSettingsPatch,
   UsageSettings
 } from '../../shared/types'
 import type { JsonStore } from './jsonStore'
+import {
+  applyProjectTestQueuePatch,
+  applyTestQueuePatch,
+  defaultTestQueueSettings,
+  withTestQueueDefaults
+} from './testQueueSettings'
 
 export const defaultSettings = (): Settings => ({
   language: null,
   usage: { display: 'used', trayEnabled: true, trayMetric: 'both', trayAccount: 'auto' },
-  launchAtLogin: false
+  launchAtLogin: false,
+  testQueue: defaultTestQueueSettings()
 })
 
 export const emptyState = (): AppState => ({
@@ -38,7 +47,8 @@ function withDefaultSettings(state: AppState): AppState {
     settings: {
       ...defaults,
       ...saved,
-      usage: { ...defaults.usage, ...(saved.usage ?? {}) }
+      usage: { ...defaults.usage, ...(saved.usage ?? {}) },
+      testQueue: withTestQueueDefaults(saved.testQueue)
     }
   }
 }
@@ -224,6 +234,26 @@ export class Repository {
     return this.commit({
       ...this.state,
       settings: { ...this.state.settings, launchAtLogin: enabled === true }
+    })
+  }
+
+  setTestQueueSettings(patch: TestQueueSettingsPatch): AppState {
+    const testQueue = applyTestQueuePatch(this.state.settings.testQueue, patch, this.newId)
+    return this.commit({ ...this.state, settings: { ...this.state.settings, testQueue } })
+  }
+
+  /** Project overrides; the field is dropped when it equals the defaults (inherit, no rules). */
+  setProjectTestQueue(id: string, patch: Partial<ProjectTestQueue>): AppState {
+    const project = this.project(id)
+    const testQueue = applyProjectTestQueuePatch(project.testQueue, patch, this.newId)
+    return this.commit({
+      ...this.state,
+      projects: this.state.projects.map((p) => {
+        if (p.id !== id) return p
+        const next: Project = { ...p, testQueue: testQueue ?? undefined }
+        if (!testQueue) delete next.testQueue
+        return next
+      })
     })
   }
 

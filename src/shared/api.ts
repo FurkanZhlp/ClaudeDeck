@@ -21,7 +21,15 @@ import type {
   AccountStats,
   SessionKind,
   UpdateInfo,
-  UsageSettings
+  UsageSettings,
+  AgentEvent,
+  AgentOpenResult,
+  AgentSummary,
+  ClassifyResult,
+  ProjectTestQueue,
+  TestQueueHookStatus,
+  TestQueueSettingsPatch,
+  TestQueueSnapshot
 } from './types'
 
 type Unsubscribe = () => void
@@ -42,6 +50,8 @@ export interface Api {
     create(input: ProjectInput): Promise<AppState>
     update(id: string, patch: Partial<ProjectInput>): Promise<AppState>
     remove(id: string): Promise<AppState>
+    /** Project overrides for the test queue; arrays replace the stored ones. */
+    setTestQueue(id: string, patch: Partial<ProjectTestQueue>): Promise<AppState>
   }
   sessions: {
     create(
@@ -58,6 +68,8 @@ export interface Api {
     setLanguage(language: Language | null): Promise<AppState>
     setUsage(patch: Partial<UsageSettings>): Promise<AppState>
     setLaunchAtLogin(enabled: boolean): Promise<AppState>
+    /** Validates and clamps; rejects with INVALID on bad values or a regex that does not compile. */
+    setTestQueue(patch: TestQueueSettingsPatch): Promise<AppState>
   }
   pty: {
     startSession(
@@ -137,6 +149,41 @@ export interface Api {
     /** Local transcript statistics; rescans when older than a minute. */
     stats(): Promise<AccountStats[]>
     onStats(cb: (stats: AccountStats) => void): Unsubscribe
+  }
+  /** Test runs waiting for or holding a slot (main window only). */
+  testQueue: {
+    list(): Promise<TestQueueSnapshot>
+    /** Pushed on changes, debounced in main (500 ms). */
+    onUpdate(cb: (snapshot: TestQueueSnapshot) => void): Unsubscribe
+    /** Denies a waiting run; the agent sees a fixed "cancelled by the user" reason. */
+    cancel(runId: string): Promise<TestQueueSnapshot>
+    /** Moves a waiting run to `position` among waiting runs (0 = next to start). */
+    move(runId: string, position: number): Promise<TestQueueSnapshot>
+    /** Starts a waiting run now, over capacity (`forced`). */
+    runNow(runId: string): Promise<TestQueueSnapshot>
+    /** Frees the slot of a stuck starting/running/background run without touching processes. */
+    release(runId: string): Promise<TestQueueSnapshot>
+    /** Kills the run's process tree; only when `TestRun.canStop` is true. */
+    stop(runId: string): Promise<TestQueueSnapshot>
+    /** Classifies a command with the current rules (plus the project's when given). */
+    classify(command: string, projectId?: string): Promise<ClassifyResult>
+    hookStatus(): Promise<TestQueueHookStatus>
+  }
+  /** Live subagent transcripts of Claude tabs; main derives every path (main window only). */
+  agents: {
+    /** Starts summary tracking for a running Claude tab; returns the current list. */
+    watch(sessionId: string): Promise<AgentSummary[]>
+    unwatch(sessionId: string): Promise<null>
+    list(sessionId: string): Promise<AgentSummary[]>
+    /** Full mode for one agent: latest events, then live ones through onEvents. */
+    open(sessionId: string, agentId: string): Promise<AgentOpenResult>
+    close(sessionId: string, agentId: string): Promise<null>
+    /** Previous page before `cursor` (from AgentOpenResult). */
+    older(sessionId: string, agentId: string, cursor: number): Promise<AgentOpenResult>
+    /** Summaries of a watched tab, pushed at most every 250 ms. */
+    onUpdate(cb: (sessionId: string, agents: AgentSummary[]) => void): Unsubscribe
+    /** New events of the open agent, oldest first. */
+    onEvents(cb: (sessionId: string, agentId: string, events: AgentEvent[]) => void): Unsubscribe
   }
   /** App level actions shared by the main window and the menu bar popover. */
   app: {
