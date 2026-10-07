@@ -1,5 +1,6 @@
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import type { RmOptions } from 'node:fs'
+import type { ProcessInfo } from './processList'
 
 export type Env = Record<string, string>
 
@@ -51,4 +52,6 @@ export interface Platform {
   permissionRulePath(abs: string): string
   rmWithRetry(path: string, options?: RmOptions): void
   copyRunner: CopyRunner
+  /** Every running process with parent and command line (`ps` / CIM, fixed arguments). */
+  listProcesses(): Promise<ProcessInfo[]>
 }

@@ -59,6 +59,11 @@ export class PtyManager {
     return this.ptys.has(id)
   }
 
+  /** Pid of the tab's process (the root of its process tree), while it runs. */
+  pid(id: string): number | undefined {
+    return this.ptys.get(id)?.proc.pid
+  }
+
   hasAccount(accountId: string): boolean {
     return [...this.ptys.values()].some((entry) => entry.accountId === accountId)
   }

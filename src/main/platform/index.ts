@@ -3,8 +3,10 @@ import { copyRunner, rmWithRetry } from './fs'
 import { claudeLocator, nodeLocatorFs, type LocatorFs } from './claudeLocator'
 import { claudeLaunch, shellLaunch } from './launch'
 import { permissionRulePath } from './paths'
+import { listProcesses } from './processList'
 import { killTree, spawnDefaults } from './processTree'
 import type { OsName, Platform } from './types'
+export type { ProcessInfo } from './processList'
 
 export type {
   ClaudeLocator,
@@ -32,7 +34,8 @@ export function createPlatform(os: OsName, fs: LocatorFs = nodeLocatorFs): Platf
     claudeLocator: claudeLocator(os, fs),
     permissionRulePath: (abs) => permissionRulePath(abs, os),
     rmWithRetry: rmWithRetry(os),
-    copyRunner: copyRunner(os)
+    copyRunner: copyRunner(os),
+    listProcesses: () => listProcesses(os)
   }
 }
 
