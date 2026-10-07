@@ -1,6 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { isWindows, primaryModifier } from '../platform'
@@ -76,21 +75,6 @@ function windowsClipboardKeys(term: Terminal, event: KeyboardEvent): boolean {
   return true
 }
 
-/**
- * Draws the terminal on the GPU. xterm's default DOM renderer rebuilds row elements on every
- * scroll, which stutters with a long scrollback. Falls back to the DOM renderer when WebGL is
- * unavailable or its context is lost (for example after the GPU process restarts).
- */
-function enableWebgl(term: Terminal): void {
-  try {
-    const webgl = new WebglAddon()
-    webgl.onContextLoss(() => webgl.dispose())
-    term.loadAddon(webgl)
-  } catch (error) {
-    console.warn('[terminal] WebGL renderer unavailable, using the DOM renderer', error)
-  }
-}
-
 function ensure(id: string): Entry {
   return entries.get(id) ?? create(id)
 }
@@ -121,7 +105,6 @@ export function attach(id: string, container: HTMLElement): void {
   if (!entry.opened) {
     entry.term.open(entry.host)
     entry.opened = true
-    enableWebgl(entry.term)
   }
 }
 
