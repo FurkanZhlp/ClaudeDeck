@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { AgentsToggle } from '../agents/AgentsToggle'
 import { NotesToggle } from '../notes/NotesToggle'
+import { TestQueueTabBadge } from '../testQueue/TestQueueTabBadge'
 import { useApp } from '../store'
 import { Button } from '../ui/Button'
 import { SessionIcon, StatusDot } from '../ui/SessionIcon'
@@ -52,6 +53,9 @@ export function SessionTabs({ projectId }: { projectId: string }): React.JSX.Ele
               <SessionIcon kind={session.kind} />
               <span className="truncate">{session.title}</span>
               <StatusDot run={run} />
+              {session.kind === 'claude' && (
+                <TestQueueTabBadge sessionId={session.id} projectId={session.projectId} />
+              )}
               {stale && (
                 <span data-tooltip={t('session.staleAccount')} className="text-warn">
                   <AlertTriangle size={12} />
