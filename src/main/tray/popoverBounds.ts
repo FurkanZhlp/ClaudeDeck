@@ -7,6 +7,15 @@ export interface Rect {
 
 /** Space kept between the popover and the menu bar icon or the screen edges. */
 const MARGIN = 6
+/** Range the popover's content may ask for; popoverBounds still fits it to the screen. */
+export const POPOVER_MIN_HEIGHT = 240
+export const POPOVER_MAX_HEIGHT = 720
+
+/** The height the popover renderer asked for, or null when it is not a usable number. */
+export function requestedPopoverHeight(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.round(Math.min(POPOVER_MAX_HEIGHT, Math.max(POPOVER_MIN_HEIGHT, value)))
+}
 
 /**
  * Popover frame centred under the menu bar icon, kept inside the display's work area and

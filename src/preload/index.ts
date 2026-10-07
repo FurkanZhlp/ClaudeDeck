@@ -105,7 +105,8 @@ const api: Api = {
     openMain: () => call(IPC.appOpenMain),
     quit: () => call(IPC.appQuit),
     packaged: () => call(IPC.appPackaged),
-    onTrayShown: (cb) => subscribe(IPC.appTrayShown, cb)
+    onTrayShown: (cb) => subscribe(IPC.appTrayShown, cb),
+    resizeTray: (height) => ipcRenderer.send(IPC.appTrayResize, height)
   }
 }
 

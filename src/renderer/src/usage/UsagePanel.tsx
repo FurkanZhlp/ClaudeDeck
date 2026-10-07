@@ -6,10 +6,10 @@ import { useCallback, useRef, useState } from 'react'
 import { forecast, type Forecast, type UsageWindowKind } from '@shared/usagePace'
 import { formatRelative } from '../notes/relativeTime'
 import { useApp } from '../store'
+import { AccountRings } from './AccountRings'
+import { useRingModel, useWindowPercent } from './useRings'
 import { formatDuration, formatPercent, formatResetAt } from './format'
-import { displayPercent } from '@shared/usageDisplay'
-import { useUsageDisplay } from './display'
-import { LEVEL_COLOR, meterFill, meterState } from './meter'
+import type { RingWindow } from './meter'
 import { UsageDetails } from './UsageDetails'
 import { useAccountUsage, useUsage } from './usageStore'
 
@@ -19,7 +19,6 @@ const STALE_AFTER_MS = 10 * 60_000
 const WINDOWS: readonly UsageWindowKind[] = ['fiveHour', 'sevenDay']
 
 const EASE_OUT = [0.22, 1, 0.36, 1] as const
-const FILL_S = 0.6
 
 /** The forecast line slides up in and fades up out; only fades when motion is reduced. */
 const forecastVariants = (reduced: boolean): Variants => ({
@@ -54,16 +53,10 @@ export function UsagePanel(): React.JSX.Element {
           onClick={() => setOpen((value) => !value)}
         >
           <span className="sr-only">{t('usage.details.open')}</span>
-          <span className="flex min-h-7 items-center pr-8">
-            <AccountIdentity account={account} usage={usage} />
+          <span className="flex min-h-8 items-center pr-8">
+            <AccountSummary account={account} usage={usage} />
           </span>
-          {usage ? (
-            <UsageMeters usage={usage} />
-          ) : (
-            <span className="mt-1.5 block text-[11px] leading-snug text-muted">
-              {t('usage.empty')}
-            </span>
-          )}
+          {usage && <PanelForecast usage={usage} />}
         </button>
       ) : (
         <div className="h-11" />
@@ -86,7 +79,10 @@ export function UsagePanel(): React.JSX.Element {
   )
 }
 
-function AccountIdentity({
+const PANEL_RING = 30
+
+/** Ring, name and both windows of the selected account, in one compact row. */
+function AccountSummary({
   account,
   usage
 }: {
@@ -97,21 +93,26 @@ function AccountIdentity({
   const now = useUsage((s) => s.now)
   const stale = usage !== undefined && now - usage.updatedAt > STALE_AFTER_MS
   const ago = usage ? formatRelative(usage.updatedAt, i18n.language, now) : ''
+  const model = useRingModel(account, usage)
 
   return (
-    <span className="flex min-w-0 items-center gap-2">
-      <span
-        aria-hidden
-        className="flex size-7 shrink-0 items-center justify-center rounded-lg text-[12px] font-semibold text-white"
-        style={{ background: account.color }}
-      >
-        {account.name.trim().charAt(0).toLocaleUpperCase()}
-      </span>
+    <span className="flex min-w-0 items-center gap-2.5">
+      <AccountRings account={account} usage={usage} size={PANEL_RING} surface="var(--panel)" />
       <span className="block min-w-0 leading-tight">
         <span className="block truncate text-[12px] font-semibold">{account.name}</span>
+        {usage ? (
+          <span className="mt-0.5 flex gap-2.5 text-[11px] text-muted">
+            <WindowValue kind="fiveHour" ring={model.session} window={usage.fiveHour} now={now} />
+            <WindowValue kind="sevenDay" ring={model.weekly} window={usage.sevenDay} now={now} />
+          </span>
+        ) : (
+          <span className="mt-0.5 block text-[11px] leading-snug text-muted">
+            {t('usage.empty')}
+          </span>
+        )}
         {stale && (
           <span
-            className="block truncate text-[10.5px] text-muted"
+            className="mt-0.5 block truncate text-[10.5px] text-muted"
             data-tooltip={t('usage.staleTooltip', { time: ago })}
           >
             {ago}
@@ -122,106 +123,73 @@ function AccountIdentity({
   )
 }
 
-function UsageMeters({ usage }: { usage: AccountUsage }): React.JSX.Element {
+function WindowValue({
+  kind,
+  ring,
+  window,
+  now
+}: {
+  kind: UsageWindowKind
+  ring: RingWindow
+  window: UsageWindow | null
+  now: number
+}): React.JSX.Element {
+  const { t, i18n } = useTranslation()
+  const percent = useWindowPercent()
+  const language = i18n.language
+  const longLabel = t(`usage.${kind}Long`)
+  const tone =
+    ring.level === 'danger' ? 'text-danger' : ring.level === 'warn' ? 'text-warn' : 'text-fg'
+
+  let value: string
+  let tooltip: string
+  if (!window) {
+    value = t('usage.noWindow')
+    tooltip = t('usage.tooltip.empty', { window: longLabel })
+  } else if (ring.reset) {
+    value = t('usage.reset')
+    tooltip = t('usage.tooltip.reset', { window: longLabel })
+  } else {
+    value = percent(ring)
+    tooltip = t('usage.tooltip.active', {
+      window: longLabel,
+      percent: formatPercent(window.usedPercentage, language),
+      at: formatResetAt(window.resetsAt, language, now),
+      in: formatDuration(window.resetsAt - now, t)
+    })
+  }
+
+  return (
+    <span className="truncate" data-tooltip={tooltip}>
+      {t(`usage.${kind}`)}{' '}
+      <span className={`font-medium tabular-nums ${window && !ring.reset ? tone : ''}`}>
+        {value}
+      </span>
+    </span>
+  )
+}
+
+/** At most one forecast line under the summary; it slides in and out as the pace changes. */
+function PanelForecast({ usage }: { usage: AccountUsage }): React.JSX.Element {
   const now = useUsage((s) => s.now)
   const reduced = useReducedMotion() ?? false
   const notice = pickForecast(usage, now)
 
   return (
-    <>
-      <span className="mt-2 block space-y-1.5">
-        {WINDOWS.map((kind) => (
-          <Meter key={kind} kind={kind} window={usage[kind]} now={now} />
-        ))}
-      </span>
-      <AnimatePresence initial={false}>
-        {notice && (
-          <motion.span
-            className="block"
-            key={`${notice.window}:${notice.forecast.kind}`}
-            variants={forecastVariants(reduced)}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-          >
-            <ForecastLine window={notice.window} forecast={notice.forecast} />
-          </motion.span>
-        )}
-      </AnimatePresence>
-    </>
-  )
-}
-
-function Meter({
-  kind,
-  window,
-  now
-}: {
-  kind: UsageWindowKind
-  window: UsageWindow | null
-  now: number
-}): React.JSX.Element {
-  const { t, i18n } = useTranslation()
-  const reduced = useReducedMotion() ?? false
-  const display = useUsageDisplay()
-  const language = i18n.language
-  const label = t(`usage.${kind}`)
-  const longLabel = t(`usage.${kind}Long`)
-  const state = meterState(window, kind, now)
-  const { used, reset, level } = state
-  const shown = formatPercent(displayPercent(used, display), language)
-  const percent = display === 'used' ? shown : t('usage.details.left', { percent: shown })
-  const fill = meterFill(window, state, display)
-
-  let detail: string
-  let tooltip: string
-  if (!window) {
-    detail = t('usage.noWindow')
-    tooltip = t('usage.tooltip.empty', { window: longLabel })
-  } else if (reset) {
-    detail = t('usage.reset')
-    tooltip = t('usage.tooltip.reset', { window: longLabel })
-  } else {
-    const resetIn = formatDuration(window.resetsAt - now, t)
-    detail = resetIn
-    tooltip = t('usage.tooltip.active', {
-      window: longLabel,
-      percent: formatPercent(window.usedPercentage, language),
-      at: formatResetAt(window.resetsAt, language, now),
-      in: resetIn
-    })
-  }
-
-  return (
-    <span className="block" data-tooltip={tooltip}>
-      <span className="flex items-baseline justify-between gap-2 text-[11px]">
-        <span className="text-muted">{label}</span>
-        <span className="truncate tabular-nums">
-          {window && <span className="font-medium text-fg">{percent}</span>}
-          <span className="text-muted">
-            {window ? ' · ' : ''}
-            {detail}
-          </span>
-        </span>
-      </span>
-      <span
-        role="meter"
-        aria-label={longLabel}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(fill)}
-        aria-valuetext={window ? `${percent}, ${detail}` : detail}
-        className="mt-1 block h-1 overflow-hidden rounded-full bg-fg/10"
-      >
+    <AnimatePresence initial={false}>
+      {notice && (
         <motion.span
-          className="block h-full origin-left rounded-full transition-colors duration-300"
-          style={{ background: LEVEL_COLOR[level] }}
-          initial={false}
-          animate={{ scaleX: fill / 100 }}
-          transition={reduced ? { duration: 0 } : { duration: FILL_S, ease: EASE_OUT }}
-        />
-      </span>
-    </span>
+          className="block"
+          key={`${notice.window}:${notice.forecast.kind}`}
+          variants={forecastVariants(reduced)}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+        >
+          <ForecastLine window={notice.window} forecast={notice.forecast} />
+        </motion.span>
+      )}
+    </AnimatePresence>
   )
 }
 

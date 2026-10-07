@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { RotateCw } from 'lucide-react'
+import { Info, RotateCw, Timer } from 'lucide-react'
 import {
   useEffect,
   useLayoutEffect,
@@ -10,23 +10,25 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import type { Account, AccountStats, AccountUsage, UsageWindow } from '@shared/types'
-import type { UsageWindowKind } from '@shared/usagePace'
+import type { Account, AccountUsage, UsageWindow } from '@shared/types'
+import { forecast, type UsageWindowKind } from '@shared/usagePace'
+import { displayPercent } from '@shared/usageDisplay'
 import { formatRelative } from '../notes/relativeTime'
 import { useApp } from '../store'
-import { Donut, TrendBars, type TrendBar } from './charts'
+import { AccountRings, RingKey } from './AccountRings'
+import { useRingModel, useWindowPercent } from './useRings'
+import { Sparkline, type SparkPoint } from './charts'
+import { useUsageDisplay } from './display'
 import {
   formatCost,
   formatDay,
   formatDuration,
   formatPercent,
-  formatResetLabel,
+  formatResetAt,
   formatTokens
 } from './format'
-import { displayPercent } from '@shared/usageDisplay'
-import { useUsageDisplay } from './display'
-import { LEVEL_COLOR, meterFill, meterState } from './meter'
-import { COST_RANGES, dayKey, dayTime, rangeTotals, totalTokens, type CostRange } from './stats'
+import { meterState, type RingWindow } from './meter'
+import { COST_RANGES, dailyTotals, dayTime, rangeTotals, trendDays, type CostRange } from './stats'
 import { useUsage } from './usageStore'
 
 const WIDTH = 360
@@ -162,15 +164,26 @@ function Popover({ anchorRef, onClose }: Omit<Props, 'open'>): React.JSX.Element
   )
 }
 
+const HERO_RING = 92
+const ROW_RING = 44
+const WINDOWS: readonly UsageWindowKind[] = ['fiveHour', 'sevenDay']
+
 /**
- * Cost overview, the selected account's limits and statistics, and a refresh footer.
- * Shared by the sidebar popover and the menu bar popover; the parent is a flex column.
+ * The viewed account as large rings, the other accounts as compact rows, the API-equivalent
+ * cost and a refresh footer. Shared by the sidebar popover and the menu bar popover; the
+ * parent is a flex column.
  */
-export function UsageDetailsContent(): React.JSX.Element {
+export function UsageDetailsContent({
+  contentRef
+}: {
+  /** Wraps the scrollable content, so the menu bar popover can size its window to fit. */
+  contentRef?: RefObject<HTMLDivElement | null>
+} = {}): React.JSX.Element {
   const accounts = useApp((s) => s.data?.accounts) ?? []
   const selectedId = useApp((s) => s.selectedAccountId)
   const [viewedId, setViewedId] = useState(selectedId)
   const viewed = accounts.find((a) => a.id === viewedId) ?? accounts[0]
+  const others = accounts.filter((a) => a.id !== viewed?.id)
 
   useEffect(() => {
     void useUsage.getState().hydrateDetails()
@@ -179,310 +192,346 @@ export function UsageDetailsContent(): React.JSX.Element {
   return (
     <>
       <div className="scroll-area min-h-0 flex-1 overflow-y-auto">
-        <CostSection accounts={accounts} />
-        {viewed && (
-          <AccountSection account={viewed} accounts={accounts} onView={(id) => setViewedId(id)} />
-        )}
+        <div ref={contentRef}>
+          {viewed && <HeroAccount account={viewed} />}
+          {others.length > 0 && <OtherAccounts accounts={others} onView={setViewedId} />}
+          <CostSection />
+        </div>
       </div>
       {viewed && <Footer account={viewed} />}
     </>
   )
 }
 
-function CostSection({ accounts }: { accounts: Account[] }): React.JSX.Element {
-  const { t, i18n } = useTranslation()
-  const language = i18n.language
-  const [range, setRange] = useState<CostRange>('today')
-  const stats = useUsage((s) => s.stats)
-  const status = useUsage((s) => s.detailsStatus)
+/** Soonest "runs out before reset" forecast of an account, if any. */
+function useRunsOut(
+  usage: AccountUsage | undefined
+): { kind: UsageWindowKind; inMs: number } | null {
   const now = useUsage((s) => s.now)
-  const hasStats = Object.keys(stats).length > 0
-
-  const rows = accounts.map((account) => ({
-    account,
-    totals: rangeTotals(stats[account.id], range, now)
-  }))
-  const total = rows.reduce((sum, row) => sum + row.totals.costUSD, 0)
-  const rangeLabel = t(`usage.details.range.${range}`)
-
-  return (
-    <section aria-labelledby="usage-cost-title" className="px-4 pb-4 pt-3.5">
-      <div className="flex items-center justify-between gap-3">
-        <h2 id="usage-cost-title" className="text-[13px] font-semibold">
-          {t('usage.details.cost')}
-        </h2>
-        <div
-          role="group"
-          aria-label={t('usage.details.range.label')}
-          className="flex rounded-lg bg-fg/[0.06] p-0.5"
-        >
-          {COST_RANGES.map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={range === value}
-              className={`rounded-md px-2 py-0.5 text-[11.5px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent ${range === value ? 'bg-elevated text-fg shadow-sm' : 'text-muted hover:text-fg'}`}
-              onClick={() => setRange(value)}
-            >
-              {t(`usage.details.range.${value}`)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {status === 'ready' && !hasStats ? (
-        <p className="mt-3 text-[11.5px] leading-snug text-muted">{t('usage.details.noStats')}</p>
-      ) : (
-        <div className="mt-3 flex items-center gap-4">
-          <Donut
-            segments={rows.map(({ account, totals }) => ({
-              id: account.id,
-              color: account.color,
-              value: totals.costUSD
-            }))}
-            label={t('usage.details.chartLabel', {
-              range: rangeLabel,
-              total: formatCost(total, language, false)
-            })}
-          >
-            <span className="text-[17px] font-semibold tabular-nums leading-tight">
-              {formatCost(total, language)}
-            </span>
-            <span className="text-[10.5px] text-muted">{rangeLabel}</span>
-          </Donut>
-          <ul className="min-w-0 flex-1 space-y-1.5">
-            {rows.map(({ account, totals }) => (
-              <li key={account.id} className="flex items-center gap-2 text-[11.5px]">
-                <span
-                  aria-hidden
-                  className="size-2.5 shrink-0 rounded-[3px]"
-                  style={{ background: account.color }}
-                />
-                <span className="min-w-0 flex-1 truncate">{account.name}</span>
-                <span className="tabular-nums text-muted">
-                  {formatCost(totals.costUSD, language)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <p className="mt-3 text-[10.5px] leading-snug text-muted">
-        {t('usage.details.estimateNote')}
-      </p>
-    </section>
-  )
+  if (!usage) return null
+  return WINDOWS.reduce<{ kind: UsageWindowKind; inMs: number } | null>((best, kind) => {
+    const value = forecast(usage[kind], kind, now)
+    if (value?.kind !== 'runsOut' || (best && best.inMs <= value.inMs)) return best
+    return { kind, inMs: value.inMs }
+  }, null)
 }
 
-function AccountSection({
-  account,
-  accounts,
-  onView
-}: {
-  account: Account
-  accounts: Account[]
-  onView: (id: string) => void
-}): React.JSX.Element {
+function HeroAccount({ account }: { account: Account }): React.JSX.Element {
   const { t } = useTranslation()
   const usage = useUsage((s) => s.byAccount[account.id])
   const plan = useUsage((s) => s.plans[account.id])
-  const stats = useUsage((s) => s.stats[account.id])
-  const status = useUsage((s) => s.detailsStatus)
+  const display = useUsageDisplay()
+  const model = useRingModel(account, usage)
+  const runsOut = useRunsOut(usage)
   const extra =
     plan?.extraUsageEnabled === true
       ? t('usage.details.extraOn')
       : plan?.extraUsageEnabled === false
         ? t('usage.details.extraOff')
-        : t('usage.details.noData')
+        : null
 
   return (
-    <section
-      aria-labelledby="usage-account-title"
-      className="border-t border-border px-4 pb-4 pt-3.5"
-    >
-      <div className="flex items-center gap-2">
-        <h2 id="usage-account-title" className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-[13px] font-semibold">{account.name}</span>
-          {plan?.label && <span className="shrink-0 text-[11.5px] text-muted">{plan.label}</span>}
-        </h2>
-        {accounts.length > 1 && (
-          <div
-            role="group"
-            aria-label={t('usage.details.accounts')}
-            className="ml-auto flex shrink-0 items-center gap-0.5"
-          >
-            {accounts.map((other) => (
-              <button
-                key={other.id}
-                type="button"
-                aria-pressed={other.id === account.id}
-                aria-label={t('usage.details.viewAccount', { name: other.name })}
-                data-tooltip={other.name}
-                className="flex size-5 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-accent"
-                onClick={() => onView(other.id)}
-              >
-                <span
-                  aria-hidden
-                  className={`rounded-full transition-all ${other.id === account.id ? 'size-3 ring-2 ring-offset-1 ring-offset-elevated' : 'size-2.5 opacity-60 hover:opacity-100'}`}
-                  style={
-                    {
-                      background: other.color,
-                      '--tw-ring-color': other.color
-                    } as CSSProperties
-                  }
-                />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {usage ? (
-        <div className="mt-3 space-y-3">
-          <DetailMeter label={t('usage.details.session')} kind="fiveHour" window={usage.fiveHour} />
-          <DetailMeter label={t('usage.details.weekly')} kind="sevenDay" window={usage.sevenDay} />
-          {usage.models?.map((model) => (
-            <DetailMeter key={model.model} label={model.model} kind="sevenDay" window={model} />
-          ))}
+    <section aria-labelledby="usage-account-title" className="px-4 pb-3.5 pt-4">
+      <div className="flex items-center gap-4">
+        <AccountRings account={account} usage={usage} size={HERO_RING} center />
+        <div className="min-w-0 flex-1">
+          <h2 id="usage-account-title" className="flex min-w-0 items-center gap-1.5">
+            <span
+              aria-hidden
+              className="size-2 shrink-0 rounded-full"
+              style={{ background: account.color }}
+            />
+            <span className="truncate text-[13px] font-semibold">{account.name}</span>
+            {plan?.label && <span className="shrink-0 text-[11px] text-muted">{plan.label}</span>}
+          </h2>
+          {usage ? (
+            <dl className="mt-2.5 space-y-2">
+              <WindowRow
+                label={t('usage.details.session')}
+                window={model.session}
+                source={usage.fiveHour}
+                color={account.color}
+              />
+              <WindowRow
+                label={t('usage.details.weekly')}
+                window={model.weekly}
+                source={usage.sevenDay}
+                color={account.color}
+              />
+            </dl>
+          ) : (
+            <p className="mt-2 text-[11.5px] leading-snug text-muted">
+              {t('usage.details.noUsage')}
+            </p>
+          )}
         </div>
-      ) : (
-        <p className="mt-3 text-[11.5px] leading-snug text-muted">{t('usage.details.noUsage')}</p>
-      )}
-
-      <div className="mt-3 flex items-baseline justify-between text-[11.5px]">
-        <span className="text-muted">{t('usage.details.extraUsage')}</span>
-        <span className={plan?.extraUsageEnabled == null ? 'text-muted' : 'font-medium'}>
-          {extra}
-        </span>
       </div>
 
-      {stats ? (
-        <StatsBlock account={account} stats={stats} />
-      ) : (
-        status === 'ready' && (
-          <p className="mt-3 text-[11.5px] leading-snug text-muted">{t('usage.details.noStats')}</p>
-        )
+      {runsOut && (
+        <p
+          role="status"
+          className="mt-3 flex items-center gap-1.5 text-[11.5px] leading-snug text-danger"
+        >
+          <Timer size={12} aria-hidden className="shrink-0" />
+          <span>
+            <span className="font-semibold">
+              {t(`usage.details.${runsOut.kind === 'fiveHour' ? 'session' : 'weekly'}`)}:
+            </span>{' '}
+            {t('usage.forecast.runsOut', { time: formatDuration(runsOut.inMs, t) })}
+          </span>
+        </p>
       )}
+
+      {usage?.models && usage.models.length > 0 && (
+        <dl className="mt-3 space-y-1">
+          {usage.models.map((item) => (
+            <ModelRow key={item.model} label={item.model} window={item} />
+          ))}
+        </dl>
+      )}
+
+      <div className="mt-3 flex items-center justify-between gap-3 text-[10.5px] text-muted">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span aria-hidden className="h-2.5 w-[1.5px] shrink-0 rounded-full bg-fg" />
+          <span className="truncate">
+            {t(display === 'used' ? 'usage.ring.legendUsed' : 'usage.ring.legendRemaining')}
+          </span>
+        </span>
+        {extra && <span className="shrink-0">{t('usage.ring.extra', { state: extra })}</span>}
+      </div>
     </section>
   )
 }
 
-function DetailMeter({
+function WindowRow({
   label,
-  kind,
-  window
+  window,
+  source,
+  color
 }: {
   label: string
-  kind: UsageWindowKind
-  window: UsageWindow | null
+  window: RingWindow
+  source: UsageWindow | null
+  color: string
 }): React.JSX.Element {
   const { t, i18n } = useTranslation()
-  const reduced = useReducedMotion() ?? false
   const now = useUsage((s) => s.now)
-  const display = useUsageDisplay()
-  const language = i18n.language
-  const state = meterState(window, kind, now)
-  const { used, reset, level } = state
-  const fill = meterFill(window, state, display)
-  // A rolled over window reads as unused (0% used, 100% left) until the next report.
-  const active = window !== null
-  const percent = formatPercent(displayPercent(used, display), language)
-
-  const value = active
-    ? t(display === 'used' ? 'usage.details.used' : 'usage.details.left', { percent })
-    : t('usage.details.noData')
-  const detail = !window
-    ? null
-    : reset
-      ? t('usage.details.resetDone')
-      : formatResetLabel(window.resetsAt, language, now, t)
+  const percent = useWindowPercent()
+  const tone =
+    window.level === 'danger' ? 'text-danger' : window.level === 'warn' ? 'text-warn' : ''
+  const detail = !source
+    ? t('usage.details.noData')
+    : window.reset
+      ? t('usage.ring.resetDone')
+      : t('usage.ring.resets', {
+          at: formatResetAt(source.resetsAt, i18n.language, now),
+          in: formatDuration(source.resetsAt - now, t)
+        })
+  const tooltip = source && window.reset ? t('usage.details.resetDone') : detail
 
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-2 text-[11.5px]">
-        <span className="truncate font-medium">{label}</span>
-        <span className={`shrink-0 tabular-nums ${active ? '' : 'text-muted'}`}>{value}</span>
+      <div className="flex items-baseline justify-between gap-2">
+        <dt className="flex items-center gap-1.5 text-[11.5px] text-muted">
+          <RingKey kind={window.kind} color={color} />
+          {label}
+        </dt>
+        <dd className={`text-[13px] font-semibold tabular-nums ${source ? tone : 'text-muted'}`}>
+          {source ? percent(window) : ''}
+        </dd>
       </div>
-      <div
-        role="meter"
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(fill)}
-        aria-valuetext={detail ? `${value}, ${detail}` : value}
-        className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-fg/10"
-      >
-        <motion.div
-          className="h-full origin-left rounded-full"
-          style={{ background: LEVEL_COLOR[level] }}
-          initial={{ scaleX: reduced ? fill / 100 : 0 }}
-          animate={{ scaleX: fill / 100 }}
-          transition={reduced ? { duration: 0 } : { duration: 0.6, ease: EASE_OUT, delay: 0.1 }}
-        />
+      <div className="mt-0.5 truncate pl-4 text-[10.5px] text-muted" data-tooltip={tooltip}>
+        {detail}
       </div>
-      {detail && <div className="mt-1 text-[10.5px] text-muted">{detail}</div>}
     </div>
   )
 }
 
-function StatsBlock({
+/** Per-model weekly limit, one quiet line. */
+function ModelRow({ label, window }: { label: string; window: UsageWindow }): React.JSX.Element {
+  const { t, i18n } = useTranslation()
+  const now = useUsage((s) => s.now)
+  const display = useUsageDisplay()
+  const state = meterState(window, 'sevenDay', now)
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-[11px] text-muted">
+      <dt className="truncate">{t('usage.ring.model', { model: label })}</dt>
+      <dd className="shrink-0 font-medium tabular-nums text-fg">
+        {formatPercent(displayPercent(state.used, display), i18n.language)}
+      </dd>
+    </div>
+  )
+}
+
+function OtherAccounts({
+  accounts,
+  onView
+}: {
+  accounts: Account[]
+  onView: (id: string) => void
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <ul aria-label={t('usage.details.accounts')} className="border-t border-border px-2 py-1.5">
+      {accounts.map((account) => (
+        <li key={account.id}>
+          <AccountRow account={account} onView={() => onView(account.id)} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function AccountRow({
   account,
-  stats
+  onView
 }: {
   account: Account
-  stats: AccountStats
+  onView: () => void
 }): React.JSX.Element {
+  const { t } = useTranslation()
+  const usage = useUsage((s) => s.byAccount[account.id])
+  const model = useRingModel(account, usage)
+  const percent = useWindowPercent()
+  const runsOut = useRunsOut(usage)
+  const value = (window: RingWindow): React.JSX.Element => (
+    <span
+      className={`font-medium tabular-nums ${window.level === 'danger' ? 'text-danger' : window.level === 'warn' ? 'text-warn' : 'text-fg'}`}
+    >
+      {window.active ? percent(window) : t('usage.noWindow')}
+    </span>
+  )
+
+  return (
+    <button
+      type="button"
+      className="flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-fg/[0.05] focus-visible:outline-2 focus-visible:outline-accent"
+      onClick={onView}
+    >
+      <AccountRings account={account} usage={usage} size={ROW_RING} />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span
+            aria-hidden
+            className="size-1.5 shrink-0 rounded-full"
+            style={{ background: account.color }}
+          />
+          <span className="truncate text-[12px] font-medium">{account.name}</span>
+        </span>
+        {usage ? (
+          <span className="mt-0.5 flex gap-3 text-[11px] text-muted">
+            <span>
+              {t('usage.details.session')} {value(model.session)}
+            </span>
+            <span>
+              {t('usage.details.weekly')} {value(model.weekly)}
+            </span>
+          </span>
+        ) : (
+          <span className="mt-0.5 block text-[11px] text-muted">{t('usage.details.noData')}</span>
+        )}
+      </span>
+      {runsOut && (
+        <span
+          className="shrink-0 text-danger"
+          data-tooltip={t('usage.forecast.runsOut', { time: formatDuration(runsOut.inMs, t) })}
+        >
+          <Timer size={13} aria-hidden />
+          <span className="sr-only">
+            {t('usage.forecast.runsOut', { time: formatDuration(runsOut.inMs, t) })}
+          </span>
+        </span>
+      )}
+    </button>
+  )
+}
+
+function CostSection(): React.JSX.Element {
   const { t, i18n } = useTranslation()
   const language = i18n.language
+  const [range, setRange] = useState<CostRange>('today')
+  const statsById = useUsage((s) => s.stats)
+  const status = useUsage((s) => s.detailsStatus)
   const now = useUsage((s) => s.now)
-  const today = dayKey(now)
-
-  const bars: TrendBar[] = stats.days.map((day) => ({
+  const stats = Object.values(statsById)
+  const totals = rangeTotals(stats, range, now)
+  const days = dailyTotals(stats, trendDays(range), now)
+  const peak = Math.max(0, ...days.map((day) => day.costUSD))
+  const points: SparkPoint[] = days.map((day) => ({
     key: day.date,
     value: day.costUSD,
-    highlight: day.date === today,
     tooltip: t('usage.details.barTooltip', {
       date: formatDay(dayTime(day.date), language),
       cost: formatCost(day.costUSD, language),
-      tokens: t('usage.details.tokens', { value: formatTokens(totalTokens(day.tokens), language) })
+      tokens: t('usage.details.tokens', { value: formatTokens(day.tokens, language) })
     })
   }))
-  const peak = Math.max(0, ...stats.days.map((day) => day.costUSD))
-  const rows: Array<{ range: CostRange; label: string }> = [
-    { range: 'today', label: t('usage.details.rows.today') },
-    { range: 'yesterday', label: t('usage.details.rows.yesterday') },
-    { range: 'month', label: t('usage.details.rows.month') }
-  ]
 
   return (
-    <>
-      <div className="mt-4">
-        <h3 className="mb-1.5 text-[11.5px] font-medium">{t('usage.details.trend')}</h3>
-        <TrendBars
-          key={account.id}
-          bars={bars}
-          color={account.color}
-          label={t('usage.details.trendLabel', { max: formatCost(peak, language) })}
-        />
+    <section aria-labelledby="usage-cost-title" className="border-t border-border px-4 pb-3.5 pt-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2
+          id="usage-cost-title"
+          className="flex items-center gap-1 text-[11.5px] font-medium text-muted"
+        >
+          {t('usage.ring.apiEquivalent')}
+          <span
+            role="img"
+            tabIndex={0}
+            aria-label={t('usage.details.estimateNote')}
+            data-tooltip={t('usage.details.estimateNote')}
+            className="rounded-full p-0.5 text-muted/80 outline-none hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <Info size={11} aria-hidden />
+          </span>
+        </h2>
+        <div role="group" aria-label={t('usage.details.range.label')} className="flex gap-2.5">
+          {COST_RANGES.map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={range === value}
+              className={`relative rounded text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${range === value ? 'font-medium text-fg' : 'text-muted hover:text-fg'}`}
+              onClick={() => setRange(value)}
+            >
+              {t(`usage.details.range.${value}`)}
+              {range === value && (
+                <span
+                  aria-hidden
+                  className="absolute inset-x-0 -bottom-1 mx-auto h-[1.5px] w-3 rounded-full bg-fg"
+                />
+              )}
+            </button>
+          ))}
+        </div>
       </div>
-      <dl className="mt-3 space-y-1.5 text-[11.5px]">
-        {rows.map(({ range, label }) => {
-          const totals = rangeTotals(stats, range, now)
-          return (
-            <div key={range} className="flex items-baseline justify-between gap-2">
-              <dt className="text-muted">{label}</dt>
-              <dd className="truncate tabular-nums">
-                <span className="font-medium">{formatCost(totals.costUSD, language)}</span>
-                <span className="text-muted">
-                  {' · '}
-                  {t('usage.details.tokens', { value: formatTokens(totals.tokens, language) })}
-                </span>
-              </dd>
+
+      {status === 'ready' && stats.length === 0 ? (
+        <p className="mt-2 text-[11.5px] leading-snug text-muted">{t('usage.details.noStats')}</p>
+      ) : (
+        <div className="mt-2 flex items-end gap-4">
+          <div className="shrink-0 leading-tight">
+            <div className="text-[17px] font-semibold tabular-nums">
+              {formatCost(totals.costUSD, language)}
             </div>
-          )
-        })}
-      </dl>
-    </>
+            <div className="text-[10.5px] tabular-nums text-muted">
+              {t('usage.details.tokens', { value: formatTokens(totals.tokens, language) })}
+            </div>
+          </div>
+          <div className="min-w-0 flex-1 pb-0.5">
+            <Sparkline
+              key={range}
+              points={points}
+              color="var(--muted)"
+              label={t('usage.ring.sparkLabel', {
+                days: days.length,
+                max: formatCost(peak, language)
+              })}
+            />
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -492,6 +541,10 @@ function Footer({ account }: { account: Account }): React.JSX.Element {
   const now = useUsage((s) => s.now)
   const [busy, setBusy] = useState(false)
   const nextAt = usage ? usage.updatedAt + POLL_INTERVAL_MS : null
+  const next =
+    nextAt !== null && nextAt > now
+      ? t('usage.details.nextUpdate', { time: formatDuration(nextAt - now, t) })
+      : null
 
   const refresh = async (): Promise<void> => {
     setBusy(true)
@@ -503,25 +556,18 @@ function Footer({ account }: { account: Account }): React.JSX.Element {
   }
 
   return (
-    <footer className="flex items-center gap-2 border-t border-border px-4 py-2.5 text-[11px] text-muted">
-      <div className="min-w-0 flex-1 leading-snug">
-        {usage && (
-          <div className="truncate">
-            {t('usage.details.updated', {
+    <footer className="flex items-center gap-2 border-t border-border py-1.5 pl-4 pr-2 text-[11px] text-muted">
+      <span className="min-w-0 flex-1 truncate" data-tooltip={next ?? undefined}>
+        {usage
+          ? t('usage.details.updated', {
               time: formatRelative(usage.updatedAt, i18n.language, now)
-            })}
-          </div>
-        )}
-        {nextAt !== null && nextAt > now && (
-          <div className="truncate">
-            {t('usage.details.nextUpdate', { time: formatDuration(nextAt - now, t) })}
-          </div>
-        )}
-      </div>
+            })
+          : t('usage.details.noData')}
+      </span>
       <button
         type="button"
         aria-label={busy ? t('usage.details.refreshing') : t('usage.details.refresh')}
-        data-tooltip={t('usage.details.refresh')}
+        data-tooltip={next ? `${t('usage.details.refresh')}. ${next}` : t('usage.details.refresh')}
         disabled={busy}
         className="no-drag rounded-md p-1.5 text-muted transition-colors hover:bg-fg/[0.06] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-default"
         onClick={() => void refresh()}

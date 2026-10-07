@@ -151,5 +151,7 @@ export interface Api {
     packaged(): Promise<boolean>
     /** The menu bar popover opened again (not on its first open, which loads the page). */
     onTrayShown(cb: () => void): () => void
+    /** The menu bar popover asks for a window height that fits its content (popover only). */
+    resizeTray(height: number): void
   }
 }

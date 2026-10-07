@@ -13,5 +13,7 @@ export const TRAY_CHANNELS: ReadonlySet<string> = new Set([
   IPC.usagePollNow,
   IPC.appTrayAccount,
   IPC.appOpenMain,
-  IPC.appQuit
+  IPC.appQuit,
+  // Sent, not invoked: menuBar listens on the popover's own webContents, so only it can resize.
+  IPC.appTrayResize
 ])

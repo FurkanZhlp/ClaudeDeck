@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { popoverBounds } from './popoverBounds'
+import { popoverBounds, requestedPopoverHeight } from './popoverBounds'
 
 const SIZE = { width: 360, height: 560 }
 const WORK_AREA = { x: 0, y: 25, width: 1440, height: 875 }
@@ -25,5 +25,19 @@ describe('popoverBounds', () => {
     const area = { x: 0, y: 25, width: 1024, height: 500 }
     const tray = { x: 500, y: 0, width: 30, height: 24 }
     expect(popoverBounds(tray, area, SIZE).height).toBe(25 + 500 - 31 - 6)
+  })
+})
+
+describe('requestedPopoverHeight', () => {
+  it('clamps the content height to the allowed range', () => {
+    expect(requestedPopoverHeight(431.6)).toBe(432)
+    expect(requestedPopoverHeight(80)).toBe(240)
+    expect(requestedPopoverHeight(5000)).toBe(720)
+  })
+
+  it('rejects anything that is not a finite number', () => {
+    for (const value of [NaN, Infinity, '400', null, undefined, { height: 400 }]) {
+      expect(requestedPopoverHeight(value)).toBeNull()
+    }
   })
 })

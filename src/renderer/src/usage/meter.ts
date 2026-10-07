@@ -1,5 +1,6 @@
 import type { UsageDisplay, UsageWindow } from '@shared/types'
 import { displayPercent } from '@shared/usageDisplay'
+import { elapsedFraction, markerFraction } from './ring'
 import {
   PERIOD_MS,
   evaluatePace,
@@ -9,11 +10,9 @@ import {
   type UsageWindowKind
 } from '@shared/usagePace'
 
-export const LEVEL_COLOR: Record<UsageLevel, string> = {
-  calm: 'var(--accent)',
-  warn: 'var(--warn)',
-  danger: 'var(--danger)'
-}
+/** Arc colour: the account's own colour while calm, the risk token once it needs attention. */
+const levelColor = (level: UsageLevel, calm: string): string =>
+  level === 'calm' ? calm : `var(--${level})`
 
 export interface MeterState {
   /** 0-100, zero when the window rolled over since the last report. */
@@ -48,4 +47,36 @@ export function meterFill(
   display: UsageDisplay
 ): number {
   return window ? displayPercent(state.used, display) : 0
+}
+
+export interface RingWindow extends MeterState {
+  kind: UsageWindowKind
+  /** False without any report for the window. */
+  active: boolean
+  /** Arc fill for the display mode, 0-100. */
+  fill: number
+  /** Arc colour. */
+  color: string
+  /** Now tick position (0-1) for the display mode, null when the window is over or missing. */
+  marker: number | null
+}
+
+/** Everything a ring needs to draw one window. */
+export function ringWindow(
+  window: UsageWindow | null,
+  kind: UsageWindowKind,
+  now: number,
+  display: UsageDisplay,
+  accountColor: string
+): RingWindow {
+  const state = meterState(window, kind, now)
+  const elapsed = elapsedFraction(window, kind, now)
+  return {
+    ...state,
+    kind,
+    active: window !== null,
+    fill: meterFill(window, state, display),
+    color: levelColor(state.level, accountColor),
+    marker: elapsed === null ? null : markerFraction(elapsed, display)
+  }
 }

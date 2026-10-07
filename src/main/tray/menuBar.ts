@@ -10,9 +10,10 @@ import {
 import { IPC } from '../../shared/ipc'
 import type { Account, AccountUsage, UsageSettings } from '../../shared/types'
 import type { Translate } from '../../shared/translate'
-import { popoverBounds } from './popoverBounds'
+import { popoverBounds, requestedPopoverHeight } from './popoverBounds'
 import { pickTrayAccount, trayTitle } from './trayTitle'
 
+/** Starting size; the renderer then asks for the height its content needs. */
 const POPOVER_SIZE = { width: 360, height: 560 }
 const POPOVER_BG = { light: '#ffffff', dark: '#242421' }
 /** Countdowns and rolled-over windows change the title even without new readings. */
@@ -66,6 +67,7 @@ export function createMenuBar(deps: Deps): MenuBar {
   let popover: BrowserWindow | null = null
   let ticker: NodeJS.Timeout | null = null
   let hiddenAt = 0
+  let popoverSize = POPOVER_SIZE
 
   const account = (): string | null =>
     pickTrayAccount(
@@ -118,6 +120,14 @@ export function createMenuBar(deps: Deps): MenuBar {
     win.on('closed', () => {
       if (popover === win) popover = null
     })
+    // Listened to on this window's own IPC, so no other renderer (or subframe) can resize it.
+    win.webContents.ipc.on(IPC.appTrayResize, (event, value: unknown) => {
+      if (event.senderFrame !== win.webContents.mainFrame) return
+      const height = requestedPopoverHeight(value)
+      if (height === null || height === popoverSize.height) return
+      popoverSize = { ...popoverSize, height }
+      if (win.isVisible()) placePopover(win)
+    })
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     win.webContents.on('will-navigate', (event, url) => {
       if (url !== win.webContents.getURL()) event.preventDefault()
@@ -126,13 +136,19 @@ export function createMenuBar(deps: Deps): MenuBar {
     return win
   }
 
+  /** Puts the popover under the menu bar icon at its current size. */
+  function placePopover(win: BrowserWindow): void {
+    if (!tray) return
+    const trayBounds = tray.getBounds()
+    const { workArea } = screen.getDisplayMatching(trayBounds)
+    win.setBounds(popoverBounds(trayBounds, workArea, popoverSize))
+  }
+
   const showPopover = (): void => {
     if (!tray) return
     const reopened = !!popover && !popover.isDestroyed()
     if (!popover || popover.isDestroyed()) popover = createPopover()
-    const trayBounds = tray.getBounds()
-    const { workArea } = screen.getDisplayMatching(trayBounds)
-    popover.setBounds(popoverBounds(trayBounds, workArea, POPOVER_SIZE))
+    placePopover(popover)
     popover.show()
     popover.focus()
     // A new popover loads its state on mount; a reused one is told to refresh.

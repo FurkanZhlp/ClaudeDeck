@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { meterFill, meterState } from './meter'
+import { meterFill, meterState, ringWindow } from './meter'
 
 const NOW = 1_000_000_000
 const active = { usedPercentage: 40, resetsAt: NOW + 60_000 }
@@ -23,5 +23,35 @@ describe('meterFill', () => {
   it('stays empty without a window in either mode', () => {
     expect(fill(null, 'used')).toBe(0)
     expect(fill(null, 'remaining')).toBe(0)
+  })
+})
+
+describe('ringWindow', () => {
+  const HOUR = 3_600_000
+  // Two of five hours passed.
+  const window = { usedPercentage: 30, resetsAt: NOW + 3 * HOUR }
+
+  it('uses the account colour while calm and the risk token otherwise', () => {
+    expect(ringWindow(window, 'fiveHour', NOW, 'used', '#123456').color).toBe('#123456')
+    const hot = { usedPercentage: 90, resetsAt: NOW + 3 * HOUR }
+    expect(ringWindow(hot, 'fiveHour', NOW, 'used', '#123456').color).toBe('var(--danger)')
+  })
+
+  it('places the tick by display mode', () => {
+    expect(ringWindow(window, 'fiveHour', NOW, 'used', '#000').marker).toBeCloseTo(0.4)
+    expect(ringWindow(window, 'fiveHour', NOW, 'remaining', '#000').marker).toBeCloseTo(0.6)
+  })
+
+  it('drops the tick when the window rolled over or is missing', () => {
+    expect(ringWindow(rolledOver, 'fiveHour', NOW, 'used', '#000')).toMatchObject({
+      marker: null,
+      fill: 0,
+      active: true
+    })
+    expect(ringWindow(null, 'sevenDay', NOW, 'used', '#000')).toMatchObject({
+      marker: null,
+      fill: 0,
+      active: false
+    })
   })
 })

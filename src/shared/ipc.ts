@@ -61,7 +61,8 @@ export const IPC = {
   appOpenMain: 'app:openMain',
   appQuit: 'app:quit',
   appPackaged: 'app:packaged',
-  appTrayShown: 'app:trayShown'
+  appTrayShown: 'app:trayShown',
+  appTrayResize: 'app:trayResize'
 } as const
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; code: string }

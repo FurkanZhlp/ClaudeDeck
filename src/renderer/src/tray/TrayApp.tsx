@@ -1,5 +1,5 @@
 import { AppWindow, Power } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { applyLanguage, useApp } from '../store'
 import { TooltipLayer } from '../ui/TooltipLayer'
@@ -49,12 +49,16 @@ export function TrayApp(): React.JSX.Element {
     return unsubscribe
   }, [])
 
+  const rootRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  useFitWindow(rootRef, contentRef, ready && hasAccounts, `${accountId}:${shown}`)
+
   if (!ready) return <div className="h-full bg-elevated" />
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-elevated text-fg">
+    <div ref={rootRef} className="flex h-full flex-col overflow-hidden bg-elevated text-fg">
       {hasAccounts ? (
-        <UsageDetailsContent key={`${accountId}:${shown}`} />
+        <UsageDetailsContent key={`${accountId}:${shown}`} contentRef={contentRef} />
       ) : (
         <p className="flex-1 px-4 py-6 text-[12px] leading-snug text-muted">
           {t('tray.noAccounts')}
@@ -73,6 +77,38 @@ export function TrayApp(): React.JSX.Element {
       <TooltipLayer />
     </div>
   )
+}
+
+/**
+ * Asks the main process for a window height that shows the whole content without a gap:
+ * everything around the scroll area plus the content's own height. The main process clamps it
+ * and the content scrolls when the screen is too short.
+ */
+function useFitWindow(
+  rootRef: React.RefObject<HTMLDivElement | null>,
+  contentRef: React.RefObject<HTMLDivElement | null>,
+  active: boolean,
+  /** Changes whenever the content remounts, so the observer follows the new element. */
+  mount: string
+): void {
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    const content = contentRef.current
+    const scroller = content?.parentElement
+    if (!active || !root || !content || !scroller) return
+    let sent = 0
+    const measure = (): void => {
+      const height = Math.ceil(root.offsetHeight - scroller.clientHeight + content.offsetHeight)
+      if (height === sent) return
+      sent = height
+      window.api.app.resizeTray(height)
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(root)
+    observer.observe(content)
+    measure()
+    return () => observer.disconnect()
+  }, [rootRef, contentRef, active, mount])
 }
 
 function TrayButton({
