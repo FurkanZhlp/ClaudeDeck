@@ -14,7 +14,8 @@ import type { ProcessInfo } from '../platform/processList'
 import { defaultAutoMax, type SystemLoad } from '../platform/systemLoad'
 import type { SessionScope } from '../mcp/sessionTokens'
 import { parsePostToolUse, parsePreToolUse } from './hookPayload'
-import { findRunProcesses, stopTarget } from './processMatch'
+import { WAIT_MARKER } from './hookScript'
+import { findRunProcesses, stopTarget, type StopTarget } from './processMatch'
 
 /** Fixed reasons the agent sees; never built from request data. */
 export const CANCEL_REASON = 'ClaudeDeck test queue: the user cancelled this test run.'
@@ -23,6 +24,8 @@ export const MAX_WAIT_REASON =
 
 /** Hook reply without a decision: the tool call goes ahead untouched. */
 export const PASS = ''
+/** Reply to a poll held this long without a decision: the hook script polls again. */
+export const WAIT = WAIT_MARKER
 
 const denyReply = (reason: string): string =>
   JSON.stringify({
@@ -43,8 +46,13 @@ export const REQUEUE_WINDOW_MS = 10 * 60 * 1000
 const MAX_EXPIRED_KEPT = 200
 const TICK_MS = 1000
 const SAMPLE_MS = 2000
-/** Process checks of a starting run, after its start. */
+/** Process checks of a starting run, after its start; then every START_PROBE_EVERY_MS. */
 export const START_PROBES_MS = [10_000, 30_000, 60_000]
+export const START_PROBE_EVERY_MS = 15_000
+/** A hook poll is answered with WAIT after this; the script's curl allows 30 s. */
+export const POLL_HOLD_MS = 20_000
+/** A waiter whose script did not poll again within this is gone (killed hook, dead claude). */
+export const ABANDON_AFTER_MS = 10_000
 /** A run whose process disappeared without a PostToolUse is done after this. */
 export const PROCESS_GONE_GRACE_MS = 5000
 const PUSH_DEBOUNCE_MS = 500
@@ -69,8 +77,8 @@ export interface TestQueueDeps {
   isLive(sessionId: string): boolean
   ptyPid(sessionId: string): number | undefined
   listProcesses(): Promise<ProcessInfo[]>
-  /** Ends a process tree (POSIX: the group led by `pid`; Windows: taskkill /T). */
-  killTree(pid: number): void
+  /** Ends a process tree (POSIX: the group led by `target.pid`; Windows: taskkill /T). */
+  killTree(target: StopTarget): void
   load: SystemLoad
   cpuCount(): number
   /** Background completion source; null when the transcript cannot be watched. */
@@ -86,11 +94,19 @@ interface Entry {
   rawCommand: string
   tokens: string[]
   toolUseId: string
-  /** Answers the waiting hook; null once answered. */
+  /** `sessionId` + tool use id: what a poll of the hook script is matched by. */
+  key: string
+  /** Answers the hook poll attached right now; null between polls and once answered. */
   reply: ((body: string) => void) | null
+  /** Since when the attached poll is held. */
+  pollSince: number | null
+  /** Since when no poll is attached while the script still has to hear the decision. */
+  detachedAt: number | null
   /** Start of this wait (max wait counts from here, ordering from run.enqueuedAt). */
   waitingSince: number
   probesDone: number
+  /** The final process check at the end of the start grace is under way. */
+  graceCheck: boolean
   backgroundSince: number | null
   /** Pid of the matched process tree, once seen. */
   pid: number | null
@@ -107,9 +123,20 @@ interface Expired {
 const ACTIVE = new Set<TestRun['state']>(['starting', 'running', 'background'])
 const isActive = (e: Entry): boolean => ACTIVE.has(e.run.state)
 const isQueued = (e: Entry): boolean => e.run.state === 'queued'
+const pollKey = (sessionId: string, toolUseId: string): string => `${sessionId}\n${toolUseId}`
+
+/** Time after start of the probe number `n` (0-based) of a starting run. */
+export const startProbeAt = (n: number): number =>
+  n < START_PROBES_MS.length
+    ? START_PROBES_MS[n]
+    : START_PROBES_MS[START_PROBES_MS.length - 1] +
+      (n - START_PROBES_MS.length + 1) * START_PROBE_EVERY_MS
 
 export interface TestQueueService {
-  /** PreToolUse: resolves with the hook's stdout once the command may run (or is denied). */
+  /**
+   * PreToolUse poll: resolves with the hook's stdout once the command may run (or is denied),
+   * or with WAIT after POLL_HOLD_MS (the script polls again with the same payload).
+   */
   pre(scope: SessionScope, payload: unknown, signal: AbortSignal): Promise<string>
   /** PostToolUse / PostToolUseFailure. */
   post(scope: SessionScope, payload: unknown): void
@@ -144,11 +171,13 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
   const expired: Expired[] = []
   const lastCalls = new Map<string, number>()
   const transcriptWatches = new Map<string, () => void>()
+  /** Decisions reached between two polls of a script, by poll key. */
+  const undelivered = new Map<string, { body: string; at: number }>()
   let lastStartAt = 0
   let lastSampleAt = 0
   let lastProcessCheckAt = 0
   let sampling = false
-  let checking = false
+  let checking: Promise<void> | null = null
   let ticker: NodeJS.Timeout | null = null
   let pushTimer: NodeJS.Timeout | null = null
   let disposed = false
@@ -198,17 +227,45 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
     transcriptWatches.delete(sessionId)
   }
 
-  /** Removes an entry; a waiting hook gets `reply` (pass-through unless given). */
-  const finish = (entry: Entry, state: TestRun['state'], reply: string = PASS): void => {
+  /**
+   * Answers the attached poll, or keeps the decision for the script's next poll (a decision
+   * for a waiter that is gone is dropped).
+   */
+  const deliver = (entry: Entry, body: string): void => {
+    const answer = entry.reply
+    entry.reply = null
+    entry.pollSince = null
+    if (answer) {
+      entry.detachedAt = null
+      answer(body)
+      return
+    }
+    undelivered.set(entry.key, { body, at: Date.now() })
+    if (undelivered.size > MAX_RUNS_TOTAL) {
+      const oldest = undelivered.keys().next().value
+      if (oldest !== undefined) undelivered.delete(oldest)
+    }
+  }
+
+  /**
+   * Removes an entry; a waiting hook gets `reply` (pass-through unless given). `admitAfter`
+   * false leaves starting the next runs to the caller (bulk removals admit once at the end).
+   */
+  const finish = (
+    entry: Entry,
+    state: TestRun['state'],
+    reply: string = PASS,
+    admitAfter = true
+  ): void => {
     if (!entries.has(entry.run.id)) return
+    const wasQueued = isQueued(entry)
     entries.delete(entry.run.id)
     const index = order.indexOf(entry.run.id)
     if (index >= 0) order.splice(index, 1)
     entry.run.state = state
     entry.run.finishedAt = Date.now()
-    const answer = entry.reply
-    entry.reply = null
-    answer?.(reply)
+    // A waiter between two polls hears a cancel or max wait on its next poll.
+    if (entry.reply || (wasQueued && state !== 'abandoned')) deliver(entry, reply)
     if (state === 'expired') {
       expired.push({
         sessionId: entry.run.sessionId,
@@ -221,7 +278,7 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
     unwatchIfIdle(entry.run.sessionId)
     push()
     if (entries.size === 0) stopTicker()
-    else admit()
+    else if (admitAfter) admit()
   }
 
   const start = (entry: Entry, forced: boolean): void => {
@@ -232,9 +289,7 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
     entry.run.startedAt = now
     entry.run.forced = entry.run.forced || forced
     lastStartAt = now
-    const answer = entry.reply
-    entry.reply = null
-    answer?.(PASS)
+    deliver(entry, PASS)
     push()
   }
 
@@ -244,6 +299,7 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
   const admit = (): void => {
     if (disposed) return
     const s = settings()
+    if (!s.enabled) return
     const head = (): Entry | undefined => {
       for (const id of order) {
         const entry = entries.get(id)
@@ -286,16 +342,19 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
   }
 
   /** Process discovery for active runs: evidence for starting ones, liveness and canStop. */
-  const checkProcesses = async (): Promise<void> => {
-    if (checking) return
-    checking = true
+  const checkProcesses = (): Promise<void> => {
+    checking ??= runCheck().finally(() => {
+      checking = null
+    })
+    return checking
+  }
+
+  const runCheck = async (): Promise<void> => {
     let list: ProcessInfo[] | null = null
     try {
       list = await deps.listProcesses()
     } catch (error) {
       console.warn('[test-queue] process list failed', error)
-    } finally {
-      checking = false
     }
     if (!list || disposed) return
     const now = Date.now()
@@ -303,11 +362,12 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
       if (!isActive(entry) || !entries.has(entry.run.id)) continue
       const root = deps.ptyPid(entry.run.sessionId)
       if (root === undefined) continue
-      const matches = findRunProcesses(list, root, {
+      const match = findRunProcesses(list, root, {
         command: entry.rawCommand,
         tokens: entry.tokens
       })
-      const canStop = matches.length === 1 && stopTarget(matches[0], list, root) !== null
+      const matches = match.processes
+      const canStop = stopTarget(match, list, root, entry.run.startedAt ?? now) !== null
       if (canStop !== entry.run.canStop) {
         entry.run.canStop = canStop
         push()
@@ -332,24 +392,42 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
     const s = settings()
     const now = Date.now()
     let probe = false
+    for (const [key, kept] of undelivered) {
+      if (now - kept.at >= 2 * ABANDON_AFTER_MS) undelivered.delete(key)
+    }
     for (const entry of [...entries.values()]) {
       const { run } = entry
+      if (entry.reply && entry.pollSince !== null && now - entry.pollSince >= POLL_HOLD_MS) {
+        deliver(entry, WAIT)
+        entry.detachedAt = now
+      }
+      const gone = entry.detachedAt !== null && now - entry.detachedAt >= ABANDON_AFTER_MS
       if (run.state === 'queued') {
-        if (now - entry.waitingSince >= s.maxWaitMinutes * 60_000) {
+        if (gone) finish(entry, 'abandoned')
+        else if (now - entry.waitingSince >= s.maxWaitMinutes * 60_000) {
           finish(entry, 'expired', MAX_WAIT_REPLY)
         }
         continue
       }
       if (run.state === 'starting') {
-        const elapsed = now - (run.startedAt ?? now)
-        if (elapsed >= s.startGraceSeconds * 1000) {
-          finish(entry, 'done')
+        // Let through between two polls, and the script never came back for the answer.
+        if (gone && undelivered.has(entry.key)) {
+          undelivered.delete(entry.key)
+          finish(entry, 'abandoned')
           continue
         }
-        while (
-          entry.probesDone < START_PROBES_MS.length &&
-          elapsed >= START_PROBES_MS[entry.probesDone]
-        ) {
+        const elapsed = now - (run.startedAt ?? now)
+        if (elapsed >= s.startGraceSeconds * 1000) {
+          // One last look for the process before the slot is given up.
+          if (!entry.graceCheck) {
+            entry.graceCheck = true
+            void checkProcesses().then(() => {
+              if (entries.get(run.id) === entry && run.state === 'starting') finish(entry, 'done')
+            })
+          }
+          continue
+        }
+        while (elapsed >= startProbeAt(entry.probesDone)) {
           entry.probesDone += 1
           probe = true
         }
@@ -444,17 +522,43 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
     const root = deps.ptyPid(entry.run.sessionId)
     if (root === undefined) throw new DomainError('INVALID')
     const list = await deps.listProcesses()
-    const matches = findRunProcesses(list, root, {
+    const match = findRunProcesses(list, root, {
       command: entry.rawCommand,
       tokens: entry.tokens
     })
-    const target = matches.length === 1 ? stopTarget(matches[0], list, root) : null
+    const target = stopTarget(match, list, root, entry.run.startedAt ?? Date.now())
     if (target === null) {
       entry.run.canStop = false
       push()
       throw new DomainError('INVALID')
     }
     deps.killTree(target)
+  }
+
+  /** Holds a hook poll on the entry until a decision or WAIT. */
+  function attach(entry: Entry, resolve: (body: string) => void, signal: AbortSignal): void {
+    entry.reply = resolve
+    entry.pollSince = Date.now()
+    entry.detachedAt = null
+    signal.addEventListener(
+      'abort',
+      () => {
+        if (entry.reply !== resolve) return
+        // Esc, a killed hook or a closed tab: the waiter is gone.
+        entry.reply = null
+        entry.pollSince = null
+        if (entries.get(entry.run.id) === entry && isQueued(entry)) finish(entry, 'abandoned')
+      },
+      { once: true }
+    )
+  }
+
+  /** Removes matching entries without starting others in between, then admits once. */
+  function dropWhere(match: (entry: Entry) => boolean): void {
+    for (const entry of [...entries.values()]) {
+      if (match(entry)) finish(entry, isQueued(entry) ? 'abandoned' : 'done', PASS, false)
+    }
+    admit()
   }
 
   return {
@@ -464,6 +568,22 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
       if (disposed || !s.enabled || signal.aborted) return Promise.resolve(PASS)
       const pre = parsePreToolUse(payload)
       if (!pre) return Promise.resolve(PASS)
+      const key = pollKey(scope.sessionId, pre.toolUseId)
+      const kept = undelivered.get(key)
+      const known = [...entries.values()].find((e) => e.key === key)
+      if (kept) {
+        // Decided while the script was between two polls.
+        undelivered.delete(key)
+        if (known) known.detachedAt = null
+        return Promise.resolve(kept.body)
+      }
+      if (known && !isQueued(known)) return Promise.resolve(PASS)
+      if (known) {
+        // The script polls again: it takes over the waiter. A second hook running for the
+        // same call (installed twice) is let go; Claude waits for both anyway.
+        if (known.reply) deliver(known, PASS)
+        return new Promise<string>((resolve) => attach(known, resolve, signal))
+      }
       const project = deps.project(scope.projectId)
       if (!project) return Promise.resolve(PASS)
       const result = deps.classify(pre.command, {
@@ -478,13 +598,6 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
       if (all.length >= MAX_RUNS_TOTAL || perSession >= MAX_RUNS_PER_SESSION) {
         return Promise.resolve(PASS)
       }
-      // A repeated hook call for the same tool use replaces the earlier one.
-      for (const e of all) {
-        if (e.run.sessionId === scope.sessionId && e.toolUseId === pre.toolUseId) {
-          finish(e, isQueued(e) ? 'abandoned' : 'done')
-        }
-      }
-
       const now = Date.now()
       const entry: Entry = {
         run: {
@@ -504,25 +617,21 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
         rawCommand: pre.command,
         tokens: deps.fingerprint(result),
         toolUseId: pre.toolUseId,
+        key,
         reply: null,
+        pollSince: null,
+        detachedAt: null,
         waitingSince: now,
         probesDone: 0,
+        graceCheck: false,
         backgroundSince: null,
         pid: null,
         pidGoneAt: null
       }
       return new Promise<string>((resolve) => {
-        entry.reply = resolve
         entries.set(entry.run.id, entry)
         insert(entry)
-        signal.addEventListener(
-          'abort',
-          () => {
-            // Esc, a killed hook or a closed tab: the waiter is gone.
-            if (entries.get(entry.run.id) === entry && isQueued(entry)) finish(entry, 'abandoned')
-          },
-          { once: true }
-        )
+        attach(entry, resolve, signal)
         startTicker()
         push()
         admit()
@@ -533,8 +642,15 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
       lastCalls.set(scope.accountId, Date.now())
       const post = parsePostToolUse(payload)
       if (!post) return
+      const key = pollKey(scope.sessionId, post.toolUseId)
+      undelivered.delete(key)
       for (const entry of [...entries.values()]) {
-        if (entry.run.sessionId !== scope.sessionId || entry.toolUseId !== post.toolUseId) continue
+        if (entry.key !== key) continue
+        // The call ended before its run started (or right after, by Esc): nothing ran.
+        if (isQueued(entry) || (entry.run.state === 'starting' && post.interrupted)) {
+          finish(entry, 'abandoned')
+          continue
+        }
         if (!isActive(entry)) continue
         if (post.background) {
           entry.run.state = 'background'
@@ -624,29 +740,24 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
     },
 
     dropSession(sessionId) {
-      for (const entry of [...entries.values()]) {
-        if (entry.run.sessionId === sessionId) finish(entry, isQueued(entry) ? 'abandoned' : 'done')
+      dropWhere((e) => e.run.sessionId === sessionId)
+      for (const key of [...undelivered.keys()]) {
+        if (key.startsWith(`${sessionId}\n`)) undelivered.delete(key)
       }
       transcriptWatches.get(sessionId)?.()
       transcriptWatches.delete(sessionId)
     },
 
     dropAll() {
-      for (const entry of [...entries.values()]) {
-        finish(entry, isQueued(entry) ? 'abandoned' : 'done')
-      }
+      dropWhere(() => true)
+      undelivered.clear()
       for (const stop of transcriptWatches.values()) stop()
       transcriptWatches.clear()
     },
 
     settingsChanged() {
-      const s = settings()
-      if (!s.enabled) {
-        // Turned off: nobody waits any more and no slot is held.
-        for (const entry of [...entries.values()]) {
-          finish(entry, isQueued(entry) ? 'abandoned' : 'done')
-        }
-      }
+      // Turned off: nobody waits any more and no slot is held.
+      if (!settings().enabled) dropWhere(() => true)
       push()
       admit()
     },
@@ -658,6 +769,7 @@ export function createTestQueueService(deps: TestQueueDeps): TestQueueService {
         answer?.(PASS)
       }
       entries.clear()
+      undelivered.clear()
       order.length = 0
       for (const stop of transcriptWatches.values()) stop()
       transcriptWatches.clear()

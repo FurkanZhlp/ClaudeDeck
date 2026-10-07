@@ -47,7 +47,7 @@ describe('installTestQueueHooks', () => {
         }
       ]
     })
-    expect(readFileSync(hookScriptPath(dir), 'utf8')).toContain('exec curl')
+    expect(readFileSync(hookScriptPath(dir), 'utf8')).toContain('curl -q -s')
     expectMode(hookScriptPath(dir), 0o755)
     expectMode(settingsFile(), 0o600)
   })
@@ -71,7 +71,7 @@ describe('installTestQueueHooks', () => {
     const hooks = read().hooks as Record<string, { hooks: { timeout: number }[] }[]>
     expect(hooks.PreToolUse).toHaveLength(1)
     expect(hooks.PreToolUse[0].hooks[0].timeout).toBe(360)
-    expect(readFileSync(hookScriptPath(dir), 'utf8')).toContain('pre) max=330 ;;')
+    expect(readFileSync(hookScriptPath(dir), 'utf8')).toContain('pre) max=30; polls=36 ;;')
   })
 
   it('takes our hook out of a shared group but leaves the rest of it', () => {

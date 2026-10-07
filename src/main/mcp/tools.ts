@@ -52,6 +52,8 @@ export interface ToolDeps {
   confirm: (req: ConfirmRequest) => Promise<boolean>
   /** Overrides the confirmation timeout (tests). */
   confirmTimeoutMs?: number
+  /** Clock for cooldowns (tests). */
+  now?: () => number
 }
 
 /** MCP-shaped result, kept free of SDK types so the logic stays transport independent. */
@@ -149,6 +151,10 @@ export class TextReply {
 
 const notAllowed = (): ToolError => new ToolError('Not allowed')
 const QUEUE_UNAVAILABLE = 'The test queue is not available.'
+/** One cancel_test_run per run and tab in this window: a stop scans every process. */
+export const CANCEL_COOLDOWN_MS = 5000
+const MAX_COOLDOWNS = 1000
+const COOLDOWN_TEXT = 'This run was just handled; try again in a few seconds.'
 
 // Returned by a handler when the user said no; reported as a normal (non-error) result.
 const DECLINED = Symbol('declined')
@@ -311,6 +317,21 @@ export function createTools(deps: ToolDeps): Tools {
   const { repo, notes } = deps
   const timeoutMs = deps.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS
   const pendingConfirms = new Set<string>()
+  const now = deps.now ?? Date.now
+  const lastCancel = new Map<string, number>()
+
+  /** False while a cancel of the same run by the same tab is within CANCEL_COOLDOWN_MS. */
+  const cancelAllowed = (key: string): boolean => {
+    const at = now()
+    const last = lastCancel.get(key)
+    if (last !== undefined && at - last < CANCEL_COOLDOWN_MS) return false
+    if (lastCancel.size >= MAX_COOLDOWNS) {
+      for (const [k, t] of lastCancel) if (at - t >= CANCEL_COOLDOWN_MS) lastCancel.delete(k)
+      if (lastCancel.size >= MAX_COOLDOWNS) lastCancel.clear()
+    }
+    lastCancel.set(key, at)
+    return true
+  }
 
   const describeProject = (p: Project): Record<string, string> => ({
     id: p.id,
@@ -512,6 +533,7 @@ export function createTools(deps: ToolDeps): Tools {
       { runId: id },
       async (args, scope) => {
         if (!deps.testQueue) throw new ToolError(QUEUE_UNAVAILABLE)
+        if (!cancelAllowed(`${scope.sessionId}\n${args.runId}`)) throw new ToolError(COOLDOWN_TEXT)
         try {
           return { runId: args.runId, result: await deps.testQueue.cancelOwn(scope, args.runId) }
         } catch (error) {

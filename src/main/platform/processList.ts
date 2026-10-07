@@ -8,6 +8,8 @@ export interface ProcessInfo {
   pid: number
   ppid: number
   pgid: number | null
+  /** Start time (epoch ms; whole seconds on POSIX), null when it could not be read. */
+  startMs: number | null
   command: string
 }
 
@@ -15,17 +17,23 @@ export interface ProcessInfo {
 export type RunFile = (file: string, args: string[]) => Promise<string>
 
 const PS = '/bin/ps'
-/** Every process, full command lines (`ww`), no header (`=`). */
-export const PS_ARGS = ['-axww', '-o', 'pid=,ppid=,pgid=,command=']
+const ENV = '/usr/bin/env'
+/**
+ * Every process, full command lines (`ww`), no header (`=`). `lstart` is the start time as
+ * `Tue Oct  7 10:22:33 2026` (local time); `LC_ALL=C` keeps it in English.
+ */
+export const PS_ARGS = ['-axww', '-o', 'pid=,ppid=,pgid=,lstart=,command=']
+const PS_ENV_ARGS = ['LC_ALL=C', PS, ...PS_ARGS]
 
 /**
- * Tab separated `pid ppid commandline`, one per line; line breaks and tabs inside a command line
- * become spaces. UTF-8 output so non-ASCII paths survive.
+ * Tab separated `pid ppid startMs commandline`, one per line (startMs empty when unknown); line
+ * breaks and tabs inside a command line become spaces. UTF-8 output so non-ASCII paths survive.
  */
 export const WINDOWS_PROCESS_SCRIPT = [
   '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
   'Get-CimInstance Win32_Process | ForEach-Object {',
-  '"$($_.ProcessId)`t$($_.ParentProcessId)`t$(($_.CommandLine) -replace "[\\r\\n\\t]+", " ")"',
+  '$s = if ($_.CreationDate) { ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } else { "" }',
+  '"$($_.ProcessId)`t$($_.ParentProcessId)`t$s`t$(($_.CommandLine) -replace "[\\r\\n\\t]+", " ")"',
   '}'
 ].join('; ')
 
@@ -34,15 +42,33 @@ const MAX_BUFFER = 32 * 1024 * 1024
 
 const isPid = (n: number): boolean => Number.isInteger(n) && n >= 0
 
-/** `ps -o pid=,ppid=,pgid=,command=` output. */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+/** `Tue Oct  7 10:22:33 2026` as `ps -o lstart` prints it in the C locale. */
+const LSTART = /^[A-Z][a-z]{2}\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})$/
+
+/** Local time of an `lstart` value in epoch ms, or null when it does not parse. */
+export function parseLstart(text: string): number | null {
+  const match = LSTART.exec(text.trim())
+  if (!match) return null
+  const month = MONTHS.indexOf(match[1])
+  const [day, hour, minute, second, year] = match.slice(2).map(Number)
+  if (month < 0 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 60) return null
+  const ms = new Date(year, month, day, hour, minute, second).getTime()
+  return Number.isFinite(ms) ? ms : null
+}
+
+/** `ps -o pid=,ppid=,pgid=,lstart=,command=` output. */
 export function parsePsOutput(text: string): ProcessInfo[] {
   const out: ProcessInfo[] = []
   for (const line of text.split('\n')) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s(.*)$/.exec(line)
+    const match =
+      /^\s*(\d+)\s+(\d+)\s+(\d+)\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+[\d:]{8}\s+\d{4})\s(.*)$/.exec(
+        line
+      )
     if (!match) continue
     const [pid, ppid, pgid] = [Number(match[1]), Number(match[2]), Number(match[3])]
     if (!isPid(pid) || !isPid(ppid) || !isPid(pgid)) continue
-    out.push({ pid, ppid, pgid, command: match[4].trim() })
+    out.push({ pid, ppid, pgid, startMs: parseLstart(match[4]), command: match[5].trim() })
   }
   return out
 }
@@ -51,11 +77,13 @@ export function parsePsOutput(text: string): ProcessInfo[] {
 export function parseWindowsProcessList(text: string): ProcessInfo[] {
   const out: ProcessInfo[] = []
   for (const raw of text.split(/\r?\n/)) {
-    const match = /^(\d+)\t(\d+)\t(.*)$/.exec(raw)
+    const match = /^(\d+)\t(\d+)\t(\d*)\t(.*)$/.exec(raw)
     if (!match) continue
     const [pid, ppid] = [Number(match[1]), Number(match[2])]
     if (!isPid(pid) || !isPid(ppid)) continue
-    out.push({ pid, ppid, pgid: null, command: match[3].trim() })
+    const start = match[3] ? Number(match[3]) : NaN
+    const startMs = Number.isSafeInteger(start) && start > 0 ? start : null
+    out.push({ pid, ppid, pgid: null, startMs, command: match[4].trim() })
   }
   return out
 }
@@ -94,7 +122,7 @@ export async function listProcesses(
     ])
     return parseWindowsProcessList(text)
   }
-  return parsePsOutput(await run(PS, PS_ARGS))
+  return parsePsOutput(await run(ENV, PS_ENV_ARGS))
 }
 
 /** Processes below `rootPid` (not the root itself), parents before children. */

@@ -7,8 +7,8 @@ import {
   type Json,
   readSettings,
   settingsPath,
-  writeIfChanged,
-  writeSettings
+  updateSettings,
+  writeIfChanged
 } from '../profile/settingsFile'
 import { findGitBash } from '../usage/statuslineScript'
 import {
@@ -114,22 +114,30 @@ export function installTestQueueHooks(
     return { installed: false, problem: 'noGitBash', changed: removed.changed }
   }
   const file = settingsPath(configDir)
-  const settings = readSettings(file)
-  if (!settings) return { installed: false, problem: 'invalidSettings', changed: false }
   const scriptPath = hookScriptPath(configDir)
-  const hooks = nextHooks(settings.hooks, (event) =>
-    ourGroup(scriptPath, event, host.os, maxWaitMinutes)
-  )
-  if (!hooks) return { installed: false, problem: 'invalidSettings', changed: false }
+  const withOurs = (settings: Json): Json | null => {
+    const hooks = nextHooks(settings.hooks, (event) =>
+      ourGroup(scriptPath, event, host.os, maxWaitMinutes)
+    )
+    return hooks && { ...settings, hooks }
+  }
+  // Checked before anything is written; the update below checks again on the fresh file.
+  const current = readSettings(file)
+  if (!current || !withOurs(current)) {
+    return { installed: false, problem: 'invalidSettings', changed: false }
+  }
 
   try {
     mkdirSync(join(configDir, 'claudedeck'), { recursive: true })
     // The script first: a hook pointing at a missing file would fail every Bash call's hook.
     let changed = writeIfChanged(scriptPath, hookScript(maxWaitMinutes), SCRIPT_MODE)
-    if (!sameJson(settings.hooks, hooks)) {
-      writeSettings(file, { ...settings, hooks })
-      changed = true
-    }
+    const result = updateSettings(file, (settings) => {
+      const next = withOurs(settings)
+      if (!next) return 'invalid'
+      return sameJson(settings.hooks, next.hooks) ? 'unchanged' : next
+    })
+    if (result === 'invalid') return { installed: false, problem: 'invalidSettings', changed }
+    if (result === 'written') changed = true
     return { installed: true, problem: null, changed }
   } catch (error) {
     console.warn('[test-queue] could not install hooks', error)
@@ -140,22 +148,22 @@ export function installTestQueueHooks(
 /** Removes ClaudeDeck's groups (only those) and the script. */
 export function removeTestQueueHooks(configDir: string): HookInstallResult {
   const file = settingsPath(configDir)
-  const settings = existsSync(file) ? readSettings(file) : null
   let changed = false
   let problem: TestQueueHookProblem | null = null
   try {
-    if (settings && settings.hooks !== undefined) {
-      const hooks = nextHooks(settings.hooks, null)
-      if (!hooks) problem = 'invalidSettings'
-      else if (!sameJson(settings.hooks, hooks)) {
+    if (existsSync(file)) {
+      const result = updateSettings(file, (settings) => {
+        if (settings.hooks === undefined) return 'unchanged'
+        const hooks = nextHooks(settings.hooks, null)
+        if (!hooks) return 'invalid'
+        if (sameJson(settings.hooks, hooks)) return 'unchanged'
         const next = { ...settings }
         if (Object.keys(hooks).length > 0) next.hooks = hooks
         else delete next.hooks
-        writeSettings(file, next)
-        changed = true
-      }
-    } else if (existsSync(file) && !settings) {
-      problem = 'invalidSettings'
+        return next
+      })
+      if (result === 'invalid') problem = 'invalidSettings'
+      if (result === 'written') changed = true
     }
     const script = hookScriptPath(configDir)
     if (existsSync(script)) {

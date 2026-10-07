@@ -302,3 +302,19 @@ Shared module: `src/main/transcripts/` (owned by the agent viewer stream) provid
 JSONL tailing and a session transcript watcher that emits `taskNotification {taskId, toolUseId,
 status, exitCode?}` and `toolResult {toolUseId, isError}` events; the queue consumes it for
 background completion.
+
+## Review changes (hook protocol and stop safety)
+
+- The pre hook short-polls instead of holding one long request: the server answers within 20 s
+  with a decision, an empty body (pass-through) or `claudedeck-wait`, after which the script
+  polls again with the same payload (matched by session and `tool_use_id`). A waiter without a
+  new poll within 10 s is abandoned; a decision reached between polls is kept for the next one.
+- The script runs curl in the background, traps HUP/INT/TERM (curl gets SIGTERM, the server
+  sees the close), always exits 0 and feeds the body through the builtin `printf` (no here-doc
+  temp file holding the token).
+- Stop needs a snapshot wrapper match on POSIX and a process start time after the run's start
+  (`ps -o lstart`, CIM CreationDate); it signals only the process group and re-checks the leader
+  before SIGKILL. Windows never targets claude or its non-wrapper direct children.
+- User regexes are refused when they could backtrack catastrophically (`src/shared/safeRegex.ts`)
+  and are tested on at most 2 KB of input. Transcript readers refuse symlinks and non-regular
+  files and stay inside `<configDir>/projects`.

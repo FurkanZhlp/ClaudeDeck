@@ -11,11 +11,14 @@ import type { ProcessInfo } from '../platform/processList'
 import type { SystemLoad } from '../platform/systemLoad'
 import { defaultTestQueueSettings } from '../state/testQueueSettings'
 import {
+  ABANDON_AFTER_MS,
   CANCEL_REASON,
   createTestQueueService,
+  POLL_HOLD_MS,
   MAX_RUNS_PER_SESSION,
   MAX_WAIT_REASON,
   PASS,
+  WAIT,
   type QueueTranscriptEvent,
   type TestQueueService
 } from './testQueueService'
@@ -91,7 +94,7 @@ function create(): TestQueueService {
       listCalls += 1
       return Promise.resolve(processes)
     },
-    killTree: (pid) => killed.push(pid),
+    killTree: (target) => killed.push(target.pid),
     load: fakeLoad,
     cpuCount: () => 8,
     watchTranscript: (sessionId, onEvent) => {
@@ -103,20 +106,38 @@ function create(): TestQueueService {
   })
 }
 
-/** Starts a pre hook; `state.body` fills in once the hook is answered. */
-function ask(
-  scope: SessionScope,
-  payload: Record<string, unknown>
-): { body: string | null; abort: () => void; toolUseId: string } {
-  const controller = new AbortController()
-  const state = {
-    body: null as string | null,
+interface Asked {
+  body: string | null
+  /** Polls made so far (the hook script polls again after each WAIT). */
+  polls: number
+  abort: () => void
+  /** Stops polling after the current poll, like a hook killed with SIGKILL. */
+  vanish: () => void
+  toolUseId: string
+}
+
+/** Runs a pre hook like the script does; `state.body` fills in once there is a decision. */
+function ask(scope: SessionScope, payload: Record<string, unknown>): Asked {
+  let controller = new AbortController()
+  let gone = false
+  const state: Asked = {
+    body: null,
+    polls: 0,
     abort: () => controller.abort(),
+    vanish: () => {
+      gone = true
+    },
     toolUseId: payload.tool_use_id as string
   }
-  void service.pre(scope, payload, controller.signal).then((body) => {
-    state.body = body
-  })
+  const poll = (): void => {
+    state.polls += 1
+    controller = new AbortController()
+    void service.pre(scope, payload, controller.signal).then((body) => {
+      if (body !== WAIT) state.body = body
+      else if (!gone) poll()
+    })
+  }
+  poll()
   return state
 }
 
@@ -381,18 +402,35 @@ describe('starting, running and background', () => {
     await flush()
     await vi.advanceTimersByTimeAsync(11_000)
     expect(listCalls).toBe(1)
-    await vi.advanceTimersByTimeAsync(110_000)
-    expect(listCalls).toBe(3)
+    // 30 s, 60 s, then every 15 s: 75, 90, 105 s.
+    await vi.advanceTimersByTimeAsync(108_000)
+    expect(listCalls).toBe(6)
+    expect(states()).toEqual(['run1:starting'])
+    // At the end of the grace one more check runs before the slot is released.
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(listCalls).toBe(7)
     expect(states()).toEqual([])
+  })
+
+  it('keeps a run whose process shows up in the final grace check', async () => {
+    settings = { ...settings, startGraceSeconds: 70 }
+    ask(A, pre('npm test'))
+    await flush()
+    await vi.advanceTimersByTimeAsync(65_000)
+    processes = [
+      { pid: 300, ppid: 100, pgid: 300, startMs: 1_001_000, command: wrapper('npm test') }
+    ]
+    await vi.advanceTimersByTimeAsync(6_000)
+    expect(states()).toEqual(['run1:running'])
   })
 
   it('finds the process, allows stop with exactly one match, and kills its group', async () => {
     ask(A, pre('npm test'))
     await flush()
     processes = [
-      { pid: 100, ppid: 1, pgid: 100, command: 'claude' },
-      { pid: 300, ppid: 100, pgid: 300, command: wrapper('npm test') },
-      { pid: 301, ppid: 300, pgid: 300, command: 'node vitest' }
+      { pid: 100, ppid: 1, pgid: 100, startMs: 1, command: 'claude' },
+      { pid: 300, ppid: 100, pgid: 300, startMs: 1_001_000, command: wrapper('npm test') },
+      { pid: 301, ppid: 300, pgid: 300, startMs: 1_001_000, command: 'node vitest' }
     ]
     await vi.advanceTimersByTimeAsync(10_000)
     expect(service.snapshot().runs[0]).toMatchObject({ state: 'running', canStop: true })
@@ -401,7 +439,10 @@ describe('starting, running and background', () => {
     expect(killed).toEqual([300])
 
     // A second identical run in the same tab: no longer unambiguous.
-    processes = [...processes, { pid: 310, ppid: 100, pgid: 310, command: wrapper('npm test') }]
+    processes = [
+      ...processes,
+      { pid: 310, ppid: 100, pgid: 310, startMs: 1_001_000, command: wrapper('npm test') }
+    ]
     await expect(service.stop('run1')).rejects.toThrow('INVALID')
     expect(service.snapshot().runs[0].canStop).toBe(false)
   })
@@ -409,7 +450,9 @@ describe('starting, running and background', () => {
   it('ends a running run whose process disappeared without a post', async () => {
     ask(A, pre('npm test'))
     await flush()
-    processes = [{ pid: 300, ppid: 100, pgid: 300, command: wrapper('npm test') }]
+    processes = [
+      { pid: 300, ppid: 100, pgid: 300, startMs: 1_001_000, command: wrapper('npm test') }
+    ]
     await vi.advanceTimersByTimeAsync(10_000)
     expect(states()).toEqual(['run1:running'])
     processes = []
@@ -491,7 +534,7 @@ describe('agent access', () => {
     expect(JSON.stringify(view)).not.toContain('p2')
   })
 
-  it('cancels only runs of the own tab', async () => {
+  it('cancels and stops only runs of the own tab', async () => {
     settings = { ...settings, maxConcurrent: 1 }
     ask(A, pre('npm test'))
     const mine = ask(B, pre('npm test', { agent_id: 'sub1', agent_type: 'x' }))
@@ -502,5 +545,169 @@ describe('agent access', () => {
     expect(denyReason(mine.body as string)).toBe(CANCEL_REASON)
     // Running without a single matching process cannot be stopped.
     await expect(service.cancelOwn(A, 'run1')).rejects.toThrow('INVALID')
+  })
+})
+
+describe('short polls', () => {
+  beforeEach(() => {
+    settings = { ...settings, maxConcurrent: 1, startGraceSeconds: 900 }
+  })
+
+  it('answers a held poll with WAIT and keeps the place when the script polls again', async () => {
+    ask(A, pre('npm test'))
+    const waiting = ask(A, pre('npm test'))
+    await flush()
+    await vi.advanceTimersByTimeAsync(POLL_HOLD_MS + 1000)
+    expect(waiting.polls).toBe(2)
+    expect(waiting.body).toBeNull()
+    await vi.advanceTimersByTimeAsync(5 * POLL_HOLD_MS)
+    expect(states()).toEqual(['run1:starting', 'run2:queued'])
+    service.release('run1')
+    await flush()
+    expect(waiting.body).toBe(PASS)
+  })
+
+  it('drops a waiter whose script stopped polling', async () => {
+    ask(A, pre('npm test'))
+    const waiting = ask(A, pre('npm test'))
+    await flush()
+    waiting.vanish()
+    await vi.advanceTimersByTimeAsync(POLL_HOLD_MS + 1000)
+    expect(states()).toEqual(['run1:starting', 'run2:queued'])
+    await vi.advanceTimersByTimeAsync(ABANDON_AFTER_MS)
+    expect(states()).toEqual(['run1:starting'])
+    expect(service.snapshot().runs).toHaveLength(1)
+  })
+
+  it('keeps a decision made between two polls for the next poll', async () => {
+    ask(A, pre('npm test'))
+    const payload = pre('npm test')
+    const controller = new AbortController()
+    const first = service.pre(A, payload, controller.signal)
+    await vi.advanceTimersByTimeAsync(POLL_HOLD_MS + 1000)
+    expect(await first).toBe(WAIT)
+    // Between polls: the user cancels it.
+    service.cancel('run2')
+    expect(denyReason(await service.pre(A, payload, controller.signal))).toBe(CANCEL_REASON)
+    // The decision is handed out once; no new run is created.
+    expect(states()).toEqual(['run1:starting'])
+  })
+
+  it('lets a started run through on the next poll, or drops it when that poll never comes', async () => {
+    const one = ask(A, pre('npm test'))
+    const payload = pre('npm test')
+    void service.pre(A, payload, new AbortController().signal)
+    await vi.advanceTimersByTimeAsync(POLL_HOLD_MS + 1000)
+    service.post(A, post(one.toolUseId))
+    expect(states()).toEqual(['run2:starting'])
+    expect(await service.pre(A, payload, new AbortController().signal)).toBe(PASS)
+    await vi.advanceTimersByTimeAsync(ABANDON_AFTER_MS + 1000)
+    expect(states()).toEqual(['run2:starting'])
+
+    // Same again, but the script is gone: the slot is freed.
+    const three = ask(B, pre('npm test'))
+    const gone = pre('npm test')
+    void service.pre(B, gone, new AbortController().signal)
+    await vi.advanceTimersByTimeAsync(POLL_HOLD_MS + 1000)
+    service.release('run2')
+    await flush()
+    expect(three.body).toBe(PASS)
+    service.post(B, post(three.toolUseId))
+    expect(states()).toEqual(['run4:starting'])
+    await vi.advanceTimersByTimeAsync(ABANDON_AFTER_MS + 1000)
+    expect(states()).toEqual([])
+  })
+
+  it('lets a second hook for the same call go and answers a late poll of a started run', async () => {
+    const payload = pre('npm test')
+    ask(A, pre('npm test'))
+    const first = service.pre(A, payload, new AbortController().signal)
+    const second = service.pre(A, payload, new AbortController().signal)
+    expect(await first).toBe(PASS)
+    expect(states()).toEqual(['run1:starting', 'run2:queued'])
+    service.release('run1')
+    expect(await second).toBe(PASS)
+    expect(await service.pre(A, payload, new AbortController().signal)).toBe(PASS)
+    expect(states()).toEqual(['run2:starting'])
+  })
+})
+
+describe('post hooks and bulk removal', () => {
+  it('abandons a queued run when its call ends without running (Esc, failure)', async () => {
+    settings = { ...settings, maxConcurrent: 1 }
+    ask(A, pre('npm test'))
+    const waiting = ask(A, pre('npm test'))
+    await flush()
+    service.post(A, {
+      ...(post(waiting.toolUseId) as object),
+      hook_event_name: 'PostToolUseFailure'
+    })
+    expect(states()).toEqual(['run1:starting'])
+  })
+
+  it('abandons a starting run interrupted by the user, finishes it otherwise', async () => {
+    const one = ask(A, pre('npm test'))
+    const two = ask(A, pre('npm test'))
+    await flush()
+    service.post(A, {
+      ...(post(one.toolUseId) as object),
+      hook_event_name: 'PostToolUseFailure',
+      is_interrupt: true
+    })
+    service.post(A, post(two.toolUseId))
+    expect(states()).toEqual([])
+  })
+
+  it('does not start waiting runs while removing them in bulk', async () => {
+    settings = { ...settings, maxConcurrent: 1 }
+    ask(A, pre('npm test'))
+    const queued = ask(A, pre('npm test'))
+    const other = ask(B, pre('npm test'))
+    await flush()
+    await vi.advanceTimersByTimeAsync(600)
+    snapshots = []
+    service.dropAll()
+    await flush()
+    expect(queued.body).toBe(PASS)
+    expect(other.body).toBe(PASS)
+    expect(states()).toEqual([])
+    await vi.advanceTimersByTimeAsync(600)
+    expect(snapshots.at(-1)?.runs).toEqual([])
+  })
+
+  it('admits nothing while the queue is turned off', async () => {
+    settings = { ...settings, maxConcurrent: 1, enabled: false }
+    service.settingsChanged()
+    expect(service.snapshot().runs).toEqual([])
+  })
+})
+
+describe('stop safety', () => {
+  const wrapper = (cmd: string): string =>
+    `/bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval '${cmd}'`
+
+  it('refuses to stop a process that started before the run', async () => {
+    ask(A, pre('npm test'))
+    await flush()
+    processes = [
+      { pid: 100, ppid: 1, pgid: 100, startMs: 1, command: 'claude' },
+      { pid: 300, ppid: 100, pgid: 300, startMs: 990_000, command: wrapper('npm test') }
+    ]
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(service.snapshot().runs[0]).toMatchObject({ state: 'running', canStop: false })
+    await expect(service.stop('run1')).rejects.toThrow('INVALID')
+    expect(killed).toEqual([])
+  })
+
+  it('refuses to stop a run found by its runner tokens only', async () => {
+    ask(A, pre('npm test'))
+    await flush()
+    processes = [
+      { pid: 100, ppid: 1, pgid: 100, startMs: 1, command: 'claude' },
+      { pid: 300, ppid: 100, pgid: 300, startMs: 1_001_000, command: 'sh -c x' },
+      { pid: 301, ppid: 300, pgid: 300, startMs: 1_001_000, command: 'npm test' }
+    ]
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(service.snapshot().runs[0]).toMatchObject({ state: 'running', canStop: false })
   })
 })

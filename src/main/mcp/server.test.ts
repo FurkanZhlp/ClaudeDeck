@@ -8,7 +8,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '../../shared/types'
 import { JsonStore } from '../state/jsonStore'
 import { emptyState, Repository } from '../state/repository'
-import { allowLongPolls, canUseRandomPort, startMcpServer, type RunningMcpServer } from './server'
+import {
+  canUseRandomPort,
+  configureTimeouts,
+  IDLE_TIMEOUT_MS,
+  startMcpServer,
+  type RunningMcpServer
+} from './server'
 import { createSessionTokens, type SessionScope, type SessionTokens } from './sessionTokens'
 import { createOptimizeTools } from './optimizeTools'
 import { createTools, type Tools } from './tools'
@@ -229,6 +235,7 @@ describe('hook routes', () => {
       tokens,
       preferredPort: 0,
       routeRateLimit: { limit: 5, windowMs: 60_000 },
+      maxRouteRequests: 2,
       routes: {
         [PRE]: {
           maxBodyBytes: 1024,
@@ -279,7 +286,9 @@ describe('hook routes', () => {
       [hook({ t: 'nope', p: {} }), 401],
       [hook({ p: {} }), 401],
       [hook({ t: run, p: {} }), 401],
-      [hook('not json'), 400],
+      // The body must start with a token before anything else is read.
+      [hook('not json'), 401],
+      [hook(`{"t":"${tokens.issue({ ...scope, sessionId: 'hookj' })}", oops`), 400],
       [hook({ t: tokens.issue({ ...scope, sessionId: 'hook2' }), p: 'x'.repeat(2000) }), 413],
       [
         hook(
@@ -323,11 +332,46 @@ describe('hook routes', () => {
     finish('')
   })
 
-  it('turns the idle socket timeout off for long-polls', () => {
+  it('bounds unauthorised sockets with header, request and idle timeouts', () => {
     const server = createServer()
-    server.timeout = 5000
-    allowLongPolls(server)
-    expect(server.timeout).toBe(0)
+    server.timeout = 0
+    configureTimeouts(server)
+    expect(server.timeout).toBe(IDLE_TIMEOUT_MS)
+    expect(server.headersTimeout).toBe(10_000)
+    expect(server.requestTimeout).toBe(30_000)
+  })
+
+  it('refuses a body whose leading token is unknown before reading the rest', async () => {
+    calls = []
+    const res = await hook(`{"t":"${'0'.repeat(64)}","p":${JSON.stringify('x'.repeat(900))}}`)
+    expect(res.status).toBe(401)
+    expect(calls).toEqual([])
+  })
+
+  it('refuses hook requests beyond the open request cap with 503', async () => {
+    calls = []
+    release = null
+    const holders = ['hook7', 'hook8'].map((id) => {
+      const controller = new AbortController()
+      const token = tokens.issue({ ...scope, sessionId: id })
+      return {
+        controller,
+        pending: hook({ t: token, p: { wait: true } }, { signal: controller.signal }).catch(
+          () => null
+        )
+      }
+    })
+    await vi.waitFor(() => expect(calls).toHaveLength(2))
+    const extra = await hook({ t: tokens.issue({ ...scope, sessionId: 'hook9' }), p: {} })
+    expect(extra.status).toBe(503)
+    expect(await extra.text()).toBe('')
+    for (const h of holders) h.controller.abort()
+    await Promise.all(holders.map((h) => h.pending))
+    await vi.waitFor(async () =>
+      expect(
+        (await hook({ t: tokens.issue({ ...scope, sessionId: 'hook10' }), p: {} })).status
+      ).toBe(200)
+    )
   })
 
   it('answers a long-poll once the handler resolves', async () => {

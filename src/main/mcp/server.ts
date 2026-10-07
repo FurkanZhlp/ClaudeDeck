@@ -13,6 +13,16 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 const DEFAULT_RATE_LIMIT: RateLimit = { limit: 60, windowMs: 60_000 }
 /** Hook calls are one per Bash tool call, so they get their own, larger budget. */
 const DEFAULT_ROUTE_RATE_LIMIT: RateLimit = { limit: 600, windowMs: 60_000 }
+/** Hook requests open at once (all tabs together); more are refused with 503. */
+export const MAX_ROUTE_REQUESTS = 300
+/** Idle socket timeout for anything not authorised yet. */
+export const IDLE_TIMEOUT_MS = 60_000
+export const HEADERS_TIMEOUT_MS = 10_000
+/** Receiving a whole request (bodies are small and local). */
+export const REQUEST_TIMEOUT_MS = 30_000
+/** Hook bodies start with the token: `{"t":"<64 hex>"`, checked before the rest is read. */
+const TOKEN_PREFIX = /^\{"t":"([0-9a-f]{64})"/
+const TOKEN_PREFIX_BYTES = 71
 
 export interface RateLimit {
   limit: number
@@ -44,6 +54,8 @@ export interface McpServerOptions {
   routes?: Record<string, HookRoute>
   /** Hook calls allowed per session and window; defaults to 600 per minute. */
   routeRateLimit?: RateLimit
+  /** Hook requests open at once; defaults to MAX_ROUTE_REQUESTS. */
+  maxRouteRequests?: number
 }
 
 export interface RunningMcpServer {
@@ -87,8 +99,17 @@ function sendEmpty(res: ServerResponse, status: number): void {
 
 type BodyResult = { ok: true; text: string } | { ok: false; status: number }
 
-/** Reads the request body up to `max` bytes; more is drained and refused with 413. */
-function readBody(req: IncomingMessage, max: number): Promise<BodyResult> {
+/**
+ * Reads the request body up to `max` bytes; more is drained and refused with 413. `accept`
+ * sees the first `prefixBytes` (or the whole body when shorter) once; false refuses with 401
+ * without keeping the rest.
+ */
+function readBody(
+  req: IncomingMessage,
+  max: number,
+  accept: (prefix: string) => boolean = () => true,
+  prefixBytes = 0
+): Promise<BodyResult> {
   const declared = Number(req.headers['content-length'])
   if (Number.isFinite(declared) && declared > max) {
     req.resume()
@@ -97,26 +118,42 @@ function readBody(req: IncomingMessage, max: number): Promise<BodyResult> {
   return new Promise((done) => {
     const chunks: Buffer[] = []
     let size = 0
-    let tooLarge = false
+    let refused: number | null = null
+    let checked = false
+    const check = (): void => {
+      checked = true
+      if (!accept(Buffer.concat(chunks).subarray(0, prefixBytes).toString('utf8'))) {
+        refused = 401
+        chunks.length = 0
+      }
+    }
     req.on('data', (chunk: Buffer) => {
-      if (tooLarge) return
+      if (refused !== null) return
       size += chunk.length
       if (size > max) {
-        tooLarge = true
+        refused = 413
         chunks.length = 0
         return
       }
       chunks.push(chunk)
+      if (!checked && size >= prefixBytes) check()
     })
-    req.on('end', () =>
+    req.on('end', () => {
+      if (refused === null && !checked) check()
       done(
-        tooLarge
-          ? { ok: false, status: 413 }
+        refused !== null
+          ? { ok: false, status: refused }
           : { ok: true, text: Buffer.concat(chunks).toString('utf8') }
       )
-    )
+    })
     req.on('error', () => done({ ok: false, status: 400 }))
   })
+}
+
+/** A session token at the start of a hook body (cheap check before reading the rest). */
+function sessionTokenAhead(prefix: string, tokens: SessionTokens): boolean {
+  const match = TOKEN_PREFIX.exec(prefix)
+  return !!match && tokens.lookup(match[1])?.kind === 'session'
 }
 
 async function handleRoute(
@@ -127,7 +164,12 @@ async function handleRoute(
   allow: (key: string) => boolean
 ): Promise<void> {
   if (req.method !== 'POST') return sendEmpty(res, 405)
-  const body = await readBody(req, route.maxBodyBytes)
+  const body = await readBody(
+    req,
+    route.maxBodyBytes,
+    (prefix) => sessionTokenAhead(prefix, tokens),
+    TOKEN_PREFIX_BYTES
+  )
   if (!body.ok) return sendEmpty(res, body.status)
   let parsed: unknown
   try {
@@ -140,6 +182,8 @@ async function handleRoute(
   // Optimize runs never reach hook routes.
   if (!scope || scope.kind !== 'session') return sendEmpty(res, 401)
   if (!allow(scopeId(scope))) return sendEmpty(res, 429)
+  // An authorised poll is held up to 20 s by the queue; no idle timeout applies to it.
+  req.setTimeout(0)
 
   const aborted = new AbortController()
   res.on('close', () => {
@@ -195,11 +239,14 @@ export function canUseRandomPort(error: unknown, preferred: number): boolean {
 }
 
 /**
- * Hook long-polls stay open up to the queue's max wait (hours): no idle socket timeout. The
- * request timeout only covers receiving the request, which hooks send at once.
+ * Unauthenticated clients cannot hold sockets: headers within 10 s, the whole request within
+ * 30 s, 60 s idle. Authorised requests (hook polls, MCP calls that wait for a confirmation
+ * dialog) turn the idle timeout off for their socket.
  */
-export function allowLongPolls(server: Server): void {
-  server.timeout = 0
+export function configureTimeouts(server: Server): void {
+  server.headersTimeout = HEADERS_TIMEOUT_MS
+  server.requestTimeout = REQUEST_TIMEOUT_MS
+  server.timeout = IDLE_TIMEOUT_MS
 }
 
 function listen(server: Server, port: number): Promise<number> {
@@ -228,6 +275,8 @@ export async function startMcpServer(opts: McpServerOptions): Promise<RunningMcp
   const allowRoute = createLimiter(opts.routeRateLimit ?? DEFAULT_ROUTE_RATE_LIMIT)
   const routes = new Map(Object.entries(opts.routes ?? {}))
   let allowedHosts: string[] = []
+  let openRouteRequests = 0
+  const maxRouteRequests = opts.maxRouteRequests ?? MAX_ROUTE_REQUESTS
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const path = new URL(req.url ?? '/', 'http://localhost').pathname
@@ -240,12 +289,20 @@ export async function startMcpServer(opts: McpServerOptions): Promise<RunningMcp
     if (route) {
       // Same DNS rebinding guard the MCP transport applies.
       if (!allowedHosts.includes(req.headers.host ?? '')) return sendEmpty(res, 403)
+      if (openRouteRequests >= maxRouteRequests) {
+        req.resume()
+        return sendEmpty(res, 503)
+      }
+      openRouteRequests++
+      res.once('close', () => openRouteRequests--)
       return handleRoute(route, req, res, opts.tokens, allowRoute)
     }
     if (path !== MCP_PATH) return sendError(res, 404, 'Not found')
     if (req.method === 'OPTIONS') return sendError(res, 405, 'Method not allowed')
     const scope = scopeOf(req, opts.tokens)
     if (!scope) return sendError(res, 401, 'Unauthorized')
+    // Tool calls may wait minutes for the user's confirmation.
+    req.setTimeout(0)
     // Stateless mode has no standalone SSE stream or session to delete.
     if (req.method !== 'POST') return sendError(res, 405, 'Method not allowed')
 
@@ -271,7 +328,7 @@ export async function startMcpServer(opts: McpServerOptions): Promise<RunningMcp
       else sendError(res, 500, 'Internal error')
     })
   })
-  allowLongPolls(http)
+  configureTimeouts(http)
 
   const preferred = opts.preferredPort ?? DEFAULT_MCP_PORT
   let port: number

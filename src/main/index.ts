@@ -6,8 +6,9 @@ import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { IPC } from '../shared/ipc'
 import { resolveLanguage } from '../shared/language'
 import { createTranslator, type Translate } from '../shared/translate'
-import { AccountService, transcriptPath } from './accounts/accountService'
-import { registerAgentsIpc, type AgentsIpc } from './agents/agentsIpc'
+import { AccountService } from './accounts/accountService'
+import { registerAgentsIpc, resolveTabSession, type AgentsIpc } from './agents/agentsIpc'
+import { locateSessionTranscript } from './agents/subagentPaths'
 import { watchSessionTranscript } from './transcripts/sessionTranscript'
 import { platform } from './platform'
 import { registerIpc } from './ipc'
@@ -113,7 +114,7 @@ const ptys = new PtyManager({
   }
 })
 
-// Test runs of Claude tabs wait for a slot through a PreToolUse hook that long-polls the MCP server.
+// Test runs of Claude tabs wait for a slot through a PreToolUse hook that polls the MCP server.
 const testQueue = createTestQueueService({
   settings: () => repo.get().settings.testQueue,
   project: (id) => repo.get().projects.find((p) => p.id === id),
@@ -122,18 +123,19 @@ const testQueue = createTestQueueService({
   isLive: (sessionId) => ptys.has(sessionId),
   ptyPid: (sessionId) => ptys.pid(sessionId),
   listProcesses: () => platform.listProcesses(),
-  killTree: createStopProcess(platform.os, platform.killTree),
+  killTree: createStopProcess(platform.os, {
+    killTree: platform.killTree,
+    listProcesses: () => platform.listProcesses()
+  }),
   load: createSystemLoad(nodeSystemLoadDeps(platform.os)),
   cpuCount: () => cpus().length,
   onSnapshot: (snapshot) => send(IPC.testQueueUpdate, snapshot),
   // Background runs end with a task notification in the tab's parent transcript.
+  // Located like the agent viewer does (symlinked project paths, safe ids, inside projects/).
   watchTranscript: (sessionId, onEvent) => {
-    const state = repo.get()
-    const session = state.sessions.find((s) => s.id === sessionId)
-    const project = session && state.projects.find((p) => p.id === session.projectId)
-    const account = project && state.accounts.find((a) => a.id === project.accountId)
-    if (!session?.claudeSessionId || !project || !account) return null
-    const path = transcriptPath(account.configDir, project.path, session.claudeSessionId)
+    const location = resolveTabSession(repo, sessionId)
+    const path = location && locateSessionTranscript(location)
+    if (!path) return null
     // A short scan of recent lines covers a notice written right before watching started.
     return watchSessionTranscript(path, onEvent, { initialScanBytes: 64 * 1024 })
   },
@@ -541,9 +543,11 @@ app.whenReady().then(() => {
     openUpdate: openUpdatePage,
     prepareAccount,
     onProjectMoved: (before, after, projectId) => {
-      // Open subagent watchers would block moving the transcripts on Windows.
-      for (const s of repo.get().sessions)
-        if (s.projectId === projectId) agents?.forgetSession(s.id)
+      // Open subagent watchers would block moving the transcripts on Windows. A running tab's
+      // claude keeps writing under the old project key, so its watcher stays where it is.
+      for (const s of repo.get().sessions) {
+        if (s.projectId === projectId && !ptys.has(s.id)) agents?.forgetSession(s.id)
+      }
       try {
         notes?.relocateForProjectChange(before, after, projectId)
       } catch (error) {

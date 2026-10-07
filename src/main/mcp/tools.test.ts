@@ -10,6 +10,7 @@ import { emptyState, Repository } from '../state/repository'
 import type { SessionScope } from './sessionTokens'
 import {
   blockedRoots,
+  CANCEL_COOLDOWN_MS,
   createTools,
   findProjectByPath,
   resolveProjectFolder,
@@ -464,6 +465,28 @@ describe('MCP tools: test queue', () => {
     expect(stuck.isError).toBe(true)
     expect(stuck.content[0].text).toMatch(/cannot be stopped/)
     expect((await queued.cancel_test_run.call({}, scope)).isError).toBe(true)
+  })
+
+  it('allows one cancel per run and tab every 5 seconds', async () => {
+    let clock = 0
+    const cancelOwn = vi.fn(() => Promise.resolve('stopped' as const))
+    const queued = createTools({
+      repo,
+      notes,
+      notifyStateChanged,
+      requestOpenSession,
+      confirm,
+      now: () => clock,
+      testQueue: { agentView: vi.fn(() => view), cancelOwn }
+    })
+    expect((await queued.cancel_test_run.call({ runId: 'r1' }, scope)).isError).toBeFalsy()
+    const again = await queued.cancel_test_run.call({ runId: 'r1' }, scope)
+    expect(again.isError).toBe(true)
+    expect(again.content[0].text).toMatch(/try again/)
+    expect((await queued.cancel_test_run.call({ runId: 'r2' }, scope)).isError).toBeFalsy()
+    clock = CANCEL_COOLDOWN_MS
+    expect((await queued.cancel_test_run.call({ runId: 'r1' }, scope)).isError).toBeFalsy()
+    expect(cancelOwn).toHaveBeenCalledTimes(3)
   })
 
   it('is never available to optimize runs', async () => {

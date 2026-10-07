@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  hookBaseUrl,
-  hookCommand,
-  hookScript,
-  OURS,
-  preCurlMaxTime,
-  preHookTimeout
-} from './hookScript'
+import { hookBaseUrl, hookCommand, hookScript, OURS, preHookTimeout, prePolls } from './hookScript'
 
 describe('hookScript', () => {
   // Pinned: the script runs on every Bash call of every account with the queue on.
@@ -17,8 +10,8 @@ describe('hookScript', () => {
       # answers permission prompts. Outside ClaudeDeck tabs it exits at once.
       event=$1
       case $event in
-        pre) max=3630 ;;
-        post) max=8 ;;
+        pre) max=30; polls=366 ;;
+        post) max=8; polls=1 ;;
         *) exit 0 ;;
       esac
       token=\${CLAUDEDECK_MCP_TOKEN-}
@@ -34,26 +27,60 @@ describe('hookScript', () => {
       port=\${port%%/*}
       case $port in ''|*[!0-9]*) exit 0 ;; esac
       input=$(cat) || exit 0
-      exec curl -q -s --noproxy '*' --connect-timeout 5 --max-time "$max" \\
-        -H 'Content-Type: application/json' --data-binary @- "$url$event" <<EOF
-      {"t":"$token","e":"$event","p":$input}
-      EOF
+      out=$(mktemp 2>/dev/null) || exit 0
+      pid=
+      stop() {
+        [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null
+        rm -f "$out"
+        exit 0
+      }
+      trap stop HUP INT TERM
+      answer=
+      n=0
+      while [ "$n" -lt "$polls" ]; do
+        n=$((n + 1))
+        : >"$out" || break
+        printf '%s' "{\\"t\\":\\"$token\\",\\"e\\":\\"$event\\",\\"p\\":$input}" |
+          curl -q -s --noproxy '*' --connect-timeout 5 --max-time "$max" \\
+            -H 'Content-Type: application/json' --data-binary @- -o "$out" "$url$event" &
+        pid=$!
+        wait "$pid"
+        pid=
+        answer=
+        IFS= read -r answer <"$out" || :
+        [ "$answer" = claudedeck-wait ] || break
+      done
+      [ "$answer" = claudedeck-wait ] || cat "$out" 2>/dev/null
+      rm -f "$out"
+      exit 0
       "
     `)
   })
 
-  it('never puts the token on the command line', () => {
-    const curl = hookScript(60)
+  it('never puts the token on a command line or into a file', () => {
+    const script = hookScript(60)
+    const curl = script
       .split('\n')
-      .filter((line) => line.includes('curl'))
+      .filter((line) => line.includes('curl') || line.includes('-H '))
       .join('\n')
     expect(curl).not.toContain('token')
+    // The body goes through the builtin printf into curl's stdin; no here-doc temp file.
+    expect(script).not.toContain('<<')
+    expect(script).toContain('printf \'%s\' "{\\"t\\":\\"$token\\"')
+    expect(script).not.toMatch(/\bexec\b/)
   })
 
-  it('derives curl and hook timeouts from the max wait', () => {
-    expect(preCurlMaxTime(1)).toBe(90)
+  it('derives the hook timeout and poll count from the max wait', () => {
     expect(preHookTimeout(1)).toBe(120)
-    expect(hookScript(2)).toContain('pre) max=150 ;;')
+    expect(prePolls(1)).toBe(12)
+    expect(hookScript(2)).toContain('pre) max=30; polls=18 ;;')
+  })
+
+  it('refuses a max wait that is not a whole number in range', () => {
+    for (const bad of [0, 241, 1.5, Number.NaN, Infinity]) {
+      expect(() => preHookTimeout(bad)).toThrow(RangeError)
+      expect(() => hookScript(bad)).toThrow(RangeError)
+    }
   })
 })
 

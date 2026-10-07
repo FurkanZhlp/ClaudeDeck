@@ -17,6 +17,8 @@ export interface PostToolUse {
   toolUseId: string
   /** The command moved to the background (run_in_background or auto-backgrounded). */
   background: boolean
+  /** PostToolUseFailure with `is_interrupt`: the user stopped the call (Esc). */
+  interrupted: boolean
 }
 
 const cleanText = (value: unknown, max: number): string | undefined => {
@@ -55,5 +57,7 @@ export function parsePostToolUse(payload: unknown): PostToolUse | null {
     isObject(response) &&
     ((typeof response.backgroundTaskId === 'string' && response.backgroundTaskId !== '') ||
       typeof response.timedOutAfterMs === 'number')
-  return { toolUseId, background }
+  const interrupted =
+    payload.hook_event_name === 'PostToolUseFailure' && payload.is_interrupt === true
+  return { toolUseId, background, interrupted }
 }
