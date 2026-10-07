@@ -1,3 +1,4 @@
+import { isSafeRegex } from '../../../shared/safeRegex'
 import type { ClassifyResult, ProjectTestQueue, TestPattern } from '../../../shared/types'
 import { EXCLUSIONS, BUILTIN_PATTERNS, findBuiltin } from './builtinPatterns'
 import { normalizeSegment, type Canonical } from './normalize'
@@ -5,6 +6,8 @@ import { lex, type Word } from './shellLexer'
 
 /** Longer commands are cut before lexing (the hook sends at most this much anyway). */
 export const MAX_CLASSIFY_INPUT = 16 * 1024
+/** Text a custom regex is tested on is cut to this (bounds the cost of any user pattern). */
+export const MAX_REGEX_INPUT = 2048
 /** Compiled custom rules kept in memory; the cache is cleared when it grows past this. */
 const MAX_CACHED_RULES = 500
 
@@ -66,8 +69,10 @@ function cached<T>(cache: Map<string, T>, key: string, make: () => T): T {
   return value
 }
 
+/** Unsafe patterns (saved before the check existed, or edited by hand) never compile. */
 const compileRegex = (pattern: string): RegExp | null =>
   cached(regexCache, pattern, () => {
+    if (!isSafeRegex(pattern)) return null
     try {
       return new RegExp(pattern)
     } catch {
@@ -102,7 +107,11 @@ function customRule(pattern: TestPattern, source: Source): Rule | null {
   const regex = compileRegex(pattern.pattern)
   if (!regex) return null
   if (pattern.target === 'raw') return { id: pattern.id, source, raw: regex }
-  return { id: pattern.id, source, canonical: (c) => regex.test(regexTarget(c.words)) }
+  return {
+    id: pattern.id,
+    source,
+    canonical: (c) => regex.test(regexTarget(c.words).slice(0, MAX_REGEX_INPUT))
+  }
 }
 
 function buildRules(opts: ClassifyOptions, disabled: ReadonlySet<string>): Rule[] {
@@ -165,7 +174,9 @@ export function classify(command: string, opts: ClassifyOptions): ClassifyResult
   let excluded: ClassifyResult | null = null
   for (const c of canonicals) {
     const texts = c.words.map((w) => w.text)
-    const rule = rules.find((r) => (r.canonical ? r.canonical(c, texts) : !!r.raw?.test(c.raw)))
+    const rule = rules.find((r) =>
+      r.canonical ? r.canonical(c, texts) : !!r.raw?.test(c.raw.slice(0, MAX_REGEX_INPUT))
+    )
     if (!rule) continue
     const excludedBy = exclusionFor(c, rule, disabled)
     const result: ClassifyResult = {
@@ -181,7 +192,8 @@ export function classify(command: string, opts: ClassifyOptions): ClassifyResult
   }
 
   // Raw rules may span several commands (`cd e2e && ./run.sh`).
-  const rawRule = rules.find((r) => r.raw?.test(input))
+  const head = input.slice(0, MAX_REGEX_INPUT)
+  const rawRule = rules.find((r) => r.raw?.test(head))
   if (rawRule) return { ...none, isTest: true, ruleId: rawRule.id, source: rawRule.source }
   return excluded ?? none
 }

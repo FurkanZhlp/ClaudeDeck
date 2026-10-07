@@ -1,4 +1,5 @@
 import { DomainError } from '../../shared/errors'
+import { isSafeRegex } from '../../shared/safeRegex'
 import { TEST_QUEUE_LIMITS as LIMITS, TEST_RULE_ID } from '../../shared/testQueueLimits'
 import type {
   ProjectTestQueue,
@@ -35,23 +36,93 @@ export const defaultProjectTestQueue = (): ProjectTestQueue => ({
 const isObject = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v)
 
-/** Fills fields added after the config file was written (two levels: settings and `auto`). */
-export function withTestQueueDefaults(saved: unknown): TestQueueSettings {
-  const defaults = defaultTestQueueSettings()
-  if (!isObject(saved)) return defaults
-  const merged = {
-    ...defaults,
-    ...(saved as Partial<TestQueueSettings>),
-    auto: { ...defaults.auto, ...(isObject(saved.auto) ? saved.auto : {}) }
-  }
-  if (!Array.isArray(merged.disabledBuiltins)) merged.disabledBuiltins = []
-  if (!Array.isArray(merged.customPatterns)) merged.customPatterns = []
-  return merged
-}
-
 function clampInt(value: unknown, range: { min: number; max: number }): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new DomainError('INVALID')
   return Math.min(range.max, Math.max(range.min, Math.round(value)))
+}
+
+/** A saved number clamped like a patch would be; the default when it is not a number. */
+const loadedInt = (
+  value: unknown,
+  range: { min: number; max: number },
+  fallback: number
+): number =>
+  typeof value === 'number' && Number.isFinite(value) ? clampInt(value, range) : fallback
+
+/**
+ * Saved settings as the queue may use them: fields added later get their defaults, numbers are
+ * clamped to TEST_QUEUE_LIMITS, and rules that would be refused today (bad ids, regexes that do
+ * not compile or could backtrack catastrophically) are dropped. A hand-edited config file can
+ * therefore never produce a value a patch could not.
+ */
+export function withTestQueueDefaults(saved: unknown): TestQueueSettings {
+  const defaults = defaultTestQueueSettings()
+  if (!isObject(saved)) return defaults
+  const auto = isObject(saved.auto) ? saved.auto : {}
+  const d = defaults.auto
+  const cpuHighPercent = loadedInt(auto.cpuHighPercent, LIMITS.cpuHighPercent, d.cpuHighPercent)
+  return {
+    enabled: typeof saved.enabled === 'boolean' ? saved.enabled : defaults.enabled,
+    mode: saved.mode === 'fixed' || saved.mode === 'auto' ? saved.mode : defaults.mode,
+    maxConcurrent: loadedInt(saved.maxConcurrent, LIMITS.maxConcurrent, defaults.maxConcurrent),
+    auto: {
+      maxConcurrent:
+        typeof auto.maxConcurrent === 'number' && Number.isFinite(auto.maxConcurrent)
+          ? clampInt(auto.maxConcurrent, LIMITS.autoMaxConcurrent)
+          : d.maxConcurrent,
+      cpuHighPercent,
+      cpuResumePercent: Math.min(
+        loadedInt(auto.cpuResumePercent, LIMITS.cpuResumePercent, d.cpuResumePercent),
+        cpuHighPercent - 1
+      ),
+      minAvailableMemoryPercent: loadedInt(
+        auto.minAvailableMemoryPercent,
+        LIMITS.minAvailableMemoryPercent,
+        d.minAvailableMemoryPercent
+      ),
+      rampUpSeconds: loadedInt(auto.rampUpSeconds, LIMITS.rampUpSeconds, d.rampUpSeconds)
+    },
+    maxWaitMinutes: loadedInt(saved.maxWaitMinutes, LIMITS.maxWaitMinutes, defaults.maxWaitMinutes),
+    startGraceSeconds: loadedInt(
+      saved.startGraceSeconds,
+      LIMITS.startGraceSeconds,
+      defaults.startGraceSeconds
+    ),
+    backgroundMaxHoldMinutes: loadedInt(
+      saved.backgroundMaxHoldMinutes,
+      LIMITS.backgroundMaxHoldMinutes,
+      defaults.backgroundMaxHoldMinutes
+    ),
+    disabledBuiltins: Array.isArray(saved.disabledBuiltins)
+      ? [
+          ...new Set(
+            saved.disabledBuiltins.filter(
+              (id): id is string => typeof id === 'string' && TEST_RULE_ID.test(id)
+            )
+          )
+        ].slice(0, LIMITS.maxDisabledBuiltins)
+      : [],
+    customPatterns: loadedPatterns(saved.customPatterns)
+  }
+}
+
+/** Saved rules that still pass cleanPatterns; the others are dropped one by one. */
+function loadedPatterns(value: unknown): TestPattern[] {
+  if (!Array.isArray(value)) return []
+  const kept: TestPattern[] = []
+  const ids = new Set<string>()
+  let n = 0
+  for (const raw of value.slice(0, LIMITS.maxPatterns)) {
+    try {
+      const [pattern] = cleanPatterns([raw], () => `loaded-${++n}`)
+      if (ids.has(pattern.id)) pattern.id = `loaded-${++n}`
+      ids.add(pattern.id)
+      kept.push(pattern)
+    } catch {
+      // Refused today: left out.
+    }
+  }
+  return kept
 }
 
 function ruleIds(value: unknown): string[] {
@@ -65,7 +136,8 @@ function ruleIds(value: unknown): string[] {
 }
 
 /**
- * Validates user rules: prefix or regex, trimmed, at most 300 characters, regexes must compile.
+ * Validates user rules: prefix or regex, trimmed, at most 300 characters, regexes must compile
+ * and pass the ReDoS check (no backreferences, no nested or alternating repetition).
  * Keeps valid unique ids (edits keep their identity) and generates the rest.
  */
 export function cleanPatterns(value: unknown, newId: () => string): TestPattern[] {
@@ -87,6 +159,7 @@ export function cleanPatterns(value: unknown, newId: () => string): TestPattern[
     } catch {
       throw new DomainError('INVALID')
     }
+    if (!isSafeRegex(text)) throw new DomainError('INVALID')
     if (target !== undefined && target !== 'canonical' && target !== 'raw') {
       throw new DomainError('INVALID')
     }

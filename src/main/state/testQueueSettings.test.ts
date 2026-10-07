@@ -139,3 +139,56 @@ describe('applyProjectTestQueuePatch', () => {
     )
   })
 })
+
+describe('withTestQueueDefaults on load', () => {
+  it('clamps saved numbers and replaces broken ones with defaults', () => {
+    const loaded = withTestQueueDefaults({
+      enabled: 'yes',
+      mode: 'turbo',
+      maxConcurrent: 1e9,
+      maxWaitMinutes: 2.4,
+      startGraceSeconds: 'x',
+      backgroundMaxHoldMinutes: -1,
+      auto: { maxConcurrent: 'many', cpuHighPercent: 50, cpuResumePercent: 90, rampUpSeconds: NaN }
+    })
+    const defaults = defaultTestQueueSettings()
+    expect(loaded.enabled).toBe(false)
+    expect(loaded.mode).toBe(defaults.mode)
+    expect(loaded.maxConcurrent).toBe(32)
+    expect(loaded.maxWaitMinutes).toBe(2)
+    expect(Number.isInteger(loaded.maxWaitMinutes)).toBe(true)
+    expect(loaded.startGraceSeconds).toBe(defaults.startGraceSeconds)
+    expect(loaded.backgroundMaxHoldMinutes).toBe(1)
+    expect(loaded.auto).toEqual({
+      ...defaults.auto,
+      maxConcurrent: null,
+      cpuHighPercent: 50,
+      cpuResumePercent: 49
+    })
+  })
+
+  it('drops saved rules that would be refused now, unsafe regexes included', () => {
+    const loaded = withTestQueueDefaults({
+      disabledBuiltins: ['ok-id', '../bad', 'ok-id', 3],
+      customPatterns: [
+        { id: 'a', kind: 'regex', pattern: '^pnpm e2e' },
+        { id: 'b', kind: 'regex', pattern: '(a+)+$' },
+        { id: 'c', kind: 'regex', pattern: '(' },
+        { id: 'a', kind: 'prefix', pattern: 'make test' },
+        'junk'
+      ]
+    })
+    expect(loaded.disabledBuiltins).toEqual(['ok-id'])
+    expect(loaded.customPatterns.map((p) => p.pattern)).toEqual(['^pnpm e2e', 'make test'])
+    expect(new Set(loaded.customPatterns.map((p) => p.id)).size).toBe(2)
+  })
+})
+
+describe('cleanPatterns ReDoS check', () => {
+  it('refuses regexes with nested repetition, repeated alternation or backreferences', () => {
+    for (const pattern of ['(a+)+', '(x|xy)*', '(a)\\1']) {
+      expect(() => cleanPatterns([{ kind: 'regex', pattern }], newId)).toThrow('INVALID')
+    }
+    expect(cleanPatterns([{ kind: 'regex', pattern: '^(npm|pnpm) e2e' }], newId)).toHaveLength(1)
+  })
+})

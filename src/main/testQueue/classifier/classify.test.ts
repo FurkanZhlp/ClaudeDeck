@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { ProjectTestQueue, TestPattern } from '../../../shared/types'
 import { TEST_RULE_ID } from '../../../shared/testQueueLimits'
 import { BUILTIN_GROUPS, BUILTIN_PATTERNS, EXCLUSIONS, builtinPatternList } from './builtinPatterns'
-import { classify, fingerprint, MAX_CLASSIFY_INPUT, type ClassifyOptions } from './classify'
+import {
+  classify,
+  fingerprint,
+  MAX_CLASSIFY_INPUT,
+  MAX_REGEX_INPUT,
+  type ClassifyOptions
+} from './classify'
 
 const defaults: ClassifyOptions = { disabledBuiltins: [], customPatterns: [] }
 const run = (command: string, opts: Partial<ClassifyOptions> = {}): ReturnType<typeof classify> =>
@@ -407,6 +413,18 @@ describe('classify: options', () => {
       ruleId: 'p1',
       source: 'project'
     })
+  })
+
+  it('never runs unsafe saved regexes and tests at most 2 KB of input', () => {
+    const unsafe = [custom({ kind: 'regex', pattern: '(a+)+$', target: 'raw' })]
+    const started = Date.now()
+    expect(run(`${'a'.repeat(5000)}!`, { customPatterns: unsafe }).isTest).toBe(false)
+    expect(Date.now() - started).toBeLessThan(1000)
+    const tail = [custom({ kind: 'regex', pattern: 'e2e-marker', target: 'raw' })]
+    expect(
+      run(`echo ${'x'.repeat(MAX_REGEX_INPUT)} e2e-marker`, { customPatterns: tail }).isTest
+    ).toBe(false)
+    expect(run('echo e2e-marker', { customPatterns: tail }).isTest).toBe(true)
   })
 
   it('prefers built-ins over custom rules', () => {
