@@ -15,6 +15,7 @@ import {
   cloneCopy,
   copyRunner,
   nodeCopy,
+  renameWithRetry,
   renameWithRetryAsync,
   retrySync,
   RETRY_DELAYS_MS,
@@ -82,6 +83,21 @@ describe('rmWithRetry and friends (Windows)', () => {
     expect(rm).toHaveBeenCalledTimes(1)
   })
 
+  it('retries a sync rename on Windows only', () => {
+    const rename = flaky('EBUSY', 1)
+    const sleep = vi.fn()
+    renameWithRetry('win32', { rename, sleep })('a', 'b')
+    expect(rename).toHaveBeenCalledTimes(2)
+    expect(rename).toHaveBeenLastCalledWith('a', 'b')
+    expect(sleep).toHaveBeenCalledWith(RETRY_DELAYS_MS[0])
+
+    const posixRename = flaky('EBUSY', 1)
+    expect(() => renameWithRetry('darwin', { rename: posixRename, sleep })('a', 'b')).toThrow(
+      'EBUSY'
+    )
+    expect(posixRename).toHaveBeenCalledTimes(1)
+  })
+
   it('has async variants', async () => {
     let calls = 0
     const rename = vi.fn(async () => {
@@ -115,6 +131,8 @@ describe('rmWithRetry and friends (Windows)', () => {
     writeFileSync(join(dir, 'a'), 'x')
     await renameWithRetryAsync('win32')(join(dir, 'a'), join(dir, 'b'))
     expect(readFileSync(join(dir, 'b'), 'utf8')).toBe('x')
+    renameWithRetry('win32')(join(dir, 'b'), join(dir, 'c'))
+    expect(readFileSync(join(dir, 'c'), 'utf8')).toBe('x')
     rmWithRetry('win32')(dir, { recursive: true, force: true })
     expect(existsSync(dir)).toBe(false)
   })

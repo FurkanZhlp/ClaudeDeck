@@ -9,8 +9,10 @@ import { JsonStore } from '../state/jsonStore'
 import { emptyState, Repository } from '../state/repository'
 import type { SessionScope } from './sessionTokens'
 import {
+  blockedRoots,
   createTools,
   findProjectByPath,
+  resolveProjectFolder,
   type ConfirmRequest,
   type ToolResult,
   type Tools
@@ -300,5 +302,89 @@ describe('MCP tools: open_session', () => {
     )
     expect(repo.get().sessions).toHaveLength(0)
     expect(confirm).not.toHaveBeenCalled()
+  })
+})
+
+describe('project folders on Windows', () => {
+  const env = { SystemRoot: 'D:\\WINNT', ProgramFiles: 'D:\\Apps', ProgramData: 'D:\\Data' }
+  const realpath = vi.fn((path: string) => path)
+  const resolveWin = (path: string): string =>
+    resolveProjectFolder(path, {
+      os: 'win32',
+      env,
+      realpath,
+      isDirectory: () => true,
+      home: 'C:\\Users\\Me'
+    })
+  const reason = (path: string): string | undefined => {
+    try {
+      resolveWin(path)
+      return undefined
+    } catch (error) {
+      return (error as Error).message
+    }
+  }
+
+  beforeEach(() => realpath.mockClear())
+
+  it('derives system folders from the env with the usual locations as fallback', () => {
+    const roots = blockedRoots('win32', { systemroot: 'D:\\WINNT' })
+    expect(roots).toEqual(
+      expect.arrayContaining([
+        'D:\\WINNT',
+        'C:\\Windows',
+        'C:\\Program Files',
+        'C:\\Program Files (x86)',
+        'C:\\ProgramData'
+      ])
+    )
+    expect(roots.filter((r) => r.toLowerCase() === 'c:\\windows')).toHaveLength(1)
+    expect(blockedRoots('win32', {})).toHaveLength(4)
+  })
+
+  it.each([
+    'C:\\',
+    'd:/',
+    'C:\\Users\\Me',
+    'c:/users/me/',
+    'C:\\Windows\\System32',
+    'c:\\windows',
+    'C:\\Program Files\\App',
+    'C:\\PROGRAM FILES (X86)\\App',
+    'C:\\ProgramData\\x',
+    'D:\\WINNT\\Temp',
+    'd:\\apps\\tool',
+    'D:\\data'
+  ])('refuses %s', (path) => expect(reason(path)).toBe('Path not allowed'))
+
+  it.each([
+    '\\\\server\\share\\code',
+    '//server/share',
+    '\\\\wsl$\\Ubuntu\\home',
+    '\\\\?\\C:\\code'
+  ])('refuses %s before resolving it', (path) => {
+    expect(reason(path)).toBe('Path not allowed')
+    expect(realpath).not.toHaveBeenCalled()
+  })
+
+  it('refuses a local path that resolves onto a share', () => {
+    realpath.mockImplementationOnce(() => '\\\\server\\share\\x')
+    expect(reason('Z:\\x')).toBe('Path not allowed')
+  })
+
+  it('accepts ordinary folders, including ones under the home folder', () => {
+    expect(resolveWin('C:\\Users\\Me\\code\\app')).toBe('C:\\Users\\Me\\code\\app')
+    expect(resolveWin('E:\\Work\\Windows Tools')).toBe('E:\\Work\\Windows Tools')
+    expect(resolveWin('C:\\Windows2\\x')).toBe('C:\\Windows2\\x')
+  })
+
+  it('finds a project by a path in any case or separator', () => {
+    const projects = [
+      { id: 'a', name: 'a', accountId: 'x', path: 'C:\\code\\mono' },
+      { id: 'b', name: 'b', accountId: 'x', path: 'C:\\code\\mono\\web' }
+    ]
+    expect(findProjectByPath(projects, 'c:/CODE/mono/web/src', 'win32')?.id).toBe('b')
+    expect(findProjectByPath(projects, 'C:\\code\\MONO\\api', 'win32')?.id).toBe('a')
+    expect(findProjectByPath(projects, 'C:\\code\\monorepo', 'win32')).toBeUndefined()
   })
 })

@@ -1,5 +1,6 @@
 import { lstatSync, realpathSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import * as nodePath from 'node:path'
+import type { PlatformPath } from 'node:path'
 
 const MAX_ENCODED_LENGTH = 200
 
@@ -15,7 +16,8 @@ function javaHash(text: string): number {
 
 /**
  * Claude Code names per-project folders after the memory key with every non-alphanumeric as
- * "-"; names longer than 200 chars are cut and suffixed with a hash of the raw key.
+ * "-"; names longer than 200 chars are cut and suffixed with a hash of the raw key. On Windows
+ * `C:\Users\x\p` becomes `C--Users-x-p` (drive letter case kept as given).
  */
 export function encodeProjectKey(keyPath: string): string {
   const encoded = keyPath.replace(/[^a-zA-Z0-9]/g, '-')
@@ -26,38 +28,53 @@ export function encodeProjectKey(keyPath: string): string {
 /** Kept for existing callers; same as encodeProjectKey. */
 export const encodeProjectPath = encodeProjectKey
 
-function realpathOr(path: string): string {
-  try {
-    return realpathSync(path)
-  } catch {
-    return resolve(path)
-  }
+/** File system access of resolveMemoryKey; tests pass `path.win32` and fakes. */
+export interface MemoryKeyDeps {
+  path?: PlatformPath
+  realpath?: (path: string) => string
+  /** True when `dir` holds a `.git` entry (directory or file). */
+  hasGitEntry?: (dir: string) => boolean
 }
 
-function hasGitEntry(dir: string): boolean {
-  try {
-    lstatSync(join(dir, '.git'))
-    return true
-  } catch {
-    return false
+const defaultHasGitEntry =
+  (p: PlatformPath) =>
+  (dir: string): boolean => {
+    try {
+      lstatSync(p.join(dir, '.git'))
+      return true
+    } catch {
+      return false
+    }
   }
-}
 
 /**
  * The path Claude Code keys auto memory by: the enclosing git root (a `.git` directory or file,
- * so worktrees and submodules count), otherwise the real project path itself.
+ * so worktrees and submodules count), otherwise the real project path itself. The walk stops at
+ * the file system root (`/`, a drive root `C:\` or a share root).
  */
-export function resolveMemoryKey(projectPath: string): string {
-  const real = realpathOr(projectPath)
-  for (let dir = real; ; dir = dirname(dir)) {
+export function resolveMemoryKey(projectPath: string, deps: MemoryKeyDeps = {}): string {
+  const p = deps.path ?? nodePath
+  const realpath = deps.realpath ?? realpathSync
+  const hasGitEntry = deps.hasGitEntry ?? defaultHasGitEntry(p)
+  let real: string
+  try {
+    real = realpath(projectPath)
+  } catch {
+    real = p.resolve(projectPath)
+  }
+  for (let dir = real; ; dir = p.dirname(dir)) {
     if (hasGitEntry(dir)) return dir
-    if (dirname(dir) === dir) return real
+    if (p.dirname(dir) === dir) return real
   }
 }
 
 /** Memory folder for an already resolved key under an account's config dir. */
-export function memoryDirForKey(configDir: string, keyPath: string): string {
-  return join(configDir, 'projects', encodeProjectKey(keyPath), 'memory')
+export function memoryDirForKey(
+  configDir: string,
+  keyPath: string,
+  p: PlatformPath = nodePath
+): string {
+  return p.join(configDir, 'projects', encodeProjectKey(keyPath), 'memory')
 }
 
 /** Folder where Claude Code keeps auto memory for a project under an account's config dir. */

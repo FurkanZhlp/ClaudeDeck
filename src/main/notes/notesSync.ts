@@ -1,4 +1,7 @@
 import { lstatSync } from 'node:fs'
+import * as nodePath from 'node:path'
+import type { PlatformPath } from 'node:path'
+import { pathKey, samePath } from '../platform/paths'
 import type { Repository } from '../state/repository'
 import { memoryDirForKey, resolveMemoryKey } from './memoryPath'
 import { relocateMemory, type RelocateMode } from './notesStore'
@@ -13,6 +16,13 @@ export interface NotesSyncDeps {
   /** True while any terminal of the project is alive; its Claude may still write memory. */
   isProjectRunning: (projectId: string) => boolean
   now?: () => number
+  /** Path flavour for comparisons (case-insensitive on Windows); tests pass `path.win32`. */
+  path?: PlatformPath
+  /** Memory key of a project folder (tests). */
+  resolveKey?: (projectPath: string) => string
+  /** Moves or copies a memory folder (tests). */
+  relocate?: typeof relocateMemory
+  isDirectory?: (path: string) => boolean
 }
 
 export type RelocateOutcome = 'none' | 'deferred' | 'moved' | 'copied'
@@ -37,8 +47,15 @@ function isDirectory(path: string): boolean {
 export function createNotesSync({
   repo,
   isProjectRunning,
-  now = Date.now
+  now = Date.now,
+  path: p = nodePath,
+  resolveKey = resolveMemoryKey,
+  relocate = relocateMemory,
+  isDirectory: isDir = isDirectory
 }: NotesSyncDeps): NotesSync {
+  const memDir = (configDir: string, key: string): string => memoryDirForKey(configDir, key, p)
+  const same = (a: string, b: string): boolean => samePath(a, b, p)
+
   // Location a running project had when it was first moved; applied once it stops.
   const pending = new Map<string, ProjectLocation>()
 
@@ -49,7 +66,7 @@ export function createNotesSync({
 
   const dirOf = (projectId: string): string => {
     const { configDir, path } = current(projectId)
-    return memoryDirForKey(configDir, resolveMemoryKey(path))
+    return memDir(configDir, resolveKey(path))
   }
 
   /** Projects other than `exceptId` whose memory lives under `configDir` with this key. */
@@ -60,9 +77,11 @@ export function createNotesSync({
     keyOf: (path: string) => string
   ): boolean => {
     const { accounts, projects } = repo.get()
-    const accountIds = new Set(accounts.filter((a) => a.configDir === configDir).map((a) => a.id))
+    const accountIds = new Set(
+      accounts.filter((a) => same(a.configDir, configDir)).map((a) => a.id)
+    )
     return projects.some(
-      (p) => p.id !== exceptId && accountIds.has(p.accountId) && keyOf(p.path) === key
+      (pr) => pr.id !== exceptId && accountIds.has(pr.accountId) && same(keyOf(pr.path), key)
     )
   }
 
@@ -71,7 +90,7 @@ export function createNotesSync({
     return (path) => {
       let key = cache.get(path)
       if (key === undefined) {
-        key = resolveMemoryKey(path)
+        key = resolveKey(path)
         cache.set(path, key)
       }
       return key
@@ -85,14 +104,14 @@ export function createNotesSync({
   ): RelocateOutcome => {
     const keyOf = memoKeys()
     const beforeKey = keyOf(before.path)
-    const fromDir = memoryDirForKey(before.configDir, beforeKey)
-    const toDir = memoryDirForKey(after.configDir, keyOf(after.path))
-    if (fromDir === toDir) return 'none'
+    const fromDir = memDir(before.configDir, beforeKey)
+    const toDir = memDir(after.configDir, keyOf(after.path))
+    if (same(fromDir, toDir)) return 'none'
     // Another project still reads the old folder: leave it intact and copy.
     const mode: RelocateMode = keyInUse(before.configDir, beforeKey, projectId, keyOf)
       ? 'copy'
       : 'move'
-    const result = relocateMemory(fromDir, toDir, now(), mode)
+    const result = relocate(fromDir, toDir, now(), mode)
     if (result.moved === 0) return 'none'
     console.info('[notes] memory relocated', { mode, ...result })
     return mode === 'copy' ? 'copied' : 'moved'
@@ -102,18 +121,20 @@ export function createNotesSync({
     const target = current(projectId)
     const keyOf = memoKeys()
     const key = keyOf(target.path)
-    const toDir = memoryDirForKey(target.configDir, key)
-    const seen = new Set([target.configDir])
+    const toDir = memDir(target.configDir, key)
+    // Spellings of one config folder (`C:\` vs `c:/` on Windows) count as one account folder.
+    const folderKey = (dir: string): string => pathKey(p.normalize(dir), p)
+    const seen = new Set([folderKey(target.configDir)])
     let changed = false
     for (const account of repo.get().accounts) {
-      if (seen.has(account.configDir)) continue
-      seen.add(account.configDir)
-      const fromDir = memoryDirForKey(account.configDir, key)
-      if (!isDirectory(fromDir)) continue
+      if (seen.has(folderKey(account.configDir))) continue
+      seen.add(folderKey(account.configDir))
+      const fromDir = memDir(account.configDir, key)
+      if (!isDir(fromDir)) continue
       // Notes still belong to a project of that account; never take them away.
       if (keyInUse(account.configDir, key, projectId, keyOf)) continue
       try {
-        const result = relocateMemory(fromDir, toDir, now())
+        const result = relocate(fromDir, toDir, now())
         if (result.moved > 0) {
           console.info('[notes] merged notes from another account', result)
           changed = true

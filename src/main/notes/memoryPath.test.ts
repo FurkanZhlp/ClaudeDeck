@@ -1,8 +1,14 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { encodeProjectKey, encodeProjectPath, memoryDir, resolveMemoryKey } from './memoryPath'
+import {
+  encodeProjectKey,
+  encodeProjectPath,
+  memoryDir,
+  memoryDirForKey,
+  resolveMemoryKey
+} from './memoryPath'
 
 const LONG =
   '/private/tmp/claude-501/-Volumes-Furkan-SSD-Projects-Furkan-CoreTechs/b20d8270-03af-4e10-9ba1-e05594e495e8/scratchpad/gitroot/long/segment-number-01/segment-number-02/segment-number-03/segment-number-04/segment-number-05/segment-number-06/segment-number-07/segment-number-08/segment-number-09'
@@ -80,6 +86,47 @@ describe('resolveMemoryKey', () => {
     mkdirSync(join(repo, 'web'))
     expect(memoryDir('/cfg', join(repo, 'web'))).toBe(
       join('/cfg', 'projects', encodeProjectKey(repo), 'memory')
+    )
+  })
+})
+
+describe('memory paths on Windows', () => {
+  const realpath = (path: string): string => win32.resolve(path)
+
+  it('encodes drive-letter paths like C:\\Users\\x\\p -> C--Users-x-p', () => {
+    expect(encodeProjectKey(win32.join('C:\\', 'Users', 'x', 'p'))).toBe('C--Users-x-p')
+    expect(encodeProjectKey('D:\\Work\\Boen Proje\\app.v2')).toBe('D--Work-Boen-Proje-app-v2')
+  })
+
+  it('finds the git root through backslashes and forward slashes', () => {
+    const hasGitEntry = (dir: string): boolean => dir === 'C:\\Users\\x\\repo'
+    const deps = { path: win32, realpath, hasGitEntry }
+    expect(resolveMemoryKey('C:\\Users\\x\\repo\\packages\\web', deps)).toBe('C:\\Users\\x\\repo')
+    expect(resolveMemoryKey('C:/Users/x/repo/packages', deps)).toBe('C:\\Users\\x\\repo')
+  })
+
+  it('stops at the drive root and falls back to the real path', () => {
+    const visited: string[] = []
+    const hasGitEntry = (dir: string): boolean => {
+      visited.push(dir)
+      return false
+    }
+    const key = resolveMemoryKey('D:\\code\\app', { path: win32, realpath, hasGitEntry })
+    expect(key).toBe('D:\\code\\app')
+    expect(visited).toEqual(['D:\\code\\app', 'D:\\code', 'D:\\'])
+  })
+
+  it('accepts a git root at the drive root and resolves a missing path', () => {
+    const hasGitEntry = (dir: string): boolean => dir === 'E:\\'
+    const missing = (): string => {
+      throw new Error('ENOENT')
+    }
+    expect(resolveMemoryKey('E:/x/y', { path: win32, realpath: missing, hasGitEntry })).toBe('E:\\')
+  })
+
+  it('joins the memory folder with backslashes', () => {
+    expect(memoryDirForKey('C:\\Users\\x\\.claude', 'C:\\Users\\x\\p', win32)).toBe(
+      'C:\\Users\\x\\.claude\\projects\\C--Users-x-p\\memory'
     )
   })
 })

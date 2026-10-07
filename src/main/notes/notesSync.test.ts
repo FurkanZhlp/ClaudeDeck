@@ -9,8 +9,8 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { join, win32 } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, AppState, Project } from '../../shared/types'
 import { memoryDirForKey } from './memoryPath'
 import { createNotesSync, type NotesSync } from './notesSync'
@@ -182,5 +182,85 @@ describe('notesSync.prepare', () => {
     const repo = repoDir('app')
     project('p', 'a', repo)
     expect(sync.prepare('p')).toBe(false)
+  })
+})
+
+describe('notesSync on Windows paths', () => {
+  const winState = (): { accounts: Account[]; projects: Project[] } => ({
+    accounts: [
+      { id: 'a', name: 'a', color: '#000', configDir: 'C:\\Users\\me\\AppData\\deck\\a' },
+      // Same folder as `a`, spelled differently.
+      { id: 'a2', name: 'a2', color: '#000', configDir: 'c:/users/me/appdata/deck/a' },
+      { id: 'b', name: 'b', color: '#000', configDir: 'C:\\Users\\me\\AppData\\deck\\b' }
+    ],
+    projects: []
+  })
+
+  const winSync = (
+    s: { accounts: Account[]; projects: Project[] },
+    isDirectory: (path: string) => boolean = () => false
+  ): { sync: NotesSync; relocate: ReturnType<typeof vi.fn> } => {
+    const relocate = vi.fn(() => ({ moved: 1, renamed: 0 }))
+    const find = <T extends { id: string }>(list: T[], id: string): T =>
+      list.find((x) => x.id === id)!
+    const sync = createNotesSync({
+      repo: {
+        get: () => s as unknown as AppState,
+        project: (id) => find(s.projects, id),
+        account: (id) => find(s.accounts, id)
+      },
+      isProjectRunning: () => false,
+      now: () => 1,
+      path: win32,
+      resolveKey: (path) => win32.resolve(path),
+      relocate,
+      isDirectory
+    })
+    return { sync, relocate }
+  }
+
+  it('builds the memory folder like Claude does (C--Users-...)', () => {
+    const s = winState()
+    s.projects.push({ id: 'p', name: 'p', accountId: 'a', path: 'C:\\Users\\me\\p' })
+    expect(winSync(s).sync.dirOf('p')).toBe(
+      'C:\\Users\\me\\AppData\\deck\\a\\projects\\C--Users-me-p\\memory'
+    )
+  })
+
+  it('treats drive letter case and separators as the same location', () => {
+    const s = winState()
+    const { sync, relocate } = winSync(s)
+    const outcome = sync.relocate(
+      { configDir: 'C:\\Users\\me\\AppData\\deck\\a', path: 'C:\\code\\app' },
+      { configDir: 'c:/users/me/appdata/deck/a', path: 'c:\\code\\app' },
+      'p'
+    )
+    expect(outcome).toBe('none')
+    expect(relocate).not.toHaveBeenCalled()
+  })
+
+  it('copies when a project of the same folder, spelled differently, shares the key', () => {
+    const s = winState()
+    s.projects.push({ id: 'p', name: 'p', accountId: 'b', path: 'C:\\code\\app' })
+    s.projects.push({ id: 'q', name: 'q', accountId: 'a2', path: 'c:\\CODE\\app' })
+    const { sync, relocate } = winSync(s)
+    const outcome = sync.relocate(
+      { configDir: 'C:\\Users\\me\\AppData\\deck\\a', path: 'C:\\code\\app' },
+      { configDir: 'C:\\Users\\me\\AppData\\deck\\b', path: 'C:\\code\\app' },
+      'p'
+    )
+    expect(outcome).toBe('copied')
+    expect(relocate).toHaveBeenCalledWith(expect.any(String), expect.any(String), 1, 'copy')
+  })
+
+  it('merges orphans once per config folder, whatever its spelling', () => {
+    const s = winState()
+    s.projects.push({ id: 'p', name: 'p', accountId: 'b', path: 'C:\\code\\app' })
+    const { sync, relocate } = winSync(s, () => true)
+    expect(sync.prepare('p')).toBe(true)
+    expect(relocate).toHaveBeenCalledTimes(1)
+    expect(relocate.mock.calls[0][0]).toBe(
+      'C:\\Users\\me\\AppData\\deck\\a\\projects\\C--code-app\\memory'
+    )
   })
 })

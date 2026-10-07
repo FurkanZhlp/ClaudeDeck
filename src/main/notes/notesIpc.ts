@@ -3,11 +3,14 @@ import { shell } from 'electron'
 import { DomainError } from '../../shared/errors'
 import { IPC } from '../../shared/ipc'
 import { isText, type IpcTools } from '../ipcUtil'
+import { samePath } from '../platform/paths'
 import type { Repository } from '../state/repository'
 import { existingNotePath, isSafeMemoryDir, listNotes, readNote } from './notesStore'
 import { createNotesSync, type ProjectLocation } from './notesSync'
 
 const CHANGE_DEBOUNCE_MS = 150
+/** Only Windows locks watched folders; elsewhere watchers stay open during relocations. */
+const WATCH_LOCKS_FOLDERS = process.platform === 'win32'
 
 interface Deps {
   handle: IpcTools['handle']
@@ -64,9 +67,13 @@ export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps)
     }, CHANGE_DEBOUNCE_MS)
   }
 
-  const stop = (entry: Watch): void => {
+  const closeWatcher = (entry: Watch): void => {
     entry.watcher?.close()
     entry.watcher = null
+  }
+
+  const stop = (entry: Watch): void => {
+    closeWatcher(entry)
     if (entry.timer) clearTimeout(entry.timer)
     entry.timer = null
   }
@@ -95,7 +102,7 @@ export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps)
     const entry = watches.get(projectId)
     if (!entry) return
     const dir = sync.dirOf(projectId)
-    if (dir !== entry.dir) {
+    if (!samePath(dir, entry.dir)) {
       entry.dir = dir
       start(projectId, entry)
       changed = true
@@ -103,9 +110,36 @@ export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps)
     if (changed) notify(projectId, entry)
   }
 
+  /**
+   * Runs a relocation with every watcher closed: Windows keeps a handle on a watched folder, so
+   * it could not be renamed or removed. Reopens them afterwards on each project's current folder
+   * (a moved folder is not recreated empty at its old place).
+   */
+  const whileUnwatched = <T>(op: () => T): T => {
+    if (!WATCH_LOCKS_FOLDERS) return op()
+    const open = [...watches].filter(([, entry]) => entry.watcher)
+    open.forEach(([, entry]) => closeWatcher(entry))
+    try {
+      return op()
+    } finally {
+      for (const [projectId, entry] of open) {
+        try {
+          const dir = sync.dirOf(projectId)
+          if (!samePath(dir, entry.dir)) {
+            entry.dir = dir
+            notify(projectId, entry)
+          }
+        } catch (error) {
+          console.warn('[notes] could not resolve memory folder', error)
+        }
+        start(projectId, entry)
+      }
+    }
+  }
+
   const prepare = (projectId: string): boolean => {
     try {
-      return sync.prepare(projectId)
+      return whileUnwatched(() => sync.prepare(projectId))
     } catch (error) {
       console.warn('[notes] could not prepare project memory', error)
       return false
@@ -137,7 +171,7 @@ export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps)
     const existing = watches.get(projectId)
     if (existing) {
       existing.refs++
-      if (existing.dir !== dir || !existing.watcher) {
+      if (!samePath(existing.dir, dir) || !existing.watcher) {
         existing.dir = dir
         start(projectId, existing)
       }
@@ -165,7 +199,7 @@ export function registerNotesIpc({ handle, repo, send, isProjectRunning }: Deps)
 
   return {
     relocateForProjectChange(before, after, projectId) {
-      const outcome = sync.relocate(before, after, projectId)
+      const outcome = whileUnwatched(() => sync.relocate(before, after, projectId))
       retarget(projectId, outcome !== 'none')
     },
     prepareProjectMemory(projectId) {

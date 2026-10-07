@@ -1,10 +1,13 @@
 import { realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, resolve, sep } from 'node:path'
+import * as nodePath from 'node:path'
+import { isAbsolute, type PlatformPath } from 'node:path'
 import { z } from 'zod'
 import { DomainError } from '../../shared/errors'
 import type { NoteFile, Project, SessionKind } from '../../shared/types'
 import { memoryDir } from '../notes/memoryPath'
+import type { OsName } from '../platform/types'
+import { isRootPath, isWindowsUncPath, isWithin, samePath } from '../platform/paths'
 import type { Repository } from '../state/repository'
 import type { McpScope, McpScopeKind, SessionScope } from './sessionTokens'
 
@@ -77,7 +80,7 @@ const CONFIRM_TIMEOUT_MS = 5 * 60 * 1000
 const DEFAULT_TITLES: Record<SessionKind, string> = { claude: 'Claude', shell: 'Terminal' }
 const DECLINED_TEXT = 'The user declined.'
 // System locations a project folder must never point into (checked after realpath).
-const BLOCKED_ROOTS = [
+const POSIX_BLOCKED_ROOTS = [
   '/System',
   '/Library',
   '/bin',
@@ -86,6 +89,15 @@ const BLOCKED_ROOTS = [
   '/etc',
   '/private/etc',
   '/Applications'
+]
+/** Windows system folders: env variable that names each, and its usual location. */
+const WINDOWS_BLOCKED_ROOTS: readonly (readonly [string, string])[] = [
+  ['SystemRoot', 'C:\\Windows'],
+  ['windir', 'C:\\Windows'],
+  ['ProgramFiles', 'C:\\Program Files'],
+  ['ProgramFiles(x86)', 'C:\\Program Files (x86)'],
+  ['ProgramW6432', 'C:\\Program Files'],
+  ['ProgramData', 'C:\\ProgramData']
 ]
 
 const id = z.string().trim().min(1).max(200)
@@ -163,39 +175,101 @@ const define = <S extends z.ZodRawShape>(
   run: (args: z.infer<z.ZodObject<S>>, scope: SessionScope) => unknown
 ): Tool => defineTool('session', description, inputSchema, run)
 
+/** Path flavour of an OS: Windows paths are compared case-insensitively. */
+const pathOf = (os: OsName): PlatformPath => (os === 'win32' ? nodePath.win32 : nodePath.posix)
+
+const within = (path: string, root: string, p: PlatformPath): boolean =>
+  p === nodePath.win32
+    ? isWithin(path, root, p)
+    : path === root || path.startsWith(root.endsWith(p.sep) ? root : root + p.sep)
+
 /** Project whose folder equals or contains `path`; the deepest one wins. */
-export function findProjectByPath(projects: Project[], path: string): Project | undefined {
-  const target = resolve(path)
+export function findProjectByPath(
+  projects: Project[],
+  path: string,
+  os: OsName = process.platform
+): Project | undefined {
+  const p = pathOf(os)
+  const target = p.resolve(path)
   let best: Project | undefined
   for (const project of projects) {
-    const root = resolve(project.path)
-    const inside = target === root || target.startsWith(root.endsWith(sep) ? root : root + sep)
-    if (inside && (!best || root.length > resolve(best.path).length)) best = project
+    const root = p.resolve(project.path)
+    if (within(target, root, p) && (!best || root.length > p.resolve(best.path).length)) {
+      best = project
+    }
   }
   return best
 }
 
-const within = (path: string, root: string): boolean =>
-  path === root || path.startsWith(root.endsWith(sep) ? root : root + sep)
+/**
+ * Folders a project may not be or lie in. Windows ones come from the env (case-insensitive
+ * names) with the usual locations as fallback, so a renamed or moved system drive stays covered.
+ */
+export function blockedRoots(os: OsName, env: NodeJS.ProcessEnv = process.env): string[] {
+  if (os !== 'win32') return POSIX_BLOCKED_ROOTS
+  const lookup = (name: string): string | undefined => {
+    const key = Object.keys(env).find((k) => k.toLowerCase() === name.toLowerCase())
+    const value = key ? env[key]?.trim() : undefined
+    return value || undefined
+  }
+  const roots = WINDOWS_BLOCKED_ROOTS.flatMap(([name, fallback]) => [lookup(name), fallback])
+  const unique: string[] = []
+  for (const root of roots) {
+    if (root && !unique.some((r) => samePath(r, root, nodePath.win32))) unique.push(root)
+  }
+  return unique
+}
+
+/** File system access of resolveProjectFolder; tests pass Windows fakes. */
+export interface ProjectFolderDeps {
+  os?: OsName
+  env?: NodeJS.ProcessEnv
+  realpath?: (path: string) => string
+  isDirectory?: (path: string) => boolean
+  home?: string
+}
+
+/**
+ * True when a resolved folder is a file system root, the user's home, or inside a system
+ * location. Windows comparisons ignore case and accept both separators.
+ */
+export function isBlockedProjectFolder(
+  real: string,
+  home: string,
+  os: OsName,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  const p = pathOf(os)
+  return (
+    isRootPath(real, p) ||
+    samePath(real, home, p) ||
+    blockedRoots(os, env).some((root) => within(real, root, p))
+  )
+}
 
 /** Realpath of an existing directory that is safe to use as a project folder. */
-export function resolveProjectFolder(path: string): string {
+export function resolveProjectFolder(path: string, deps: ProjectFolderDeps = {}): string {
+  const os = deps.os ?? process.platform
+  const realpath = deps.realpath ?? realpathSync
+  // Checked before touching the path: resolving a share would reach the network.
+  if (os === 'win32' && isWindowsUncPath(path)) throw new ToolError('Path not allowed')
   let real: string
   try {
-    real = realpathSync(path)
+    real = realpath(path)
   } catch {
     throw new DomainError('PATH_MISSING')
   }
-  if (!statSync(real).isDirectory()) throw new ToolError('Path is not a directory')
-  let home = homedir()
+  // A local path may still resolve onto a share (mapped drive link, junction).
+  if (os === 'win32' && isWindowsUncPath(real)) throw new ToolError('Path not allowed')
+  const isDirectory = deps.isDirectory ?? ((dir: string) => statSync(dir).isDirectory())
+  if (!isDirectory(real)) throw new ToolError('Path is not a directory')
+  let home = deps.home ?? homedir()
   try {
-    home = realpathSync(home)
+    home = realpath(home)
   } catch {
     // Keep the unresolved home dir.
   }
-  if (real === sep || real === home || BLOCKED_ROOTS.some((root) => within(real, root))) {
-    throw new ToolError('Path not allowed')
-  }
+  if (isBlockedProjectFolder(real, home, os, deps.env)) throw new ToolError('Path not allowed')
   return real
 }
 

@@ -78,12 +78,42 @@ describe('note names', () => {
     'a.txt',
     'a\\b.md',
     '/etc/x.md',
-    'a\0.md'
+    'a\0.md',
+    'a:b.md',
+    'what?.md',
+    'star*.md',
+    'pipe|.md',
+    'quote".md',
+    '<tag>.md',
+    'tab\t.md',
+    'line\n.md',
+    'esc\u001b.md',
+    'CON.md',
+    'con.md',
+    'Nul.md',
+    'aux.notes.md',
+    'prn .md',
+    'COM1.md',
+    'lpt9.md',
+    'com¹.md',
+    'CONIN$.md',
+    'a.md.',
+    'a.md '
   ])('rejects %s', (name) => {
     expect(isValidNoteName(name)).toBe(false)
     expect(codeOf(() => readNote(root, name))).toBe('INVALID')
     expect(codeOf(() => writeNote(root, name, 'x'))).toBe('INVALID')
   })
+
+  it.each([
+    'MEMORY.md',
+    'notes v2.md',
+    'console.md',
+    'com10.md',
+    'lpt.md',
+    'çalışma notu.md',
+    'a.b.md'
+  ])('accepts %s', (name) => expect(isValidNoteName(name)).toBe(true))
 
   it('rejects non-strings', () => {
     expect(isValidNoteName(undefined)).toBe(false)

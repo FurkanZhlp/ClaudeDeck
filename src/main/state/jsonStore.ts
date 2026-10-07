@@ -1,5 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { renameWithRetry } from '../platform/fs'
+
+// Windows briefly locks files (antivirus, indexer); retried there, a plain rename elsewhere.
+const renameFile = renameWithRetry(process.platform)
 
 /** Tek JSON dosyası; yazma atomik (geçici dosya + rename). */
 export class JsonStore<T extends object> {
@@ -14,7 +18,7 @@ export class JsonStore<T extends object> {
       return { ...this.defaults(), ...(JSON.parse(readFileSync(this.file, 'utf8')) as Partial<T>) }
     } catch {
       // Bozuk dosyanın üstüne yazmadan önce yedekle.
-      renameSync(this.file, `${this.file}.corrupt-${Date.now()}`)
+      renameFile(this.file, `${this.file}.corrupt-${Date.now()}`)
       return this.defaults()
     }
   }
@@ -23,6 +27,6 @@ export class JsonStore<T extends object> {
     mkdirSync(dirname(this.file), { recursive: true })
     const tmp = `${this.file}.tmp`
     writeFileSync(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 })
-    renameSync(tmp, this.file)
+    renameFile(tmp, this.file)
   }
 }

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { rmSync, type RmOptions } from 'node:fs'
+import { renameSync, rmSync, type RmOptions } from 'node:fs'
 import { cp, lstat, realpath, rename, rm, stat, symlink } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -124,6 +124,7 @@ export async function retryAsync<T>(
 }
 
 export interface SyncFsDeps {
+  rename?: (from: string, to: string) => void
   rm?: (path: string, options?: RmOptions) => void
   sleep?: (ms: number) => void
 }
@@ -142,6 +143,19 @@ export function rmWithRetry(
   const op = deps.rm ?? rmSync
   if (os !== 'win32') return (path, options) => op(path, options)
   return (path, options) => retrySync(() => op(path, options), deps.sleep)
+}
+
+/**
+ * Rename for atomic writes (temp file + rename) and folder moves. POSIX rename is atomic and not
+ * blocked by open handles; Windows retries EPERM/EBUSY/EACCES.
+ */
+export function renameWithRetry(
+  os: OsName,
+  deps: SyncFsDeps = {}
+): (from: string, to: string) => void {
+  const op = deps.rename ?? renameSync
+  if (os !== 'win32') return (from, to) => op(from, to)
+  return (from, to) => retrySync(() => op(from, to), deps.sleep)
 }
 
 /**

@@ -1,6 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MCP_TOKEN_ENV } from './sessionTokens'
+import { renameWithRetry } from '../platform/fs'
+
+// Windows briefly locks files (antivirus, indexer); retried there, a plain rename elsewhere.
+const renameFile = renameWithRetry(process.platform)
 
 export const MCP_SERVER_NAME = 'claudedeck'
 
@@ -33,7 +37,7 @@ function writeConfig(configDir: string, file: string, json: Json): void {
   mkdirSync(configDir, { recursive: true })
   const tmp = `${file}.claudedeck-tmp`
   writeFileSync(tmp, JSON.stringify(json, null, 2), { encoding: 'utf8', mode: 0o600 })
-  renameSync(tmp, file)
+  renameFile(tmp, file)
 }
 
 /**

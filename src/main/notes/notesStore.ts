@@ -6,7 +6,6 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
-  renameSync,
   rmdirSync,
   statSync,
   unlinkSync,
@@ -16,9 +15,20 @@ import {
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { DomainError } from '../../shared/errors'
 import type { NoteFile } from '../../shared/types'
+import { renameWithRetry } from '../platform/fs'
+import { samePath } from '../platform/paths'
 
 const INDEX_NOTE = 'MEMORY.md'
 const NOTE_EXT = '.md'
+/** Characters Windows refuses in file names, plus both separators. */
+const FORBIDDEN_CHARS = /[<>:"|?*/\\]/
+/** Codes below this are control characters, also refused by Windows. */
+const FIRST_PRINTABLE = 0x20
+/** Device names Windows reserves, with or without an extension (`nul.md` is `NUL`). */
+const RESERVED_STEM = /^(con|prn|aux|nul|conin\$|conout\$|(com|lpt)[0-9¹²³])$/i
+
+// Windows keeps handles open briefly (antivirus, indexer); retried there, plain elsewhere.
+const renameFile = renameWithRetry(process.platform)
 
 function lstatOrNull(path: string): Stats | null {
   try {
@@ -28,14 +38,26 @@ function lstatOrNull(path: string): Stats | null {
   }
 }
 
-/** A note name is a visible, plain basename ending in ".md"; anything else is rejected. */
+const hasControlChar = (name: string): boolean =>
+  [...name].some((char) => char.charCodeAt(0) < FIRST_PRINTABLE)
+
+/**
+ * A note name is a visible, plain basename ending in ".md" that is also a valid Windows file
+ * name: no `<>:"|?*`, no control characters, no reserved device name (`CON`, `NUL.md`,
+ * `com1.notes.md`), no trailing dot or space. Applied on every OS so notes stay portable when a
+ * project moves between machines.
+ */
 export function isValidNoteName(name: unknown): name is string {
+  if (typeof name !== 'string') return false
+  const stem = name.split('.', 1)[0].trimEnd()
   return (
-    typeof name === 'string' &&
     name.length > NOTE_EXT.length &&
     name.endsWith(NOTE_EXT) &&
     !name.startsWith('.') &&
-    !/[/\\\0]/.test(name) &&
+    !/[. ]$/.test(name) &&
+    !FORBIDDEN_CHARS.test(name) &&
+    !hasControlChar(name) &&
+    !RESERVED_STEM.test(stem) &&
     basename(name) === name
   )
 }
@@ -134,7 +156,7 @@ export function writeNote(dir: string, name: string, content: string): void {
   const tmp = join(dir, `.${name}.${randomUUID()}.tmp`)
   try {
     writeFileSync(tmp, content, 'utf8')
-    renameSync(tmp, path)
+    renameFile(tmp, path)
   } catch (error) {
     try {
       unlinkSync(tmp)
@@ -148,7 +170,7 @@ export function writeNote(dir: string, name: string, content: string): void {
 /** rename, falling back to copy + unlink for files when crossing volumes. */
 function moveEntry(from: string, to: string): void {
   try {
-    renameSync(from, to)
+    renameFile(from, to)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EXDEV' || !statSync(from).isFile()) throw error
     copyFileSync(from, to)
@@ -188,7 +210,7 @@ export function relocateMemory(
   const result = { moved: 0, renamed: 0 }
   const from = resolve(fromDir)
   const to = resolve(toDir)
-  if (from === to) return result
+  if (samePath(from, to)) return result
   const fromStats = lstatOrNull(from)
   // A symlinked memory folder is the user's own setup; never follow or move it.
   if (!fromStats?.isDirectory()) return result
@@ -200,7 +222,7 @@ export function relocateMemory(
     const count = readdirSync(from).length
     mkdirSync(dirname(to), { recursive: true })
     try {
-      renameSync(from, to)
+      renameFile(from, to)
       result.moved = count
       return result
     } catch (error) {

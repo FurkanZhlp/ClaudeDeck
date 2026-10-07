@@ -79,3 +79,17 @@ export function isWithin(path: string, root: string, p: PlatformPath = nodePath)
 export function splitPath(value: string, p: PlatformPath = nodePath): string[] {
   return value.split(isWindowsPath(p) ? /[\\/]+/ : /\/+/).filter(Boolean)
 }
+
+/**
+ * Windows path that starts with two separators: UNC shares (`\\server\share`, `\\wsl$`) and
+ * device paths (`\\?\`, `\\.\`). Touching one can reach the network, so v1 refuses them.
+ */
+export function isWindowsUncPath(value: string): boolean {
+  return /^[\\/]{2}/.test(value)
+}
+
+/** True when `value` is a file system root (`/`, `C:\`, `\\server\share\`). */
+export function isRootPath(value: string, p: PlatformPath = nodePath): boolean {
+  const normalized = p.normalize(value)
+  return p.parse(normalized).root === normalized
+}

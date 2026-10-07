@@ -1,6 +1,8 @@
 import { posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  isRootPath,
+  isWindowsUncPath,
   isWithin,
   pathKey,
   permissionRulePath,
@@ -81,5 +83,34 @@ describe('splitPath', () => {
     expect(splitPath('claudedeck\\backups/x', win32)).toEqual(['claudedeck', 'backups', 'x'])
     expect(splitPath('a\\b/c', posix)).toEqual(['a\\b', 'c'])
     expect(splitPath('', posix)).toEqual([])
+  })
+})
+
+describe('isWindowsUncPath', () => {
+  it.each([
+    '\\\\server\\share',
+    '//server/share',
+    '\\\\wsl$\\Ubuntu',
+    '\\\\?\\C:\\x',
+    '\\\\.\\pipe\\x'
+  ])('flags %s', (value) => expect(isWindowsUncPath(value)).toBe(true))
+
+  it.each(['C:\\Users\\me', 'c:/x', '\\Users\\me', 'relative'])('keeps %s', (value) =>
+    expect(isWindowsUncPath(value)).toBe(false)
+  )
+})
+
+describe('isRootPath', () => {
+  it('detects drive and share roots on Windows', () => {
+    expect(isRootPath('C:\\', win32)).toBe(true)
+    expect(isRootPath('d:/', win32)).toBe(true)
+    expect(isRootPath('\\\\server\\share\\', win32)).toBe(true)
+    expect(isRootPath('C:\\Users', win32)).toBe(false)
+    expect(isRootPath('C:', win32)).toBe(false)
+  })
+
+  it('detects / on POSIX', () => {
+    expect(isRootPath('/', posix)).toBe(true)
+    expect(isRootPath('/Users', posix)).toBe(false)
   })
 })
