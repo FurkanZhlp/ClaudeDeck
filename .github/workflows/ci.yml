@@ -17,8 +17,6 @@ jobs:
   check:
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Windows stays informational until the Windows port (phase 2) is done.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
