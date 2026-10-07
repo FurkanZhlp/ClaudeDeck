@@ -3,6 +3,9 @@
 import { chmodSync, existsSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
+// Windows has no execute bits; nothing to fix.
+if (process.platform === 'win32') process.exit(0)
+
 function makeExecutable(file) {
   if (existsSync(file) && statSync(file).isFile()) chmodSync(file, statSync(file).mode | 0o111)
 }

@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { DomainError } from '../../shared/errors'
 import type { Account, OptimizeState } from '../../shared/types'
 import { createSessionTokens, MCP_TOKEN_ENV, type SessionTokens } from '../mcp/sessionTokens'
+import { permissionRulePath } from '../platform/paths'
 import {
   buildClaudeArgs,
   profileDenyRules,
@@ -441,5 +442,18 @@ describe('profileDenyRules', () => {
     })
     const settings = JSON.parse(args[args.indexOf('--settings') + 1])
     expect(settings.permissions.deny).toContain('Read(//cfg/.claude.json)')
+  })
+})
+
+describe('profileDenyRules on Windows', () => {
+  it('uses the //c/... rule form for the credentials file', () => {
+    const rules = profileDenyRules(
+      'C:\\Users\\A B\\AppData\\Roaming\\ClaudeDeck\\accounts\\a',
+      (abs) => permissionRulePath(abs, 'win32')
+    )
+    const root = '//c/Users/A B/AppData/Roaming/ClaudeDeck/accounts/a'
+    expect(rules).toContain(`Read(${root}/.credentials.json)`)
+    expect(rules).toContain(`Edit(${root}/.credentials.json)`)
+    expect(rules.every((rule) => !rule.includes('\\'))).toBe(true)
   })
 })

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  AccountService,
   accountDir,
   hasConversation,
   markOnboardingComplete,
@@ -85,5 +86,20 @@ describe('hasConversation', () => {
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, '{}\n')
     expect(hasConversation(dir, '/tmp/app', 'abc')).toBe(true)
+  })
+})
+
+describe('AccountService.claudeAvailable', () => {
+  it('asks the locator with the base env', async () => {
+    const seen: Record<string, string>[] = []
+    const service = new AccountService('/accounts', () => Promise.resolve({ PATH: '/x' }), {
+      available: (env) => {
+        seen.push(env)
+        return Promise.resolve(false)
+      },
+      file: () => Promise.resolve('claude')
+    })
+    await expect(service.claudeAvailable()).resolves.toBe(false)
+    expect(seen).toEqual([{ PATH: '/x' }])
   })
 })

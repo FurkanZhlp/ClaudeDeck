@@ -2,7 +2,7 @@ import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:c
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Account, AccountUsage } from '../../shared/types'
-import { buildSessionEnv, claudeCommand, defaultShell } from '../env/shellEnv'
+import { platform } from '../platform'
 import { parseUsageCommandOutput, USAGE_COMMAND_ARGS, usageResultText } from './usageCommand'
 
 type Env = Record<string, string>
@@ -64,23 +64,13 @@ interface Job {
 
 type Outcome = { ok: true; usage: AccountUsage } | { ok: false; reason: string }
 
-function defaultKillTree(child: ChildProcess, signal: NodeJS.Signals): void {
-  try {
-    // Detached: the shell leads its own process group, so claude goes too.
-    if (child.pid !== undefined) process.kill(-child.pid, signal)
-    else child.kill(signal)
-  } catch {
-    child.kill(signal)
-  }
-}
-
 /** Reads plan usage with `claude -p /usage` (no model call), one account at a time. */
 export function createUsagePoller(deps: UsagePollerDeps): UsagePoller {
   const intervalMs = deps.intervalMs ?? DEFAULT_POLL_INTERVAL_MS
   const timeoutMs = deps.timeoutMs ?? POLL_TIMEOUT_MS
   const jitterMs = deps.jitterMs ?? DEFAULT_JITTER_MS
   const spawnFn = deps.spawn ?? nodeSpawn
-  const killTree = deps.killTree ?? defaultKillTree
+  const killTree = deps.killTree ?? platform.killTree
   const now = deps.now ?? Date.now
   const random = deps.random ?? Math.random
 
@@ -133,16 +123,13 @@ export function createUsagePoller(deps: UsagePollerDeps): UsagePoller {
     return new Promise<Outcome>((resolve) => {
       let child: ChildProcess
       try {
-        child = spawnFn(
-          defaultShell(base),
-          ['-ilc', claudeCommand(account.configDir, USAGE_COMMAND_ARGS)],
-          {
-            cwd: workspace,
-            env: buildSessionEnv(base, account),
-            stdio: ['ignore', 'pipe', 'pipe'],
-            detached: true
-          }
-        )
+        const launch = platform.claudeLaunch(account.configDir, USAGE_COMMAND_ARGS, base)
+        child = spawnFn(launch.file, launch.args, {
+          cwd: workspace,
+          env: launch.env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          ...platform.spawnDefaults()
+        })
       } catch (error) {
         resolve({ ok: false, reason: `spawn failed: ${(error as Error).message}` })
         return

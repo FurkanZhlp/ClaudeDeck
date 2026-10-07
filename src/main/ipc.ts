@@ -18,10 +18,10 @@ import {
   markOnboardingComplete,
   type AccountService
 } from './accounts/accountService'
-import { buildSessionEnv, claudeCommand, defaultShell, resolveShellEnv } from './env/shellEnv'
 import type { PtyManager } from './pty/ptyManager'
 import { isSize, isText, type IpcTools } from './ipcUtil'
 import { MCP_TOKEN_ENV } from './mcp/sessionTokens'
+import { platform } from './platform'
 import type { Repository } from './state/repository'
 
 interface Deps {
@@ -199,7 +199,7 @@ export function registerIpc({
       if (kind === 'claude' && !(await accounts.claudeAvailable())) {
         throw new DomainError('CLAUDE_NOT_FOUND')
       }
-      const base = await resolveShellEnv()
+      const base = await platform.resolveBaseEnv()
 
       // Beklerken oturum, proje ya da hesap değişmiş olabilir; güncel kayıtları oku.
       const session = repo.session(sessionId)
@@ -219,7 +219,7 @@ export function registerIpc({
         })
       }
 
-      let args = ['-il']
+      let launch = platform.shellLaunch(account.configDir, base)
       if (session.kind === 'claude') {
         let claudeArgs: string[]
         const stored = session.claudeSessionId
@@ -233,17 +233,15 @@ export function registerIpc({
           repo.setClaudeSessionId(session.id, claudeSessionId)
           claudeArgs = ['--session-id', claudeSessionId]
         }
-        args = ['-ilc', claudeCommand(account.configDir, claudeArgs)]
+        launch = platform.claudeLaunch(account.configDir, claudeArgs, base)
       }
       ptys.spawn(
         sessionId,
         {
-          file: defaultShell(base),
-          args,
+          file: launch.file,
+          args: launch.args,
           cwd: project.path,
-          env: mcpToken
-            ? { ...buildSessionEnv(base, account), [MCP_TOKEN_ENV]: mcpToken }
-            : buildSessionEnv(base, account),
+          env: mcpToken ? { ...launch.env, [MCP_TOKEN_ENV]: mcpToken } : launch.env,
           cols,
           rows,
           accountId: account.id
@@ -260,16 +258,17 @@ export function registerIpc({
     const ticket = ptys.ticket(id)
     repo.account(accountId)
     if (!(await accounts.claudeAvailable())) throw new DomainError('CLAUDE_NOT_FOUND')
-    const base = await resolveShellEnv()
+    const base = await platform.resolveBaseEnv()
     const account = repo.account(accountId)
     accounts.ensureConfigDir(account)
+    const launch = platform.claudeLaunch(account.configDir, ['auth', 'login'], base)
     ptys.spawn(
       id,
       {
-        file: defaultShell(base),
-        args: ['-ilc', claudeCommand(account.configDir, ['auth', 'login'])],
+        file: launch.file,
+        args: launch.args,
         cwd: homedir(),
-        env: buildSessionEnv(base, account),
+        env: launch.env,
         cols,
         rows,
         accountId: account.id

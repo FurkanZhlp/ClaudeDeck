@@ -14,10 +14,10 @@ import type {
   OptimizeStatus
 } from '../../shared/types'
 import { markOnboardingComplete } from '../accounts/accountService'
-import { buildSessionEnv, claudeCommand, defaultShell } from '../env/shellEnv'
 import { OptimizeRejection, type OptimizePort, type OptimizeToolName } from '../mcp/optimizeTools'
 import { inlineMcpConfig, MCP_SERVER_NAME } from '../mcp/register'
 import { MCP_TOKEN_ENV, type OptimizeScope, type SessionTokens } from '../mcp/sessionTokens'
+import { platform } from '../platform'
 import { ensureGuidelines } from '../profile/guidelines'
 import { cloneCopy, copyEntry, type CopyRunner } from '../profile/importer'
 
@@ -82,8 +82,12 @@ const clip = (value: string, max: number): string =>
  */
 const FINISH_EXIT_GRACE_MS = 60_000
 
-export function profileDenyRules(configDir: string): string[] {
-  const at = (rel: string): string => `/${configDir}/${rel}`
+export function profileDenyRules(
+  configDir: string,
+  rulePath: (abs: string) => string = platform.permissionRulePath
+): string[] {
+  const root = rulePath(configDir)
+  const at = (rel: string): string => `${root}/${rel}`
   const private_ = [
     '.claude.json',
     '.credentials.json',
@@ -289,16 +293,6 @@ const copyState = (state: OptimizeState): OptimizeState => ({
   events: state.events.slice()
 })
 
-function defaultKillTree(child: ChildProcess, signal: NodeJS.Signals): void {
-  try {
-    // Detached: the shell leads its own process group, so claude and its children go too.
-    if (child.pid !== undefined) process.kill(-child.pid, signal)
-    else child.kill(signal)
-  } catch {
-    child.kill(signal)
-  }
-}
-
 /** One headless optimize run per account; Claude drives it through the optimize MCP tools. */
 export class OptimizeManager {
   private readonly runs = new Map<string, Run>()
@@ -314,7 +308,7 @@ export class OptimizeManager {
     this.now = deps.now ?? Date.now
     this.newId = deps.newId ?? randomUUID
     this.spawnFn = deps.spawn ?? nodeSpawn
-    this.killTree = deps.killTree ?? defaultKillTree
+    this.killTree = deps.killTree ?? platform.killTree
     this.port = {
       status: (scope, message) => {
         const run = this.activeRun(scope)
@@ -403,20 +397,19 @@ export class OptimizeManager {
       const workspace = optimizeWorkspace(account.configDir)
       rmSync(workspace, { recursive: true, force: true })
       mkdirSync(workspace, { recursive: true })
-      const env = { ...buildSessionEnv(base, account), MCP_TOOL_TIMEOUT: MCP_TOOL_TIMEOUT_MS }
       const args = buildClaudeArgs({
         prompt: this.deps.prompt,
         configDir: account.configDir,
         mcpUrl
       })
       if (run.state.status !== 'starting') return copyState(run.state)
-      const shell = defaultShell(base)
+      const launch = platform.claudeLaunch(account.configDir, args, base)
       const token = this.deps.tokens.issue({ kind: 'optimize', runId: run.id, accountId })
-      child = this.spawnFn(shell, ['-ilc', claudeCommand(account.configDir, args)], {
+      child = this.spawnFn(launch.file, launch.args, {
         cwd: workspace,
-        env: { ...env, [MCP_TOKEN_ENV]: token },
+        env: { ...launch.env, MCP_TOOL_TIMEOUT: MCP_TOOL_TIMEOUT_MS, [MCP_TOKEN_ENV]: token },
         stdio: ['ignore', 'pipe', 'pipe'],
-        detached: true
+        ...platform.spawnDefaults()
       })
     } catch (error) {
       this.deps.tokens.revoke(run.id)

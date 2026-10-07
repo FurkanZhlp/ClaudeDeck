@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream, readdirSync, statSync, type Stats } from 'node:fs'
 import {
@@ -17,13 +16,15 @@ import {
   writeFile
 } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { isDeepStrictEqual, promisify } from 'node:util'
+import { isDeepStrictEqual } from 'node:util'
 import type {
   ProfileCategory,
   ProfileCategorySummary,
   ProfileDiffEntry,
   ProfileImportResult
 } from '../../shared/types'
+import { cloneCopy } from '../platform/fs'
+import type { CopyRunner } from '../platform/types'
 import { GUIDELINES_IMPORT_LINE, withGuidelinesImport } from './guidelines'
 
 /** Source entry (relative to the config dir) for each importable category. */
@@ -44,7 +45,6 @@ export const isProfileCategory = (value: unknown): value is ProfileCategory =>
 
 const FINDER_JUNK = '.DS_Store'
 const TMP_SUFFIX = '.claudedeck-tmp'
-const COPY_TIMEOUT_MS = 5 * 60 * 1000
 const SETTINGS_MODE = 0o600
 const PLUGIN_INDEX_FILES = ['installed_plugins.json', 'known_marketplaces.json']
 const STRIPPED_SETTINGS = [
@@ -335,16 +335,7 @@ export async function diffProfile(
   return result
 }
 
-export type CopyRunner = (src: string, dest: string, dereference: boolean) => Promise<void>
-
-const execFileAsync = promisify(execFile)
-
-/** APFS clone through `cp -c`; fails on other volumes or file systems. */
-export const cloneCopy: CopyRunner = async (src, dest, dereference) => {
-  await execFileAsync('/bin/cp', [dereference ? '-cRLp' : '-cRp', src, dest], {
-    timeout: COPY_TIMEOUT_MS
-  })
-}
+export { cloneCopy, type CopyRunner }
 
 /**
  * Copies `src` to `dest` (which must not exist), keeping timestamps. The source is resolved first
