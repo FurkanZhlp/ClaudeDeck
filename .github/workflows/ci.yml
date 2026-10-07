@@ -24,14 +24,13 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     env:
-      # Tests never start Electron; skip the ~100 MB binary download.
+      # Tests never start Electron; skip the ~100 MB npm binary download.
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
 
+      # pnpm version comes from the packageManager field in package.json.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
 
       - uses: actions/setup-node@v4
         with:
@@ -42,3 +41,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+
+      # Packaging smoke test: unpacked x64 app, no installer, nothing published. electron-builder
+      # downloads its own Electron zip, so ELECTRON_SKIP_BINARY_DOWNLOAD above does not affect it.
+      - name: Package smoke test (Windows x64, unpacked)
+        if: runner.os == 'Windows'
+        run: pnpm build && pnpm exec electron-builder --win --x64 --dir --publish never

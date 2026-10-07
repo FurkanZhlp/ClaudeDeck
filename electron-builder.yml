@@ -13,6 +13,7 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+  # Whole package, so Windows' conpty.dll and OpenConsole.exe are unpacked next to pty.node.
   - node_modules/node-pty/**
 mac:
   target:
@@ -23,6 +24,19 @@ mac:
   notarize: false
 dmg:
   artifactName: ${name}-${version}-${arch}.${ext}
+# Arch comes from the CLI (--x64 / --arm64), one installer per arch; never build both in one run,
+# that produces a combined installer whose name has no arch.
+win:
+  target: nsis
+  icon: build/icon.ico
+  executableName: ClaudeDeck
+nsis:
+  oneClick: true
+  perMachine: false
+  # Contract: src/main/updates/updateChecker.ts WINDOWS_ARTIFACT_NAME (pinned by its test).
+  artifactName: ${name}-${version}-${arch}-setup.${ext}
+  deleteAppDataOnUninstall: false
+  shortcutName: ClaudeDeck
 npmRebuild: true
 electronFuses:
   runAsNode: false

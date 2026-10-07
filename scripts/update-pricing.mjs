@@ -1,8 +1,18 @@
 // Rebuilds resources/pricing/claude-models.json from LiteLLM's public price list (Claude models only).
 // Usage: pnpm pricing:update
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-const [src, out] = process.argv.slice(2)
-const d = JSON.parse(readFileSync(src, 'utf8'))
+//        node scripts/update-pricing.mjs <out.json> [local-litellm.json]
+// Node only (built-in fetch, Node >= 18), so it runs the same on macOS, Linux and Windows.
+import { readFileSync, writeFileSync } from 'node:fs'
+const SOURCE_URL =
+  'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json'
+const [out = 'resources/pricing/claude-models.json', src] = process.argv.slice(2)
+const load = async () => {
+  if (src) return JSON.parse(readFileSync(src, 'utf8'))
+  const res = await fetch(SOURCE_URL)
+  if (!res.ok) throw new Error(`GET ${SOURCE_URL} -> HTTP ${res.status}`)
+  return res.json()
+}
+const d = await load()
 const FIELDS = [
   'input_cost_per_token','output_cost_per_token','cache_creation_input_token_cost','cache_read_input_token_cost',
   'cache_creation_input_token_cost_above_1hr','input_cost_per_token_above_200k_tokens','output_cost_per_token_above_200k_tokens',

@@ -1,0 +1,126 @@
+name: Release
+
+# Push a tag `v<version>` matching package.json to build and publish a release:
+#   1. create (or reuse) a DRAFT GitHub release for the tag,
+#   2. build each platform on its own native runner and upload the artifacts to the draft,
+#   3. publish the draft only when every build succeeded.
+# A failed build leaves the draft unpublished, so the in-app update check (releases/latest) never
+# sees a half-filled release. Builds are unsigned for now.
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.ref_name }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  draft:
+    name: create draft release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches package.json version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Tag $TAG does not match package.json version $version"
+            exit 1
+          fi
+
+      # Reuses an existing release for the tag (e.g. a draft with hand-written notes, or a re-run).
+      # Otherwise notes come from the annotated tag message, or are generated from merged PRs/commits.
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, reusing it."
+            exit 0
+          fi
+          version="${TAG#v}"
+          type="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.type)"
+          if [ "$type" = "tag" ]; then notes=--notes-from-tag; else notes=--generate-notes; fi
+          gh release create "$TAG" --draft --verify-tag --title "ClaudeDeck $version" "$notes"
+
+  mac-arm64:
+    name: build macOS arm64
+    needs: draft
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      # Unsigned and not notarized, same as the manual release flow so far.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:mac --arm64 --publish never
+      - name: Upload to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/*.dmg --clobber
+
+  win:
+    name: build Windows ${{ matrix.arch }}
+    needs: draft
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+          # Native arm64 runner (public repos). If it is ever unavailable, build arm64 on
+          # windows-latest instead: node-pty ships win32-arm64 prebuilds, but verify the installer
+          # on real arm64 hardware before publishing.
+          - arch: arm64
+            runner: windows-11-arm
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # One arch per run, so the installer is named claudedeck-<version>-<arch>-setup.exe, which
+      # the Windows update check looks for.
+      - run: pnpm build:win --${{ matrix.arch }} --publish never
+      - name: Upload to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "dist/claudedeck-${TAG#v}-${{ matrix.arch }}-setup.exe" --clobber
+
+  publish:
+    name: publish release
+    needs: [mac-arm64, win]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$TAG" --draft=false --latest
