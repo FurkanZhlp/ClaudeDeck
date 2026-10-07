@@ -45,21 +45,21 @@ function lstatOrNull(path: string): Stats | null {
 const hasControlChar = (name: string): boolean =>
   [...name].some((char) => char.charCodeAt(0) < FIRST_PRINTABLE)
 
-/** A visible, plain basename ending in ".md": no separator, no NUL. */
-function isPlainNoteName(name: unknown): name is string {
+/** A visible, plain basename (in the path flavour of `os`) ending in ".md": no separator, no NUL. */
+function isPlainNoteName(name: unknown, os: OsName): name is string {
   return (
     typeof name === 'string' &&
     name.length > NOTE_EXT.length &&
     name.endsWith(NOTE_EXT) &&
     !name.startsWith('.') &&
     !/[/\\\0]/.test(name) &&
-    basename(name) === name
+    (os === 'win32' ? nodePath.win32 : nodePath.posix).basename(name) === name
   )
 }
 
 /** A plain note name that is also a valid Windows file name. */
 function isWindowsNoteName(name: unknown): name is string {
-  if (!isPlainNoteName(name)) return false
+  if (!isPlainNoteName(name, 'win32')) return false
   const stem = name.split('.', 1)[0].trimEnd()
   return (
     !/[. ]$/.test(name) &&
@@ -85,7 +85,7 @@ export function isValidNoteName(name: unknown): name is string {
  * `:` would name an alternate data stream, so the Windows file name rules apply.
  */
 export function isListedNoteName(name: unknown, os: OsName = process.platform): name is string {
-  return os === 'win32' ? isWindowsNoteName(name) : isPlainNoteName(name)
+  return os === 'win32' ? isWindowsNoteName(name) : isPlainNoteName(name, os)
 }
 
 /** Real path of `path`, resolving only the part of it that exists. */

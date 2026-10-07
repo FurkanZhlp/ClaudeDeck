@@ -185,7 +185,8 @@ describe('MCP tools: create_project', () => {
     const link = join(dir, 'link')
     symlinkSync(folder, link)
     const r = await tools.create_project.call({ name: 'New', path: link }, scope)
-    const real = realpathSync(folder)
+    // Windows resolves natively, which also expands 8.3 short names (`RUNNER~1`).
+    const real = (process.platform === 'win32' ? realpathSync.native : realpathSync)(folder)
     expect(confirm).toHaveBeenCalledWith({
       kind: 'create_project',
       name: 'New',
