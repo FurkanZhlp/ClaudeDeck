@@ -261,3 +261,44 @@ during reservation, background run, app quit, `disableAllHooks` project, Windows
    - `move_test_run` / `run_now` are not exposed to agents (queue priority stays with the user).
    - Counted by the existing per-tab MCP rate limit; no confirmation dialog (only affects the
      caller's own runs).
+
+## Spike results (phase 0) and design changes
+
+Verified on 2.1.282 (macOS; Windows from docs/binary strings). Raw notes: tqspike scripts.
+
+- `tool_use_id` is in PreToolUse and PostToolUse/PostToolUseFailure, same value. Exactly one of
+  PostToolUse (success) or PostToolUseFailure (`error`, `is_interrupt`) fires.
+- Background: PostToolUse fires at hand-off, with `tool_response.backgroundTaskId` (and
+  `timedOutAfterMs` when auto-backgrounded). No hook fires when a background command ends.
+  The parent transcript gets a `{"type":"queue-operation","operation":"enqueue","content":"<task-notification><task-id>…</task-id><tool-use-id>…</tool-use-id>…<status>completed</status><summary>… (exit code N)</summary>…"}`
+  line right away. **Background completion = this line, matched by tool-use-id.** Process
+  discovery and `backgroundMaxHold` are fallbacks only.
+- Async PostToolUse hooks work but are killed when claude exits; keep start-grace probes.
+- A long-poll hook waits the full hook timeout. curl is a direct child of claude in its own
+  process group. SIGTERM/SIGHUP to claude closes curl (server sees close); SIGKILL leaves curl
+  orphaned, so **on pty exit the server must end that session's waiters itself**.
+- Esc while a hook waits: verified; curl is killed and the server sees the close within ~0.5 s.
+- Foreground Bash process shape: `$SHELL -c source …/shell-snapshots/snapshot-….sh … && eval '<cmd>' …`
+  (child of claude, process group leader), then the command's own processes. Fingerprint: the
+  snapshot wrapper (`shell-snapshots/snapshot-` and `eval '`) with `'"'"'` unquoted, or its
+  child's raw command line. Stop kills that process group. MCP servers are also claude children.
+- `--resume` keeps the session id and the same `subagents/` folder (`-p` verified).
+- Subagent completion: foreground = `tool_result` for the Agent `toolUseId` (with
+  `toolUseResult.status:"completed"`, `agentId`, `resolvedModel`, totals); background =
+  `<task-notification>` enqueue line whose task-id is the agentId (may repeat; idempotent).
+  `meta.json` has no `model`: use `message.model` in the subagent transcript or `resolvedModel`;
+  meta also has `requestNonInteractive`.
+- Managed settings: macOS `/Library/Application Support/ClaudeCode/managed-settings.json`,
+  Windows `C:\Program Files\ClaudeCode\managed-settings.json` (+ `managed-settings.d/`), MDM plist
+  `com.anthropic.claudecode`, registry `HKLM|HKCU\SOFTWARE\Policies\ClaudeCode`. Top-level
+  `disableAllHooks` / `allowManagedHooksOnly`; policy `disableAllHooks` implies managed-only.
+  Detection also checks user settings.
+- macOS memory: `kern.memorystatus_level` (≈ system pressure view); fallback `vm_stat`
+  (free + inactive + purgeable + speculative); never `os.freemem` on macOS.
+- Windows: hooks default to `"shell":"bash"`; without Git Bash Claude uses the PowerShell tool,
+  so the notice reads "the queue covers the Bash tool; this machine uses PowerShell".
+
+Shared module: `src/main/transcripts/` (owned by the agent viewer stream) provides incremental
+JSONL tailing and a session transcript watcher that emits `taskNotification {taskId, toolUseId,
+status, exitCode?}` and `toolResult {toolUseId, isError}` events; the queue consumes it for
+background completion.
