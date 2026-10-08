@@ -1,8 +1,8 @@
 import { isSafeRegex } from '../../../shared/safeRegex'
 import type { ClassifyResult, ProjectTestQueue, TestPattern } from '../../../shared/types'
 import { EXCLUSIONS, BUILTIN_PATTERNS, findBuiltin } from './builtinPatterns'
-import { normalizeSegment, type Canonical } from './normalize'
-import { lex, type Word } from './shellLexer'
+import { normalizeSegment, type Canonical } from '../../shell/normalize'
+import { lex, type Word } from '../../shell/shellLexer'
 
 /** Longer commands are cut before lexing (the hook sends at most this much anyway). */
 export const MAX_CLASSIFY_INPUT = 16 * 1024

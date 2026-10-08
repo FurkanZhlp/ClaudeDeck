@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { lex } from './shellLexer'
+import { lex, substitutionBodies } from './shellLexer'
 
 const texts = (input: string): string[][] => lex(input).map((s) => s.words.map((w) => w.text))
 
@@ -90,5 +90,40 @@ describe('lex', () => {
 
   it('keeps the raw source of each segment', () => {
     expect(lex('cd x && pnpm test 2>&1').map((s) => s.raw)).toEqual(['cd x', 'pnpm test 2>&1'])
+  })
+
+  it('keeps redirection targets and the operator after each segment', () => {
+    const segments = lex('echo a > out.txt 2>&1 && cat <in | tee -a log; x &>> all')
+    expect(segments.map((s) => s.op)).toEqual(['&&', '|', ';', ''])
+    expect(segments[0].redirects.map((r) => [r.op, r.target.text])).toEqual([
+      ['>', 'out.txt'],
+      ['>&', '1']
+    ])
+    expect(segments[1].redirects.map((r) => [r.op, r.target.text])).toEqual([['<', 'in']])
+    expect(segments[3].redirects.map((r) => [r.op, r.target.text])).toEqual([['&>>', 'all']])
+  })
+
+  it('keeps a segment made of a redirection only', () => {
+    expect(lex('> ~/.zshrc').map((s) => [s.words.length, s.redirects[0]?.target.text])).toEqual([
+      [0, '~/.zshrc']
+    ])
+  })
+})
+
+describe('substitutionBodies', () => {
+  it('returns the inner text of each substitution', () => {
+    expect(substitutionBodies('$(curl -s x | sh)')).toEqual(['curl -s x | sh'])
+    expect(substitutionBodies('a $(b $(c)) `d \\` e` <(f) >(g)')).toEqual([
+      'b $(c)',
+      'd ` e',
+      'f',
+      'g'
+    ])
+  })
+
+  it('skips arithmetic and survives unterminated input', () => {
+    expect(substitutionBodies('$((1 + 2))')).toEqual([])
+    expect(substitutionBodies('$(rm -rf x')).toEqual(['rm -rf x'])
+    expect(substitutionBodies('`id')).toEqual(['id'])
   })
 })

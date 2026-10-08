@@ -1,5 +1,6 @@
 /**
- * POSIX-ish shell tokenizer for test command detection. It never executes or expands anything:
+ * POSIX-ish shell tokenizer shared by the test queue classifier and the command guard. It never
+ * executes or expands anything:
  * quotes and escapes are removed, `$(...)`, backticks and process substitutions are kept as
  * opaque text, heredoc bodies are skipped and redirections are dropped. The result is a list of
  * simple commands (one per pipeline element, list element or subshell part).
@@ -16,10 +17,20 @@ export interface Word {
   assignable: boolean
 }
 
+export interface Redirect {
+  /** Operator as written (`>`, `>>`, `&>`, `<`, `2>` is `>` with the fd dropped, ...). */
+  op: string
+  target: Word
+}
+
 export interface Segment {
   words: Word[]
   /** Source text of the segment (from its first to its last token, redirections included). */
   raw: string
+  /** Redirections of the segment with their targets (heredoc delimiters included). */
+  redirects: Redirect[]
+  /** Operator that ended the segment (`|`, `&&`, `;`, newline, `(`, ...); '' at the end. */
+  op: string
 }
 
 type Token =
@@ -47,6 +58,13 @@ class Lexer {
   private nesting = 0
 
   constructor(private readonly src: string) {}
+
+  /** End (exclusive) of the substitution starting at `from` (`$(`, `<(` or `>(`). */
+  substitutionEnd(from: number): number {
+    this.pos = from
+    this.readSubstitution()
+    return this.pos
+  }
 
   /** Reads tokens until the end, or until the unmatched `)` when `nested`. */
   readList(nested: boolean): Token[] {
@@ -292,32 +310,79 @@ export function lex(input: string): Segment[] {
   const tokens = new Lexer(input).readList(false)
   const segments: Segment[] = []
   let words: Word[] = []
+  let redirects: Redirect[] = []
   let start = -1
   let end = -1
-  let dropNextWord = false
+  let redirOp: string | null = null
 
-  const flush = (): void => {
-    if (words.length) segments.push({ words, raw: input.slice(start, end) })
+  const flush = (op: string): void => {
+    if (words.length || redirects.length) {
+      segments.push({ words, raw: input.slice(start, end), redirects, op })
+    }
     words = []
+    redirects = []
     start = -1
-    dropNextWord = false
+    redirOp = null
   }
 
   for (const token of tokens) {
     if (token.kind === 'op') {
-      flush()
+      flush(input.slice(token.start, token.end))
       continue
     }
     if (start < 0) start = token.start
     end = token.end
     if (token.kind === 'redir') {
-      dropNextWord = true
-    } else if (dropNextWord) {
-      dropNextWord = false
+      redirOp = input.slice(token.start, token.end)
+    } else if (redirOp !== null) {
+      redirects.push({ op: redirOp, target: token.word })
+      redirOp = null
     } else {
       words.push(token.word)
     }
   }
-  flush()
+  flush('')
   return segments
+}
+
+/**
+ * Inner command texts of the substitutions in a word's text (`$(...)`, `<(...)`, `>(...)`,
+ * backticks). Arithmetic `$((...))` is skipped. Only meaningful for opaque words: the text of a
+ * quoted literal such as `'$(x)'` would be reported too, which errs on the side of checking.
+ */
+export function substitutionBodies(text: string): string[] {
+  const bodies: string[] = []
+  let i = 0
+  while (i < text.length) {
+    const ch = text[i]
+    const next = text[i + 1]
+    if (ch === '\\') {
+      i += 2
+    } else if ((ch === '$' || ch === '<' || ch === '>') && next === '(') {
+      if (ch === '$' && text[i + 2] === '(') {
+        i += 3
+        continue
+      }
+      const end = new Lexer(text).substitutionEnd(i)
+      const closed = text[end - 1] === ')' && end > i + 2
+      bodies.push(text.slice(i + 2, closed ? end - 1 : end))
+      i = Math.max(end, i + 2)
+    } else if (ch === '`') {
+      let j = i + 1
+      let body = ''
+      while (j < text.length && text[j] !== '`') {
+        if (text[j] === '\\' && j + 1 < text.length) {
+          body += text[j + 1]
+          j += 2
+        } else {
+          body += text[j++]
+        }
+      }
+      bodies.push(body)
+      i = j + 1
+    } else {
+      i++
+    }
+  }
+  return bodies
 }
