@@ -14,6 +14,7 @@ import type {
   UsageSettings
 } from '@shared/types'
 import i18n from './i18n'
+import { readLastSection, writeLastSection, type SettingsSectionId } from './settings/sectionIds'
 import * as pool from './terminal/terminalPool'
 
 export type Running = {
@@ -40,6 +41,8 @@ interface AppStore {
   lastSession: Record<string, string>
   running: Record<string, Running>
   settingsOpen: boolean
+  /** Section shown in the settings view; remembered across openings. */
+  settingsSection: SettingsSectionId
   projectDialog: ProjectDialogState
   loginAccountId: string | null
   error: string | null
@@ -59,7 +62,10 @@ interface AppStore {
   createAccount: (input: AccountInput) => Promise<string | null>
   updateAccount: (id: string, patch: Partial<AccountInput>) => Promise<boolean>
   removeAccount: (id: string, deleteFiles: boolean) => Promise<void>
-  setSettingsOpen: (open: boolean) => void
+  /** Opens the settings view at `section`, or at the last section shown. */
+  openSettings: (section?: SettingsSectionId) => void
+  closeSettings: () => void
+  setSettingsSection: (section: SettingsSectionId) => void
   setProjectDialog: (state: ProjectDialogState) => void
   setLoginAccount: (accountId: string | null) => void
   saveProject: (input: ProjectInput, editId?: string) => Promise<void>
@@ -150,6 +156,7 @@ export const useApp = create<AppStore>((set, get) => {
     lastSession: {},
     running: {},
     settingsOpen: false,
+    settingsSection: readLastSection(),
     projectDialog: null,
     loginAccountId: null,
     error: null,
@@ -165,7 +172,7 @@ export const useApp = create<AppStore>((set, get) => {
           const run = get().running[id]
           if (run) set({ running: { ...get().running, [id]: { ...run, exitCode } } })
         }),
-        window.api.system.onOpenSettings(() => set({ settingsOpen: true })),
+        window.api.system.onOpenSettings(() => get().openSettings()),
         window.api.update.onAvailable((update) => set({ update })),
         // Changes made by the main process itself, e.g. through the ClaudeDeck MCP server.
         window.api.state.onChanged((data) => set({ data })),
@@ -283,7 +290,15 @@ export const useApp = create<AppStore>((set, get) => {
       set({ data, statuses, ...selection })
     },
 
-    setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+    openSettings(section) {
+      if (section) get().setSettingsSection(section)
+      set({ settingsOpen: true })
+    },
+    closeSettings: () => set({ settingsOpen: false }),
+    setSettingsSection(settingsSection) {
+      writeLastSection(settingsSection)
+      set({ settingsSection })
+    },
     setProjectDialog: (projectDialog) => set({ projectDialog }),
     setLoginAccount: (loginAccountId) => set({ loginAccountId }),
 

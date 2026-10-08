@@ -99,7 +99,44 @@
     "trayAccountSelected": "Selected account",
     "about": "About",
     "version": "ClaudeDeck v{{version}}",
-    "checkUpdates": "Check for updates"
+    "checkUpdates": "Check for updates",
+    "close": "Close settings",
+    "navLabel": "Settings sections",
+    "nav": {
+      "groups": {
+        "accounts": "Accounts",
+        "app": "App"
+      }
+    },
+    "sections": {
+      "accounts": {
+        "label": "Accounts and profiles",
+        "description": "Add Claude accounts, check their sign-in status and edit each account's profile."
+      },
+      "claude": {
+        "label": "Claude and permissions",
+        "description": "Choose the permission mode new Claude tabs start in."
+      },
+      "guard": {
+        "label": "Command guard"
+      },
+      "testQueue": {
+        "label": "Test queue",
+        "description": "Queue test commands that start at the same time to keep your machine's load in check."
+      },
+      "usage": {
+        "label": "Usage and menu bar",
+        "description": "Choose how plan usage is shown and set up the menu bar item."
+      },
+      "general": {
+        "label": "General",
+        "description": "Language and startup preferences."
+      },
+      "about": {
+        "label": "About",
+        "description": "Version information and updates."
+      }
+    }
   },
   "login": {
     "title": "Sign in for {{name}}",
@@ -496,7 +533,13 @@
         "CLAUDE_NOT_FOUND": "The claude command was not found. Install Claude Code in PowerShell: irm https://claude.ai/install.ps1 | iex"
       },
       "settings": {
-        "launchAtLoginHint": "Starts ClaudeDeck when you sign in to Windows."
+        "launchAtLoginHint": "Starts ClaudeDeck when you sign in to Windows.",
+        "sections": {
+          "usage": {
+            "label": "Usage",
+            "description": "Choose how plan usage is shown."
+          }
+        }
       },
       "notes": {
         "reveal": "Show in File Explorer"

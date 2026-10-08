@@ -24,7 +24,7 @@ function ProjectForm({
   const { t } = useTranslation()
   const data = useApp((s) => s.data)
   const setProjectDialog = useApp((s) => s.setProjectDialog)
-  const setSettingsOpen = useApp((s) => s.setSettingsOpen)
+  const openSettings = useApp((s) => s.openSettings)
   const saveProject = useApp((s) => s.saveProject)
   const removeProject = useApp((s) => s.removeProject)
   const selectedAccountId = useApp((s) => s.selectedAccountId)
@@ -64,7 +64,7 @@ function ProjectForm({
             variant="primary"
             onClick={() => {
               close()
-              setSettingsOpen(true)
+              openSettings('accounts')
             }}
           >
             {t('project.openSettings')}

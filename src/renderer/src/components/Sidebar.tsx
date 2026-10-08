@@ -169,7 +169,7 @@ function AccountRail(): React.JSX.Element {
   const accounts = useApp((s) => s.data?.accounts ?? [])
   const selectedAccountId = useApp((s) => s.selectedAccountId)
   const selectAccount = useApp((s) => s.selectAccount)
-  const setSettingsOpen = useApp((s) => s.setSettingsOpen)
+  const openSettings = useApp((s) => s.openSettings)
 
   return (
     <nav
@@ -195,7 +195,7 @@ function AccountRail(): React.JSX.Element {
           data-tooltip={t('sidebar.addAccount')}
           data-tooltip-side="right"
           className="no-drag flex size-10 items-center justify-center rounded-xl border border-dashed border-border text-muted transition-colors hover:border-fg/30 hover:text-fg"
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => openSettings('accounts')}
         >
           <Plus size={16} />
         </button>

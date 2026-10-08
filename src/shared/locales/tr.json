@@ -99,7 +99,44 @@
     "trayAccountSelected": "Seçili hesap",
     "about": "Hakkında",
     "version": "ClaudeDeck v{{version}}",
-    "checkUpdates": "Güncellemeleri denetle"
+    "checkUpdates": "Güncellemeleri denetle",
+    "close": "Ayarları kapat",
+    "navLabel": "Ayar bölümleri",
+    "nav": {
+      "groups": {
+        "accounts": "Hesaplar",
+        "app": "Uygulama"
+      }
+    },
+    "sections": {
+      "accounts": {
+        "label": "Hesaplar ve profiller",
+        "description": "Claude hesaplarınızı ekleyin, giriş durumlarını izleyin ve her hesabın profilini düzenleyin."
+      },
+      "claude": {
+        "label": "Claude ve izinler",
+        "description": "Yeni Claude sekmelerinin hangi izin moduyla başlayacağını seçin."
+      },
+      "guard": {
+        "label": "Komut koruması"
+      },
+      "testQueue": {
+        "label": "Test kuyruğu",
+        "description": "Aynı anda başlayan test komutlarını sıraya alarak makinenizin yükünü dengeleyin."
+      },
+      "usage": {
+        "label": "Kullanım ve menü çubuğu",
+        "description": "Plan kullanımının nasıl gösterileceğini seçin ve menü çubuğu öğesini ayarlayın."
+      },
+      "general": {
+        "label": "Genel",
+        "description": "Dil ve başlangıç tercihleri."
+      },
+      "about": {
+        "label": "Hakkında",
+        "description": "Sürüm bilgisi ve güncellemeler."
+      }
+    }
   },
   "login": {
     "title": "{{name}} için giriş",
@@ -496,7 +533,13 @@
         "CLAUDE_NOT_FOUND": "claude komutu bulunamadı. Claude Code'u PowerShell'de kurun: irm https://claude.ai/install.ps1 | iex"
       },
       "settings": {
-        "launchAtLoginHint": "Windows'ta oturum açtığınızda ClaudeDeck'i başlatır."
+        "launchAtLoginHint": "Windows'ta oturum açtığınızda ClaudeDeck'i başlatır.",
+        "sections": {
+          "usage": {
+            "label": "Kullanım",
+            "description": "Plan kullanımının nasıl gösterileceğini seçin."
+          }
+        }
       },
       "notes": {
         "reveal": "Dosya Gezgini'nde göster"

@@ -1,34 +1,20 @@
 import { LogIn, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Account, Language } from '@shared/types'
-import { ProfileSection } from '../onboarding/ProfileSection'
-import { ClaudePermissionsSection } from '../permissions/PermissionSections'
-import {
-  AboutSettingsSection,
-  GeneralSettingsSection,
-  TestQueueSettingsSection,
-  UsageSettingsSection
-} from './PreferenceSections'
-import { useOnboarding } from '../onboarding/onboardingStore'
-import { useApp } from '../store'
-import { AccountDot } from '../ui/AccountDot'
-import { Button } from '../ui/Button'
-import { ColorPicker } from '../ui/ColorPicker'
-import { Field } from '../ui/Field'
-import { Modal } from '../ui/Modal'
-import { ACCOUNT_COLORS, inputClass, sectionTitleClass } from '../ui/styles'
+import type { Account } from '@shared/types'
+import { ProfileSection } from '../../onboarding/ProfileSection'
+import { useOnboarding } from '../../onboarding/onboardingStore'
+import { useApp } from '../../store'
+import { AccountDot } from '../../ui/AccountDot'
+import { Button } from '../../ui/Button'
+import { ColorPicker } from '../../ui/ColorPicker'
+import { Field } from '../../ui/Field'
+import { ACCOUNT_COLORS, inputClass } from '../../ui/styles'
 
-export function SettingsDialog(): React.JSX.Element | null {
-  const open = useApp((s) => s.settingsOpen)
-  return open ? <SettingsContent /> : null
-}
-
-function SettingsContent(): React.JSX.Element | null {
+/** Settings > Accounts: each account with its sign-in state and profile, plus the add form. */
+export function AccountsSection(): React.JSX.Element | null {
   const { t } = useTranslation()
   const data = useApp((s) => s.data)
-  const setSettingsOpen = useApp((s) => s.setSettingsOpen)
-  const setLanguage = useApp((s) => s.setLanguage)
   const createAccount = useApp((s) => s.createAccount)
   const [name, setName] = useState('')
   const [color, setColor] = useState(ACCOUNT_COLORS[0])
@@ -44,62 +30,36 @@ function SettingsContent(): React.JSX.Element | null {
   }
 
   return (
-    <Modal title={t('settings.title')} onClose={() => setSettingsOpen(false)} width="max-w-2xl">
-      <section className="space-y-3">
-        <h3 className={sectionTitleClass}>{t('settings.accounts')}</h3>
-        {data.accounts.length === 0 && <p className="text-muted">{t('settings.noAccounts')}</p>}
-        <ul className="space-y-2">
-          {data.accounts.map((account) => (
-            <AccountRow key={account.id} account={account} />
-          ))}
-        </ul>
-        <form
-          onSubmit={add}
-          className="flex flex-wrap items-end gap-3 rounded-lg border border-dashed border-border p-3"
-        >
-          <Field label={t('settings.accountName')} className="min-w-48 flex-1">
-            <input
-              className={inputClass}
-              value={name}
-              placeholder={t('settings.accountNamePlaceholder')}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </Field>
-          <div className="space-y-1.5">
-            <span className="block text-[12px] font-medium text-muted">{t('settings.color')}</span>
-            <ColorPicker value={color} onChange={setColor} label={t('settings.color')} />
-          </div>
-          <Button type="submit" variant="primary" disabled={!name.trim()}>
-            <Plus size={14} />
-            {t('settings.addAccount')}
-          </Button>
-        </form>
-      </section>
-
-      <UsageSettingsSection />
-      <GeneralSettingsSection />
-      <ClaudePermissionsSection />
-      <TestQueueSettingsSection />
-
-      <section className="mt-6 space-y-2">
-        <h3 className={sectionTitleClass}>{t('settings.language')}</h3>
-        <select
-          className={`${inputClass} max-w-60`}
-          value={data.settings.language ?? 'system'}
-          onChange={(event) =>
-            void setLanguage(
-              event.target.value === 'system' ? null : (event.target.value as Language)
-            )
-          }
-        >
-          <option value="system">{t('settings.languageSystem')}</option>
-          <option value="tr">Türkçe</option>
-          <option value="en">English</option>
-        </select>
-      </section>
-
-      <AboutSettingsSection />
-    </Modal>
+    <div className="space-y-3">
+      {data.accounts.length === 0 && <p className="text-muted">{t('settings.noAccounts')}</p>}
+      <ul className="space-y-2">
+        {data.accounts.map((account) => (
+          <AccountRow key={account.id} account={account} />
+        ))}
+      </ul>
+      <form
+        onSubmit={add}
+        aria-label={t('settings.addAccount')}
+        className="flex flex-wrap items-end gap-3 rounded-lg border border-dashed border-border p-3"
+      >
+        <Field label={t('settings.accountName')} className="min-w-48 flex-1">
+          <input
+            className={inputClass}
+            value={name}
+            placeholder={t('settings.accountNamePlaceholder')}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </Field>
+        <div className="space-y-1.5">
+          <span className="block text-[12px] font-medium text-muted">{t('settings.color')}</span>
+          <ColorPicker value={color} onChange={setColor} label={t('settings.color')} />
+        </div>
+        <Button type="submit" variant="primary" disabled={!name.trim()}>
+          <Plus size={14} />
+          {t('settings.addAccount')}
+        </Button>
+      </form>
+    </div>
   )
 }
 
@@ -228,7 +188,7 @@ function AccountEditForm({
             value={name}
             onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => {
-              // Keep Escape from closing the whole settings dialog.
+              // Keep Escape from closing the whole settings view.
               if (event.key === 'Escape') {
                 event.stopPropagation()
                 onDone()

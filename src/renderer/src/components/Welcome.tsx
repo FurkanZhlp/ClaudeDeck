@@ -4,7 +4,7 @@ import { Button } from '../ui/Button'
 
 export function Welcome(): React.JSX.Element {
   const { t } = useTranslation()
-  const setSettingsOpen = useApp((s) => s.setSettingsOpen)
+  const openSettings = useApp((s) => s.openSettings)
   const setProjectDialog = useApp((s) => s.setProjectDialog)
   const hasAccounts = useApp((s) => (s.data?.accounts.length ?? 0) > 0)
 
@@ -22,7 +22,7 @@ export function Welcome(): React.JSX.Element {
           <div className="flex gap-2">
             <Button
               variant={hasAccounts ? 'secondary' : 'primary'}
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => openSettings('accounts')}
             >
               {t('welcome.addAccount')}
             </Button>

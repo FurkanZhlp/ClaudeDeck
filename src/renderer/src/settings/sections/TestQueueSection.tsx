@@ -1,124 +1,17 @@
-import { ChevronRight, RefreshCw } from 'lucide-react'
-import { useEffect, useState, type ReactNode } from 'react'
+import { ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { TEST_QUEUE_LIMITS } from '@shared/testQueueLimits'
-import type { TestQueueMode, TestQueueSettingsPatch, TrayMetric, UsageDisplay } from '@shared/types'
-import { isWindows } from '../platform'
-import { useApp } from '../store'
-import { BuiltinList } from '../testQueue/settings/BuiltinList'
-import { CustomRules } from '../testQueue/settings/CustomRules'
-import { HookStatusList } from '../testQueue/settings/HookStatusList'
-import { NumberInput } from '../testQueue/settings/NumberInput'
-import { TryCommand } from '../testQueue/settings/TryCommand'
-import { useTestQueue } from '../testQueue/testQueueStore'
-import { Button } from '../ui/Button'
-import { Segmented } from '../ui/Segmented'
-import { inputClass, sectionTitleClass } from '../ui/styles'
-import { Switch } from '../ui/Switch'
-
-const TRAY_AUTO = 'auto'
-const TRAY_SELECTED = 'selected'
-
-function Row({
-  label,
-  hint,
-  children,
-  disabled
-}: {
-  label: string
-  hint?: string
-  children: ReactNode
-  disabled?: boolean
-}): React.JSX.Element {
-  return (
-    <div className={`flex items-center justify-between gap-4 ${disabled ? 'text-muted' : ''}`}>
-      <span className="min-w-0">
-        <span className="block">{label}</span>
-        {hint && <span className="block text-[12px] leading-snug text-muted">{hint}</span>}
-      </span>
-      {children}
-    </div>
-  )
-}
-
-/**
- * Settings > Usage: display mode and the macOS menu bar item. Windows has no tray yet, so its
- * menu bar options are hidden there.
- */
-export function UsageSettingsSection(): React.JSX.Element | null {
-  const { t } = useTranslation()
-  const usage = useApp((s) => s.data?.settings.usage)
-  const setUsageSettings = useApp((s) => s.setUsageSettings)
-  if (!usage) return null
-
-  return (
-    <section className="mt-6 space-y-3">
-      <h3 className={sectionTitleClass}>{t('settings.usage')}</h3>
-      <Row label={t('settings.usageDisplay')}>
-        <Segmented<UsageDisplay>
-          label={t('settings.usageDisplay')}
-          value={usage.display}
-          options={[
-            { value: 'used', label: t('settings.displayUsed') },
-            { value: 'remaining', label: t('settings.displayRemaining') }
-          ]}
-          onChange={(display) => void setUsageSettings({ display })}
-        />
-      </Row>
-      {!isWindows && <MenuBarSettings />}
-    </section>
-  )
-}
-
-function MenuBarSettings(): React.JSX.Element | null {
-  const { t } = useTranslation()
-  const usage = useApp((s) => s.data?.settings.usage)
-  const accounts = useApp((s) => s.data?.accounts) ?? []
-  const setUsageSettings = useApp((s) => s.setUsageSettings)
-  if (!usage) return null
-  const trayOff = !usage.trayEnabled
-
-  return (
-    <>
-      <Switch
-        label={t('settings.trayEnabled')}
-        hint={t('settings.trayEnabledHint')}
-        checked={usage.trayEnabled}
-        onChange={(trayEnabled) => void setUsageSettings({ trayEnabled })}
-      />
-      <Row label={t('settings.trayMetric')} disabled={trayOff}>
-        <Segmented<TrayMetric>
-          label={t('settings.trayMetric')}
-          value={usage.trayMetric}
-          disabled={trayOff}
-          options={[
-            { value: 'session', label: t('settings.metricSession') },
-            { value: 'weekly', label: t('settings.metricWeekly') },
-            { value: 'both', label: t('settings.metricBoth') }
-          ]}
-          onChange={(trayMetric) => void setUsageSettings({ trayMetric })}
-        />
-      </Row>
-      <Row label={t('settings.trayAccount')} disabled={trayOff}>
-        <select
-          aria-label={t('settings.trayAccount')}
-          className={`${inputClass} max-w-52 disabled:opacity-50`}
-          disabled={trayOff}
-          value={usage.trayAccount}
-          onChange={(event) => void setUsageSettings({ trayAccount: event.target.value })}
-        >
-          <option value={TRAY_AUTO}>{t('settings.trayAccountAuto')}</option>
-          <option value={TRAY_SELECTED}>{t('settings.trayAccountSelected')}</option>
-          {accounts.map((account) => (
-            <option key={account.id} value={account.id}>
-              {account.name}
-            </option>
-          ))}
-        </select>
-      </Row>
-    </>
-  )
-}
+import type { TestQueueMode, TestQueueSettingsPatch } from '@shared/types'
+import { useApp } from '../../store'
+import { BuiltinList } from '../../testQueue/settings/BuiltinList'
+import { CustomRules } from '../../testQueue/settings/CustomRules'
+import { HookStatusList } from '../../testQueue/settings/HookStatusList'
+import { NumberInput } from '../../testQueue/settings/NumberInput'
+import { TryCommand } from '../../testQueue/settings/TryCommand'
+import { useTestQueue } from '../../testQueue/testQueueStore'
+import { Segmented } from '../../ui/Segmented'
+import { Switch } from '../../ui/Switch'
+import { SettingRow } from '../SettingRow'
 
 const subTitleClass = 'pt-2 text-[12px] font-medium text-muted'
 
@@ -126,7 +19,7 @@ const subTitleClass = 'pt-2 text-[12px] font-medium text-muted'
  * Settings > Test queue: the opt-in switch (it writes a hook into every account's Claude
  * settings), concurrency, rules and the hook status. Saved on change, like the other sections.
  */
-export function TestQueueSettingsSection(): React.JSX.Element | null {
+export function TestQueueSection(): React.JSX.Element | null {
   const { t } = useTranslation()
   const settings = useApp((s) => s.data?.settings.testQueue)
   const saveSettings = useTestQueue((s) => s.saveSettings)
@@ -147,8 +40,7 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
   const L = TEST_QUEUE_LIMITS
 
   return (
-    <section className="mt-6 space-y-3">
-      <h3 className={sectionTitleClass}>{t('testQueue.title')}</h3>
+    <div className="space-y-3">
       <Switch
         label={t('testQueue.settings.enabled')}
         hint={t('testQueue.settings.enabledHint')}
@@ -157,7 +49,7 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
       />
       {settings.enabled && (
         <>
-          <Row
+          <SettingRow
             label={t('testQueue.settings.mode')}
             hint={t(`testQueue.settings.modeHint.${settings.mode}`)}
           >
@@ -170,9 +62,12 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
               ]}
               onChange={(mode) => void save({ mode })}
             />
-          </Row>
+          </SettingRow>
           {auto ? (
-            <Row label={t('testQueue.settings.autoMax')} hint={t('testQueue.settings.autoMaxHint')}>
+            <SettingRow
+              label={t('testQueue.settings.autoMax')}
+              hint={t('testQueue.settings.autoMaxHint')}
+            >
               <NumberInput
                 label={t('testQueue.settings.autoMax')}
                 value={settings.auto.maxConcurrent}
@@ -182,9 +77,9 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
                 placeholder={t('testQueue.settings.automatic')}
                 onCommit={(maxConcurrent) => void save({ auto: { maxConcurrent } })}
               />
-            </Row>
+            </SettingRow>
           ) : (
-            <Row label={t('testQueue.settings.maxConcurrent')}>
+            <SettingRow label={t('testQueue.settings.maxConcurrent')}>
               <NumberInput
                 label={t('testQueue.settings.maxConcurrent')}
                 value={settings.maxConcurrent}
@@ -192,9 +87,12 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
                 max={L.maxConcurrent.max}
                 onCommit={whole((value) => void save({ maxConcurrent: value }))}
               />
-            </Row>
+            </SettingRow>
           )}
-          <Row label={t('testQueue.settings.maxWait')} hint={t('testQueue.settings.maxWaitHint')}>
+          <SettingRow
+            label={t('testQueue.settings.maxWait')}
+            hint={t('testQueue.settings.maxWaitHint')}
+          >
             <NumberInput
               label={t('testQueue.settings.maxWait')}
               value={settings.maxWaitMinutes}
@@ -203,7 +101,7 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
               unit={t('testQueue.settings.unitMinutes')}
               onCommit={whole((value) => void save({ maxWaitMinutes: value }))}
             />
-          </Row>
+          </SettingRow>
 
           <details className="group/advanced rounded-lg border border-border">
             <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 hover:bg-fg/[0.03] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
@@ -217,7 +115,7 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
             <div className="space-y-2.5 px-3 pb-3 pt-1">
               {auto && (
                 <>
-                  <Row
+                  <SettingRow
                     label={t('testQueue.settings.cpuHigh')}
                     hint={t('testQueue.settings.cpuHighHint')}
                   >
@@ -229,8 +127,8 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
                       unit="%"
                       onCommit={whole((value) => void save({ auto: { cpuHighPercent: value } }))}
                     />
-                  </Row>
-                  <Row
+                  </SettingRow>
+                  <SettingRow
                     label={t('testQueue.settings.cpuResume')}
                     hint={t('testQueue.settings.cpuResumeHint')}
                   >
@@ -242,8 +140,8 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
                       unit="%"
                       onCommit={whole((value) => void save({ auto: { cpuResumePercent: value } }))}
                     />
-                  </Row>
-                  <Row
+                  </SettingRow>
+                  <SettingRow
                     label={t('testQueue.settings.minMemory')}
                     hint={t('testQueue.settings.minMemoryHint')}
                   >
@@ -257,8 +155,8 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
                         (value) => void save({ auto: { minAvailableMemoryPercent: value } })
                       )}
                     />
-                  </Row>
-                  <Row
+                  </SettingRow>
+                  <SettingRow
                     label={t('testQueue.settings.rampUp')}
                     hint={t('testQueue.settings.rampUpHint')}
                   >
@@ -270,10 +168,10 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
                       unit={t('testQueue.settings.unitSeconds')}
                       onCommit={whole((value) => void save({ auto: { rampUpSeconds: value } }))}
                     />
-                  </Row>
+                  </SettingRow>
                 </>
               )}
-              <Row
+              <SettingRow
                 label={t('testQueue.settings.startGrace')}
                 hint={t('testQueue.settings.startGraceHint')}
               >
@@ -285,8 +183,8 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
                   unit={t('testQueue.settings.unitSeconds')}
                   onCommit={whole((value) => void save({ startGraceSeconds: value }))}
                 />
-              </Row>
-              <Row
+              </SettingRow>
+              <SettingRow
                 label={t('testQueue.settings.backgroundHold')}
                 hint={t('testQueue.settings.backgroundHoldHint')}
               >
@@ -298,7 +196,7 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
                   unit={t('testQueue.settings.unitMinutes')}
                   onCommit={whole((value) => void save({ backgroundMaxHoldMinutes: value }))}
                 />
-              </Row>
+              </SettingRow>
             </div>
           </details>
 
@@ -321,71 +219,6 @@ export function TestQueueSettingsSection(): React.JSX.Element | null {
           <HookStatusList />
         </>
       )}
-    </section>
-  )
-}
-
-/** Settings > General: login item. */
-export function GeneralSettingsSection(): React.JSX.Element | null {
-  const { t } = useTranslation()
-  const launchAtLogin = useApp((s) => s.data?.settings.launchAtLogin)
-  const setLaunchAtLogin = useApp((s) => s.setLaunchAtLogin)
-  const [packaged, setPackaged] = useState(true)
-
-  useEffect(() => {
-    let alive = true
-    window.api.app
-      .packaged()
-      .then((value) => alive && setPackaged(value))
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  if (launchAtLogin === undefined) return null
-  const hint = packaged
-    ? t('settings.launchAtLoginHint')
-    : `${t('settings.launchAtLoginHint')} ${t('settings.launchAtLoginDev')}`
-
-  return (
-    <section className="mt-6 space-y-2">
-      <h3 className={sectionTitleClass}>{t('settings.general')}</h3>
-      <Switch
-        label={t('settings.launchAtLogin')}
-        hint={hint}
-        checked={launchAtLogin}
-        onChange={(enabled) => void setLaunchAtLogin(enabled)}
-      />
-    </section>
-  )
-}
-
-/** Settings > About: version and a manual update check (the app menu is macOS only). */
-export function AboutSettingsSection(): React.JSX.Element {
-  const { t } = useTranslation()
-  const [version, setVersion] = useState<string | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    window.api.app
-      .version()
-      .then((value) => alive && setVersion(value))
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  return (
-    <section className="mt-6 space-y-2">
-      <h3 className={sectionTitleClass}>{t('settings.about')}</h3>
-      <Row label={version ? t('settings.version', { version }) : 'ClaudeDeck'}>
-        <Button onClick={() => void window.api.app.checkUpdates()}>
-          <RefreshCw size={14} />
-          {t('settings.checkUpdates')}
-        </Button>
-      </Row>
-    </section>
+    </div>
   )
 }

@@ -69,7 +69,7 @@ export function UsagePanel(): React.JSX.Element {
         onClick={(event) => {
           event.stopPropagation()
           setOpen(false)
-          useApp.getState().setSettingsOpen(true)
+          useApp.getState().openSettings('usage')
         }}
       >
         <Settings size={15} />

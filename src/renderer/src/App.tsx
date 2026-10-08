@@ -8,8 +8,8 @@ import { useOptimize } from './optimize/optimizeStore'
 import { useUsage } from './usage/usageStore'
 import { LoginDialog } from './components/LoginDialog'
 import { ProjectDialog } from './components/ProjectDialog'
-import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
+import { SettingsView } from './settings/SettingsView'
 import { UpdateBanner } from './components/UpdateBanner'
 import { TooltipLayer } from './ui/TooltipLayer'
 import { Workspace } from './components/Workspace'
@@ -59,12 +59,15 @@ export default function App(): React.JSX.Element {
       if (event.key !== ',' || !event.ctrlKey || event.altKey || event.shiftKey) return
       event.preventDefault()
       event.stopPropagation()
-      useApp.getState().setSettingsOpen(true)
+      useApp.getState().openSettings()
     }
     // Capture phase, so a focused terminal does not receive the key first.
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
+
+  // The settings view covers the workspace; keep the terminals mounted but out of reach.
+  const settingsOpen = useApp((s) => s.settingsOpen)
 
   if (!ready) return <div className="drag h-full" />
 
@@ -73,14 +76,16 @@ export default function App(): React.JSX.Element {
       className="flex h-full"
       style={accent ? ({ '--account': accent } as React.CSSProperties) : undefined}
     >
-      <Sidebar />
-      <main className="flex min-w-0 flex-1 flex-col">
-        <UpdateBanner />
-        <ClaudeBanner />
-        <Workspace />
-      </main>
+      <div className="flex min-w-0 flex-1" inert={settingsOpen}>
+        <Sidebar />
+        <main className="flex min-w-0 flex-1 flex-col">
+          <UpdateBanner />
+          <ClaudeBanner />
+          <Workspace />
+        </main>
+      </div>
+      <SettingsView />
       <ProjectDialog />
-      <SettingsDialog />
       <LoginDialog />
       <OnboardingFlow />
       <ErrorToast />
