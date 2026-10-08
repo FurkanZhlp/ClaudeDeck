@@ -72,8 +72,19 @@ jobs:
           fi
           version="${TAG#v}"
           type="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.type)"
-          if [ "$type" = "tag" ]; then notes=--notes-from-tag; else notes=--generate-notes; fi
-          gh release create "$TAG" --draft --verify-tag --title "ClaudeDeck $version" "$notes"
+          if [ "$type" != "tag" ]; then
+            gh release create "$TAG" --draft --verify-tag --title "ClaudeDeck $version" --generate-notes
+            exit 0
+          fi
+          # checkout fetches the tag as a lightweight ref, so --notes-from-tag would read the commit
+          # message. Read the annotated tag object instead and drop its first line (the title).
+          sha="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.sha)"
+          gh api "repos/$GH_REPO/git/tags/$sha" --jq .message | sed '1d' | sed '/./,$!d' > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::Tag $TAG has no release notes after its title line"
+            exit 1
+          fi
+          gh release create "$TAG" --draft --verify-tag --title "ClaudeDeck $version" --notes-file notes.md
 
   mac-arm64:
     name: build macOS arm64

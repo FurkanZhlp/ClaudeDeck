@@ -124,9 +124,11 @@ docs/         Design, implementation plan, screenshots
 ### Releasing
 
 1. Bump `version` in `package.json` and commit.
-2. Tag and push: `git tag vX.Y.Z && git push origin main vX.Y.Z`.
+2. Write the notes to a file (first line is the title, then Markdown), tag and push:
+   `git tag -a vX.Y.Z --cleanup=verbatim -F notes.md && git push origin main vX.Y.Z`.
+   `--cleanup=verbatim` keeps `## Headings`, which git would otherwise strip as comments.
 
-The Release workflow checks that the tag matches `package.json`, creates a draft release, builds the macOS `.dmg` and both Windows installers on native runners and uploads them. The draft is published as latest only when every build passes, so the in-app update check (`releases/latest`) never sees a half-filled release. Notes come from an annotated tag message, or are generated.
+The Release workflow checks that the tag matches `package.json`, creates a draft release, builds the macOS `.dmg` and both Windows installers on native runners and uploads them. The draft is published as latest only when every build passes, so the in-app update check (`releases/latest`) never sees a half-filled release. Notes come from the annotated tag message (without its first line), or are generated for a lightweight tag.
 
 ## Known limitations
 
