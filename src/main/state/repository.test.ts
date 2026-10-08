@@ -309,3 +309,61 @@ describe('Claude permission modes', () => {
     expect(make().session(pinned.id).permissionMode).toBe('bypassPermissions')
   })
 })
+
+describe('guard settings', () => {
+  it('turns the guard on with default categories for configs written before it existed', () => {
+    writeFileSync(
+      join(dir, 'config.json'),
+      JSON.stringify({
+        accounts: [],
+        projects: [{ id: 'p', name: 'P', path: '/p', accountId: 'a', guard: { categories: {} } }],
+        sessions: [],
+        settings: { language: 'tr' }
+      })
+    )
+    const state = make().get()
+    expect(state.settings.guard).toEqual({
+      enabled: true,
+      categories: {
+        disk: 'deny',
+        sensitive: 'deny',
+        git: 'ask',
+        fetchExec: 'ask',
+        docker: 'ask',
+        database: 'ask',
+        publish: 'ask',
+        system: 'ask'
+      },
+      ruleOverrides: {},
+      customRules: []
+    })
+    expect(state.projects[0]).not.toHaveProperty('guard')
+  })
+
+  it('stores global and project guard settings', () => {
+    const repo = make()
+    const { account } = repo.createAccount({ name: 'A', color: 'blue' })
+    repo.createProject({ name: 'P', path: '/p', accountId: account.id })
+    const projectId = repo.get().projects[0].id
+    let state = repo.setGuardSettings({
+      categories: { git: 'deny' } as never,
+      customRules: [{ kind: 'prefix', pattern: ' echo GUARD-SENTINEL-* ', action: 'deny' } as never]
+    })
+    expect(state.settings.guard.categories.git).toBe('deny')
+    expect(state.settings.guard.categories.disk).toBe('deny')
+    expect(state.settings.guard.customRules).toEqual([
+      { id: 'id3', kind: 'prefix', pattern: 'echo GUARD-SENTINEL-*', action: 'deny' }
+    ])
+    state = repo.setProjectGuard(projectId, { categories: { docker: 'allow' } })
+    expect(state.projects[0].guard).toEqual({
+      categories: { docker: 'allow' },
+      ruleOverrides: {},
+      customRules: []
+    })
+    expect(make().get().projects[0].guard?.categories).toEqual({ docker: 'allow' })
+    state = repo.setProjectGuard(projectId, { categories: {} })
+    expect(state.projects[0]).not.toHaveProperty('guard')
+    repo.setProjectGuard(projectId, { ruleOverrides: { 'git.forcePush': 'allow' } })
+    expect(repo.setProjectGuard(projectId, null).projects[0]).not.toHaveProperty('guard')
+  })
+})

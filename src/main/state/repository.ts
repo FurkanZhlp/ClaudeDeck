@@ -8,10 +8,12 @@ import type {
   AccountInput,
   AppState,
   ClaudeSettings,
+  GuardSettingsPatch,
   Language,
   PermissionMode,
   Project,
   ProjectClaudePatch,
+  ProjectGuard,
   ProjectInput,
   ProjectTestQueue,
   Session,
@@ -20,6 +22,13 @@ import type {
   TestQueueSettingsPatch,
   UsageSettings
 } from '../../shared/types'
+import {
+  applyGuardPatch,
+  applyProjectGuardPatch,
+  defaultGuardSettings,
+  withGuardDefaults,
+  withProjectGuardDefaults
+} from './guardSettings'
 import type { JsonStore } from './jsonStore'
 import {
   applyProjectTestQueuePatch,
@@ -33,7 +42,8 @@ export const defaultSettings = (): Settings => ({
   usage: { display: 'used', trayEnabled: true, trayMetric: 'both', trayAccount: 'auto' },
   launchAtLogin: false,
   testQueue: defaultTestQueueSettings(),
-  claude: defaultClaudeSettings()
+  claude: defaultClaudeSettings(),
+  guard: defaultGuardSettings()
 })
 
 export const emptyState = (): AppState => ({
@@ -43,18 +53,31 @@ export const emptyState = (): AppState => ({
   settings: defaultSettings()
 })
 
+/** Project guard overrides as the evaluator may use them; an empty override is dropped. */
+function withProjectDefaults(projects: AppState['projects'] | undefined): AppState['projects'] {
+  return (projects ?? []).map((project) => {
+    if (project.guard === undefined) return project
+    const guard = withProjectGuardDefaults(project.guard)
+    const next = { ...project, guard }
+    if (!guard) delete next.guard
+    return next
+  })
+}
+
 /** Fills settings added after the config file was written. */
 function withDefaultSettings(state: AppState): AppState {
   const defaults = defaultSettings()
   const saved = (state.settings ?? {}) as Partial<Settings>
   return {
     ...state,
+    projects: withProjectDefaults(state.projects),
     settings: {
       ...defaults,
       ...saved,
       usage: { ...defaults.usage, ...(saved.usage ?? {}) },
       testQueue: withTestQueueDefaults(saved.testQueue),
-      claude: withClaudeDefaults(saved.claude)
+      claude: withClaudeDefaults(saved.claude),
+      guard: withGuardDefaults(saved.guard)
     }
   }
 }
@@ -309,6 +332,27 @@ export class Repository {
         if (p.id !== id) return p
         const next: Project = { ...p, testQueue: testQueue ?? undefined }
         if (!testQueue) delete next.testQueue
+        return next
+      })
+    })
+  }
+
+  setGuardSettings(patch: GuardSettingsPatch): AppState {
+    const guard = applyGuardPatch(this.state.settings.guard, patch, this.newId)
+    return this.commit({ ...this.state, settings: { ...this.state.settings, guard } })
+  }
+
+  /** Project guard overrides; null (or a patch that leaves nothing) removes the field. */
+  setProjectGuard(id: string, patch: Partial<ProjectGuard> | null): AppState {
+    const project = this.project(id)
+    const guard = applyProjectGuardPatch(project.guard, patch, this.newId)
+    return this.commit({
+      ...this.state,
+      projects: this.state.projects.map((p) => {
+        if (p.id !== id) return p
+        const next: Project = { ...p }
+        if (guard) next.guard = guard
+        else delete next.guard
         return next
       })
     })

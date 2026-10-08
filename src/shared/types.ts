@@ -18,6 +18,8 @@ export interface Project {
   testQueue?: ProjectTestQueue
   /** Per-project Claude launch overrides; absent means inherit the global settings. */
   claude?: ProjectClaude
+  /** Per-project command guard overrides; absent means inherit the global settings. */
+  guard?: ProjectGuard
 }
 
 export interface Session {
@@ -77,6 +79,7 @@ export interface Settings {
   launchAtLogin: boolean
   testQueue: TestQueueSettings
   claude: ClaudeSettings
+  guard: GuardSettings
 }
 
 export interface AppState {
@@ -497,4 +500,102 @@ export interface AgentOpenResult {
   events: AgentEvent[]
   /** Pass to `agents.older` for the previous page; null at the start of the transcript. */
   cursor: number | null
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Command guard
+ * ------------------------------------------------------------------------------------------- */
+
+export type GuardAction = 'allow' | 'ask' | 'deny'
+
+/** Built-in rule categories; custom rules carry their own action. */
+export type GuardCategoryId =
+  'disk' | 'sensitive' | 'git' | 'fetchExec' | 'docker' | 'database' | 'publish' | 'system'
+
+/** Tools the guard looks at (the hook matcher). */
+export type GuardTool =
+  'Bash' | 'PowerShell' | 'Monitor' | 'Write' | 'Edit' | 'MultiEdit' | 'NotebookEdit'
+
+/**
+ * A user rule for commands (Bash, PowerShell, Monitor), matched like a test queue rule:
+ * - `prefix`: token based, a trailing `*` matches any further tokens (`terraform apply*`).
+ * - `regex`: JavaScript regular expression on the canonical command or the raw input.
+ * An `allow` rule exempts the commands it matches from the built-in rules.
+ */
+export interface GuardCustomRule {
+  id: string
+  kind: 'prefix' | 'regex'
+  pattern: string
+  /** Only for `regex`; defaults to 'canonical'. */
+  target?: 'canonical' | 'raw'
+  action: GuardAction
+}
+
+export interface GuardSettings {
+  /** On by default; the hook is installed in every account while the guard or queue is on. */
+  enabled: boolean
+  /** Action per built-in category. */
+  categories: Record<GuardCategoryId, GuardAction>
+  /** Per-rule actions that replace their category's action. */
+  ruleOverrides: Record<string, GuardAction>
+  customRules: GuardCustomRule[]
+}
+
+/** Patch accepted by `settings.setGuard`; objects and arrays replace the stored ones. */
+export type GuardSettingsPatch = Partial<GuardSettings>
+
+/** Project overrides, applied on top of the global settings. */
+export interface ProjectGuard {
+  categories: Partial<Record<GuardCategoryId, GuardAction>>
+  ruleOverrides: Record<string, GuardAction>
+  /** Extra rules for this project, checked after the global ones. */
+  customRules: GuardCustomRule[]
+}
+
+/** A built-in rule for the settings list. */
+export interface GuardRuleInfo {
+  id: string
+  category: GuardCategoryId
+  /** Locale key of the rule's name (`guard.rules.<id>`). */
+  label: string
+  /** A command or path it matches. */
+  example: string
+}
+
+/** Result of the guard for one tool call. */
+export interface GuardDecision {
+  action: GuardAction
+  /** Category of the deciding rule; 'custom' for a user rule. */
+  category?: GuardCategoryId | 'custom'
+  /** Built-in rule id or custom rule id. */
+  ruleId?: string
+  /** Short, actionable text for Claude (permissionDecisionReason). */
+  reasonForModel?: string
+  /** Text shown to the user in the terminal (systemMessage). */
+  messageForUser?: string
+}
+
+/** "Try a command" in Settings. */
+export interface GuardEvaluateRequest {
+  /** Defaults to Bash. Write, Edit, MultiEdit and NotebookEdit take a path in `input`. */
+  tool?: GuardTool
+  input: string
+  /** Uses the project's folder and overrides. */
+  projectId?: string
+}
+
+/** One guard decision with a matching rule (activity log, newest first). */
+export interface GuardLogEntry {
+  id: string
+  at: number
+  sessionId: string
+  projectId: string
+  accountId: string
+  agentId?: string
+  tool: GuardTool
+  category: GuardCategoryId | 'custom'
+  ruleId: string
+  action: GuardAction
+  /** Command or path, single line, at most 200 characters. */
+  excerpt: string
 }
