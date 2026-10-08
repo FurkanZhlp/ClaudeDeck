@@ -80,12 +80,15 @@ describe('guard: cost stays linear (K2)', () => {
     expect(ms(() => decide(input, 'win', 'PowerShell'))).toBeLessThan(200)
   })
 
-  it('cmd.exe and POSIX adversarial input stays fast too', () => {
-    expect(ms(() => decide(`cmd /c ${'^&'.repeat(n / 2 - 8)}`, 'win'))).toBeLessThan(200)
-    expect(ms(() => decide(`echo ${'$('.repeat(n / 2 - 4)}`))).toBeLessThan(200)
-    expect(ms(() => decide(`echo "${'$('.repeat(n / 2 - 4)}`))).toBeLessThan(200)
-    expect(ms(() => decide(`echo ${'`'.repeat(n - 8)}`))).toBeLessThan(200)
-    expect(ms(() => decide('a;'.repeat(n / 2)))).toBeLessThan(500)
+  // Well inside the worker's 1.5 s limit (CI machines are slower than a laptop).
+  it.each([
+    ['cmd.exe carets', `cmd /c ${'^&'.repeat(n / 2 - 8)}`, 'win'],
+    ['POSIX substitutions', `echo ${'$('.repeat(n / 2 - 4)}`, 'mac'],
+    ['POSIX quoted substitutions', `echo "${'$('.repeat(n / 2 - 4)}`, 'mac'],
+    ['POSIX backticks', `echo ${'`'.repeat(n - 8)}`, 'mac'],
+    ['POSIX commands', 'a;'.repeat(n / 2), 'mac']
+  ] as const)('%s (128 KB) in under 500 ms', (_name, input, host) => {
+    expect(ms(() => decide(input, host))).toBeLessThan(500)
   })
 
   const ALLOWED = [

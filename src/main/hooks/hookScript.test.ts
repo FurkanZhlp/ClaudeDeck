@@ -41,8 +41,11 @@ describe('hookScript', () => {
       # The guard key file next to this script: the key, then the hook URL.
       key=
       keyurl=
-      keyfile=\${0%/*}/guard.key
-      case $0 in */*) ;; *) keyfile=./guard.key ;; esac
+      case $0 in
+        */*) keyfile=\${0%/*}/guard.key ;;
+        *\\\\*) keyfile=\${0%\\\\*}/guard.key ;;
+        *) keyfile=./guard.key ;;
+      esac
       if [ "$guard" = 1 ] && [ "$event" = pre ] && [ -f "$keyfile" ]; then
         { IFS= read -r key; IFS= read -r keyurl; } <"$keyfile" 2>/dev/null || :
         hex64 "$key" && hookurl "$keyurl" || key=

@@ -91,11 +91,18 @@ export interface HookInstallResult {
   changed: boolean
 }
 
-/** Commands ClaudeDeck writes for this account's scripts (old script names included). */
+/**
+ * Commands ClaudeDeck writes for this account's scripts (old script names included), in the
+ * POSIX and the Git Bash (forward slashes) form.
+ */
 const ourCommands = (configDir: string, os: OsName): Set<string> =>
   new Set(
     [hookScriptPath(configDir), legacyScriptPath(configDir)].flatMap((path) =>
-      (['pre', 'post'] as const).map((event) => hookCommand(path, event, os))
+      (['pre', 'post'] as const).flatMap((event) => [
+        hookCommand(path, event, os),
+        hookCommand(path, event, 'win32'),
+        hookCommand(path, event, 'darwin')
+      ])
     )
   )
 
