@@ -30,10 +30,12 @@ const api: Api = {
     create: (input) => call(IPC.projectCreate, input),
     update: (id, patch) => call(IPC.projectUpdate, id, patch),
     remove: (id) => call(IPC.projectRemove, id),
-    setTestQueue: (id, patch) => call(IPC.projectSetTestQueue, id, patch)
+    setTestQueue: (id, patch) => call(IPC.projectSetTestQueue, id, patch),
+    setClaude: (id, patch) => call(IPC.projectSetClaude, id, patch)
   },
   sessions: {
-    create: (projectId, kind, title) => call(IPC.sessionCreate, projectId, kind, title),
+    create: (projectId, kind, title, permissionMode) =>
+      call(IPC.sessionCreate, projectId, kind, title, permissionMode ?? null),
     rename: (id, title) => call(IPC.sessionRename, id, title),
     remove: (id) => call(IPC.sessionRemove, id),
     onOpenRequest: (cb) => subscribe(IPC.sessionOpenRequest, cb)
@@ -42,7 +44,8 @@ const api: Api = {
     setLanguage: (language) => call(IPC.settingsSetLanguage, language),
     setUsage: (patch) => call(IPC.settingsSetUsage, patch),
     setLaunchAtLogin: (enabled) => call(IPC.settingsSetLaunchAtLogin, enabled),
-    setTestQueue: (patch) => call(IPC.settingsSetTestQueue, patch)
+    setTestQueue: (patch) => call(IPC.settingsSetTestQueue, patch),
+    setClaude: (patch) => call(IPC.settingsSetClaude, patch)
   },
   pty: {
     startSession: (sessionId, resume, cols, rows) =>

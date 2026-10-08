@@ -1,6 +1,7 @@
 import { FolderOpen, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ProjectPermissionsSection } from '../permissions/PermissionSections'
 import { useApp, type ProjectDialogState } from '../store'
 import { ProjectTestQueueSection } from '../testQueue/settings/ProjectTestQueueSection'
 import { Button } from '../ui/Button'
@@ -105,6 +106,7 @@ function ProjectForm({
           {editing && accountId !== editing.accountId && (
             <p className="text-[12px] text-warn">{t('project.accountChangeNote')}</p>
           )}
+          {editing && <ProjectPermissionsSection projectId={editing.id} />}
           {editing && <ProjectTestQueueSection projectId={editing.id} />}
           <div className="flex items-center justify-between pt-2">
             {editing ? (

@@ -16,6 +16,8 @@ export interface Project {
   accountId: string
   /** Per-project test queue overrides; absent means inherit with no extra patterns. */
   testQueue?: ProjectTestQueue
+  /** Per-project Claude launch overrides; absent means inherit the global settings. */
+  claude?: ProjectClaude
 }
 
 export interface Session {
@@ -26,6 +28,32 @@ export interface Session {
   createdAt: number
   /** claude oturumunun --session-id değeri; "kaldığı yerden" bu sekmenin konuşmasını açar */
   claudeSessionId?: string
+  /** Permission mode chosen when the tab was opened; absent means inherit project/global. */
+  permissionMode?: PermissionMode
+}
+
+/**
+ * Permission mode a Claude tab starts in. 'default' passes no flag (Claude's own settings
+ * decide); 'manual' forces asking before each action (`--permission-mode default`).
+ */
+export type PermissionMode =
+  'default' | 'manual' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions'
+
+export interface ClaudeSettings {
+  /** Starting permission mode of Claude tabs. */
+  permissionMode: PermissionMode
+  /** Adds --allow-dangerously-skip-permissions: bypass is reachable with Shift+Tab. */
+  allowBypass: boolean
+}
+
+export interface ProjectClaude {
+  /** 'inherit' (stored as an absent field) uses the global setting. */
+  permissionMode?: PermissionMode
+}
+
+/** Patch accepted by `projects.setClaude`. */
+export interface ProjectClaudePatch {
+  permissionMode?: PermissionMode | 'inherit'
 }
 
 export type UsageDisplay = 'used' | 'remaining'
@@ -48,6 +76,7 @@ export interface Settings {
   /** Open ClaudeDeck when the user logs in (packaged app only). */
   launchAtLogin: boolean
   testQueue: TestQueueSettings
+  claude: ClaudeSettings
 }
 
 export interface AppState {

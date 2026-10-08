@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { AgentsToggle } from '../agents/AgentsToggle'
 import { NotesToggle } from '../notes/NotesToggle'
+import { NewClaudeMenu } from '../permissions/NewClaudeMenu'
+import { PermissionModeBadge } from '../permissions/PermissionModeBadge'
 import { TestQueueTabBadge } from '../testQueue/TestQueueTabBadge'
 import { useApp } from '../store'
 import { Button } from '../ui/Button'
@@ -53,6 +55,7 @@ export function SessionTabs({ projectId }: { projectId: string }): React.JSX.Ele
               <SessionIcon kind={session.kind} />
               <span className="truncate">{session.title}</span>
               <StatusDot run={run} />
+              {run && run.exitCode === null && <PermissionModeBadge mode={run.permissionMode} />}
               {session.kind === 'claude' && (
                 <TestQueueTabBadge sessionId={session.id} projectId={session.projectId} />
               )}
@@ -78,14 +81,17 @@ export function SessionTabs({ projectId }: { projectId: string }): React.JSX.Ele
         })}
       </div>
       <div className="no-drag flex shrink-0 items-center gap-1 pb-1.5">
-        <Button
-          variant="ghost"
-          data-tooltip={t('session.newClaudeHint')}
-          onClick={() => void createSession('claude')}
-        >
-          <Plus size={14} />
-          {t('session.newClaude')}
-        </Button>
+        <div className="flex items-center">
+          <Button
+            variant="ghost"
+            data-tooltip={t('session.newClaudeHint')}
+            onClick={() => void createSession('claude')}
+          >
+            <Plus size={14} />
+            {t('session.newClaude')}
+          </Button>
+          <NewClaudeMenu projectId={projectId} />
+        </div>
         <Button
           variant="ghost"
           data-tooltip={t('session.newShellHint')}

@@ -3,11 +3,15 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import { DomainError } from '../shared/errors'
+import { effectivePermissionMode, permissionModeArgs } from '../shared/permissionMode'
 import { IPC, loginPtyId } from '../shared/ipc'
 import type {
   Account,
   AccountInput,
+  ClaudeSettings,
   Language,
+  PermissionMode,
+  ProjectClaudePatch,
   ProjectInput,
   ProjectTestQueue,
   SessionKind,
@@ -182,8 +186,10 @@ export function registerIpc({
     return state
   })
 
-  handle(IPC.sessionCreate, (projectId: string, kind: SessionKind, title: string) =>
-    repo.createSession(projectId, kind, title)
+  handle(
+    IPC.sessionCreate,
+    (projectId: string, kind: SessionKind, title: string, permissionMode?: PermissionMode | null) =>
+      repo.createSession(projectId, kind, title, permissionMode ?? undefined)
   )
   handle(IPC.sessionRename, (id: string, title: string) => repo.renameSession(id, title))
   handle(IPC.sessionRemove, (id: string) => {
@@ -229,6 +235,18 @@ export function registerIpc({
     return state
   })
 
+  // Applies to tabs started afterwards; running tabs keep the mode they started in.
+  handle(IPC.settingsSetClaude, (patch: Partial<ClaudeSettings>) =>
+    repo.setClaudeSettings({
+      permissionMode: patch?.permissionMode,
+      allowBypass: patch?.allowBypass
+    })
+  )
+
+  handle(IPC.projectSetClaude, (id: string, patch: ProjectClaudePatch) =>
+    repo.setProjectClaude(id, { permissionMode: patch?.permissionMode })
+  )
+
   handle(
     IPC.ptyStartSession,
     async (sessionId: string, resume: boolean, cols: number, rows: number) => {
@@ -258,6 +276,7 @@ export function registerIpc({
         })
       }
 
+      const permissionMode = effectivePermissionMode(repo.get().settings.claude, project, session)
       let started = false
       try {
         let launch = platform.shellLaunch(account.configDir, base)
@@ -278,7 +297,12 @@ export function registerIpc({
             repo.setClaudeSessionId(session.id, claudeSessionId)
             claudeArgs = ['--session-id', claudeSessionId]
           }
-          launch = platform.claudeLaunch(account.configDir, claudeArgs, base)
+          const { allowBypass } = repo.get().settings.claude
+          launch = platform.claudeLaunch(
+            account.configDir,
+            [...claudeArgs, ...permissionModeArgs(permissionMode, allowBypass)],
+            base
+          )
         }
         started = ptys.spawn(
           sessionId,
@@ -298,7 +322,10 @@ export function registerIpc({
         // outlive it. A token is per tab, so this only drops the one issued above.
         if (!started && mcpToken) revokeMcpTokens([session.id])
       }
-      return { accountId: account.id }
+      return {
+        accountId: account.id,
+        permissionMode: session.kind === 'claude' ? permissionMode : null
+      }
     }
   )
 

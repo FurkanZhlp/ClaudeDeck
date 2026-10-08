@@ -773,5 +773,52 @@
     "toolDone": "Tamamlandı",
     "toolFailed": "Başarısız",
     "toolRunning": "Çalışıyor"
+  },
+  "permissions": {
+    "title": "Claude izinleri",
+    "mode": "Başlangıç izin modu",
+    "modeHint": "Bundan sonra başlatılan veya yeniden başlatılan Claude sekmelerine uygulanır. Sekme içinde Shift+Tab ile mod yine değiştirilebilir.",
+    "modes": {
+      "default": "Claude ayarları",
+      "manual": "Her seferinde sor",
+      "acceptEdits": "Düzenlemeleri kabul et",
+      "plan": "Plan",
+      "auto": "Otomatik",
+      "dontAsk": "Sorma",
+      "bypassPermissions": "İzinleri atla"
+    },
+    "modeHints": {
+      "default": "Bayrak eklenmez; modu Claude'un kendi ayarları belirler.",
+      "manual": "Claude dosya düzenlemeden veya komut çalıştırmadan önce size sorar.",
+      "acceptEdits": "Dosya düzenlemeleri ve yaygın dosya komutları sorulmadan çalışır.",
+      "plan": "Claude dosyaları değiştirmeden inceler ve bir plan önerir.",
+      "auto": "Size sormak yerine bir sınıflandırıcı işlemleri denetler. Desteklenen bir plan ve model gerektirir.",
+      "dontAsk": "Yalnızca önceden izin verilen araçlar çalışır; diğerleri sorulmadan reddedilir.",
+      "bypassPermissions": "Tüm komutlar ve düzenlemeler sorulmadan çalışır. Yalnızca güvendiğiniz projelerde kullanın."
+    },
+    "short": {
+      "manual": "sor",
+      "acceptEdits": "düzenle",
+      "plan": "plan",
+      "auto": "oto",
+      "dontAsk": "sorma"
+    },
+    "allowBypass": "Shift+Tab ile izinleri atla moduna geçişe izin ver",
+    "allowBypassHint": "Sekmeler seçilen modda başlar, izinleri atla modu Shift+Tab döngüsüne eklenir. Bu mod kullanılabilirken plan modu düzenlemeleri engellemez.",
+    "testQueueNote": "Test kuyruğu izinleri atla dahil her modda çalışır: hook'u Claude'un izin denetiminden önce çalışır.",
+    "inherit": "Genel ayar ({{mode}})",
+    "projectLabel": "Bu projede mod",
+    "projectHint": "Belirli bir modda açılmadıkça bu projenin Claude sekmeleri bu modu kullanır.",
+    "newTabMenu": "Claude'u belirli bir modda aç",
+    "newTabDefault": "Varsayılan ({{mode}})",
+    "tabMode": "{{mode}} modunda başlatıldı",
+    "tabBypass": "İzinleri atla modunda başlatıldı: Claude komutları ve düzenlemeleri sormadan çalıştırır.",
+    "confirm": {
+      "title": "İzinler atlansın mı?",
+      "risk": "Bu modda Claude, dosya silme, paket kurma ve git'e gönderme dahil tüm komutları ve dosya düzenlemelerini size sormadan çalıştırır.",
+      "trust": "Yalnızca güvendiğiniz, tercihen yalıtılmış projelerde kullanın. Claude'un okuduğu içerik (web sayfaları, dosyalar, issue'lar) onu yönlendirebilir ve zararlı bir adımı durduracak bir onay sorusu çıkmaz.",
+      "claude": "Claude da ilk seferde terminalde kendi uyarısını gösterir. Reddetme kurallarınız ve ClaudeDeck'in test kuyruğu geçerliliğini korur.",
+      "accept": "İzinleri atla"
+    }
   }
 }

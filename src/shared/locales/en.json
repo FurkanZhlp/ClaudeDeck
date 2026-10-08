@@ -773,5 +773,52 @@
     "toolDone": "Completed",
     "toolFailed": "Failed",
     "toolRunning": "Running"
+  },
+  "permissions": {
+    "title": "Claude permissions",
+    "mode": "Starting permission mode",
+    "modeHint": "Applies to Claude tabs started or restarted afterwards. Shift+Tab still switches modes inside a tab.",
+    "modes": {
+      "default": "Claude settings",
+      "manual": "Ask every time",
+      "acceptEdits": "Accept edits",
+      "plan": "Plan",
+      "auto": "Auto",
+      "dontAsk": "Don't ask",
+      "bypassPermissions": "Bypass permissions"
+    },
+    "modeHints": {
+      "default": "No flag is passed; Claude's own settings choose the mode.",
+      "manual": "Claude asks before editing files or running commands.",
+      "acceptEdits": "File edits and common file commands run without asking.",
+      "plan": "Claude researches and proposes a plan without changing files.",
+      "auto": "A classifier reviews actions instead of asking you. Needs a supported plan and model.",
+      "dontAsk": "Only pre-approved tools run; anything else is denied without asking.",
+      "bypassPermissions": "Every command and edit runs without asking. Use only in trusted projects."
+    },
+    "short": {
+      "manual": "ask",
+      "acceptEdits": "edits",
+      "plan": "plan",
+      "auto": "auto",
+      "dontAsk": "no ask"
+    },
+    "allowBypass": "Allow switching to bypass with Shift+Tab",
+    "allowBypassHint": "Tabs start in the chosen mode, and bypass permissions joins the Shift+Tab cycle. While it is available, plan mode no longer blocks edits.",
+    "testQueueNote": "The test queue keeps working in every mode, bypass included: its hook runs before Claude's permission check.",
+    "inherit": "Global setting ({{mode}})",
+    "projectLabel": "Mode in this project",
+    "projectHint": "Used by this project's Claude tabs unless a tab was opened in a specific mode.",
+    "newTabMenu": "Open Claude in a specific mode",
+    "newTabDefault": "Default ({{mode}})",
+    "tabMode": "Started in {{mode}} mode",
+    "tabBypass": "Started in bypass permissions mode: Claude runs commands and edits without asking.",
+    "confirm": {
+      "title": "Bypass permissions?",
+      "risk": "In this mode Claude runs every command and file edit without asking you, including deleting files, installing packages and pushing to git.",
+      "trust": "Use it only in projects you trust, ideally isolated ones. Content Claude reads (web pages, files, issues) can steer it, and no prompt stops a harmful step.",
+      "claude": "Claude also shows its own warning in the terminal the first time. Your deny rules and ClaudeDeck's test queue still apply.",
+      "accept": "Use bypass"
+    }
   }
 }

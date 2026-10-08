@@ -217,3 +217,95 @@ describe('settings', () => {
     expect(repo.setLaunchAtLogin(true).settings.launchAtLogin).toBe(true)
   })
 })
+
+describe('Claude permission modes', () => {
+  const withProject = (): { repo: Repository; projectId: string } => {
+    const repo = make()
+    const { account } = repo.createAccount({ name: 'A', color: '#000' })
+    repo.createProject({ name: 'P', path: '/tmp', accountId: account.id })
+    return { repo, projectId: repo.get().projects[0].id }
+  }
+
+  it('defaults configs written by older versions to no flag and no bypass', () => {
+    writeFileSync(
+      join(dir, 'config.json'),
+      JSON.stringify({ accounts: [], projects: [], sessions: [], settings: { language: 'tr' } })
+    )
+    expect(make().get().settings.claude).toEqual({ permissionMode: 'default', allowBypass: false })
+  })
+
+  it('replaces hand-edited unknown values with defaults', () => {
+    writeFileSync(
+      join(dir, 'config.json'),
+      JSON.stringify({
+        accounts: [],
+        projects: [],
+        sessions: [],
+        settings: { claude: { permissionMode: 'yolo', allowBypass: 'yes' } }
+      })
+    )
+    expect(make().get().settings.claude).toEqual({ permissionMode: 'default', allowBypass: false })
+    writeFileSync(
+      join(dir, 'config.json'),
+      JSON.stringify({
+        accounts: [],
+        projects: [],
+        sessions: [],
+        settings: { claude: { permissionMode: 'acceptEdits' } }
+      })
+    )
+    expect(make().get().settings.claude).toEqual({
+      permissionMode: 'acceptEdits',
+      allowBypass: false
+    })
+  })
+
+  it('validates and saves the global settings', () => {
+    const repo = make()
+    expect(repo.setClaudeSettings({ permissionMode: 'bypassPermissions' }).settings.claude).toEqual(
+      { permissionMode: 'bypassPermissions', allowBypass: false }
+    )
+    expect(repo.setClaudeSettings({ allowBypass: true }).settings.claude.allowBypass).toBe(true)
+    expect(() => repo.setClaudeSettings({ permissionMode: 'x' as 'plan' })).toThrowError('INVALID')
+    expect(() => repo.setClaudeSettings({ allowBypass: 1 as unknown as boolean })).toThrowError(
+      'INVALID'
+    )
+    expect(make().get().settings.claude).toEqual({
+      permissionMode: 'bypassPermissions',
+      allowBypass: true
+    })
+  })
+
+  it('stores a project override and drops it on inherit', () => {
+    const { repo, projectId } = withProject()
+    expect(repo.setProjectClaude(projectId, { permissionMode: 'plan' }).projects[0].claude).toEqual(
+      {
+        permissionMode: 'plan'
+      }
+    )
+    expect(() => repo.setProjectClaude(projectId, { permissionMode: 'x' as 'plan' })).toThrowError(
+      'INVALID'
+    )
+    expect(
+      repo.setProjectClaude(projectId, { permissionMode: 'inherit' }).projects[0]
+    ).not.toHaveProperty('claude')
+    expect(() => repo.setProjectClaude('missing', { permissionMode: 'plan' })).toThrowError(
+      'NOT_FOUND'
+    )
+  })
+
+  it('pins a mode on new Claude tabs only', () => {
+    const { repo, projectId } = withProject()
+    const pinned = repo.createSession(projectId, 'claude', 'C', 'bypassPermissions').session
+    expect(pinned.permissionMode).toBe('bypassPermissions')
+    expect(repo.createSession(projectId, 'claude', 'C').session).not.toHaveProperty(
+      'permissionMode'
+    )
+    expect(() => repo.createSession(projectId, 'shell', 'T', 'plan')).toThrowError('INVALID')
+    expect(() => repo.createSession(projectId, 'claude', 'C', 'x' as 'plan')).toThrowError(
+      'INVALID'
+    )
+    // The pinned mode survives a reload, so resuming the tab keeps it.
+    expect(make().session(pinned.id).permissionMode).toBe('bypassPermissions')
+  })
+})

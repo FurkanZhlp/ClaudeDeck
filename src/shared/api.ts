@@ -3,7 +3,10 @@ import type {
   AccountInput,
   AccountStatus,
   AppState,
+  ClaudeSettings,
   Language,
+  PermissionMode,
+  ProjectClaudePatch,
   ProjectInput,
   Session,
   GuidelinesUpdate,
@@ -53,12 +56,16 @@ export interface Api {
     remove(id: string): Promise<AppState>
     /** Project overrides for the test queue; arrays replace the stored ones. */
     setTestQueue(id: string, patch: Partial<ProjectTestQueue>): Promise<AppState>
+    /** Project permission mode override; 'inherit' removes it. */
+    setClaude(id: string, patch: ProjectClaudePatch): Promise<AppState>
   }
   sessions: {
     create(
       projectId: string,
       kind: SessionKind,
-      title: string
+      title: string,
+      /** Claude tabs only: pins the tab's permission mode; omitted inherits. */
+      permissionMode?: PermissionMode
     ): Promise<{ state: AppState; session: Session }>
     rename(id: string, title: string): Promise<AppState>
     remove(id: string): Promise<AppState>
@@ -71,6 +78,8 @@ export interface Api {
     setLaunchAtLogin(enabled: boolean): Promise<AppState>
     /** Validates and clamps; rejects with INVALID on bad values or a regex that does not compile. */
     setTestQueue(patch: TestQueueSettingsPatch): Promise<AppState>
+    /** Starting permission mode and the bypass switch for Claude tabs started afterwards. */
+    setClaude(patch: Partial<ClaudeSettings>): Promise<AppState>
   }
   pty: {
     startSession(
@@ -78,7 +87,7 @@ export interface Api {
       resume: boolean,
       cols: number,
       rows: number
-    ): Promise<{ accountId: string }>
+    ): Promise<{ accountId: string; permissionMode: PermissionMode | null }>
     startLogin(accountId: string, cols: number, rows: number): Promise<null>
     write(id: string, data: string): void
     resize(id: string, cols: number, rows: number): void

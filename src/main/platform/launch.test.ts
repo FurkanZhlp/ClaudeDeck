@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createPlatform } from '.'
+import { PERMISSION_MODES, permissionModeArgs } from '../../shared/permissionMode'
 import type { LocatorFs } from './claudeLocator'
 import { claudeLaunch, shellLaunch } from './launch'
 
@@ -41,6 +42,37 @@ describe('claudeLaunch (macOS)', () => {
       file: '/bin/zsh',
       args: ['-ilc', `exec env ${UNSET} CLAUDE_CONFIG_DIR='/cfg' claude 'auth' 'login'`]
     })
+  })
+})
+
+describe('claudeLaunch with permission modes (macOS)', () => {
+  const ID = '1b4e28ba-2fa1-11d2-883f-0016d3cca427'
+  const command = (args: string[]): string =>
+    claudeLaunch('darwin', '/cfg', args, BASE).args[1] as string
+
+  it('keeps the exact current command for the default mode', () => {
+    const args = ['--session-id', ID, ...permissionModeArgs('default', false)]
+    expect(claudeLaunch('darwin', '/cfg', args, BASE).args).toEqual([
+      '-ilc',
+      `exec env ${UNSET} CLAUDE_CONFIG_DIR='/cfg' claude '--session-id' '${ID}'`
+    ])
+  })
+
+  it('appends the quoted mode flag for fresh and resumed tabs', () => {
+    expect(command(['--resume', ID, ...permissionModeArgs('bypassPermissions', false)])).toBe(
+      `exec env ${UNSET} CLAUDE_CONFIG_DIR='/cfg' claude '--resume' '${ID}' ` +
+        "'--permission-mode' 'bypassPermissions'"
+    )
+    expect(command(['--session-id', ID, ...permissionModeArgs('manual', true)])).toBe(
+      `exec env ${UNSET} CLAUDE_CONFIG_DIR='/cfg' claude '--session-id' '${ID}' ` +
+        "'--permission-mode' 'default' '--allow-dangerously-skip-permissions'"
+    )
+    for (const mode of PERMISSION_MODES.filter((m) => m !== 'default' && m !== 'manual')) {
+      expect(command(['--session-id', ID, ...permissionModeArgs(mode, false)])).toBe(
+        `exec env ${UNSET} CLAUDE_CONFIG_DIR='/cfg' claude '--session-id' '${ID}' ` +
+          `'--permission-mode' '${mode}'`
+      )
+    }
   })
 })
 
@@ -114,6 +146,30 @@ describe('claudeLaunch (Windows)', () => {
     expect(keys.filter((k) => k === 'CLAUDE_CONFIG_DIR')).toHaveLength(1)
     expect(keys.filter((k) => k === 'PATH')).toHaveLength(1)
     expect(launch.env.Path.split(';')).toContain('C:\\Tools')
+  })
+
+  it('passes the permission mode flags as separate arguments', () => {
+    const fs = fakeFs({ [CLAUDE_EXE]: '' })
+    expect(
+      claudeLaunch(
+        'win32',
+        WIN_CFG,
+        ['--session-id', 'x', ...permissionModeArgs('default', false)],
+        WIN_BASE,
+        fs
+      ).args
+    ).toEqual(['--session-id', 'x'])
+    for (const mode of PERMISSION_MODES.filter((m) => m !== 'default')) {
+      const flag = permissionModeArgs(mode, true)
+      expect(claudeLaunch('win32', WIN_CFG, ['--resume', 'x', ...flag], WIN_BASE, fs).args).toEqual(
+        ['--resume', 'x', ...flag]
+      )
+    }
+    expect(permissionModeArgs('dontAsk', true)).toEqual([
+      '--permission-mode',
+      'dontAsk',
+      '--allow-dangerously-skip-permissions'
+    ])
   })
 
   it('reports CLAUDE_NOT_FOUND when there is no claude.exe', () => {

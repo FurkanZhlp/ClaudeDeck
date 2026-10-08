@@ -15,6 +15,8 @@ export const IPC = {
   settingsSetLaunchAtLogin: 'settings:setLaunchAtLogin',
   settingsSetTestQueue: 'settings:setTestQueue',
   projectSetTestQueue: 'project:setTestQueue',
+  settingsSetClaude: 'settings:setClaude',
+  projectSetClaude: 'project:setClaude',
   ptyStartSession: 'pty:startSession',
   ptyStartLogin: 'pty:startLogin',
   ptyWrite: 'pty:write',

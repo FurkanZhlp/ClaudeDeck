@@ -4,7 +4,10 @@ import type {
   AccountInput,
   AccountStatus,
   AppState,
+  ClaudeSettings,
   Language,
+  PermissionMode,
+  ProjectClaudePatch,
   ProjectInput,
   SessionKind,
   UpdateInfo,
@@ -13,7 +16,13 @@ import type {
 import i18n from './i18n'
 import * as pool from './terminal/terminalPool'
 
-export type Running = { accountId: string; exitCode: number | null; runId: number }
+export type Running = {
+  accountId: string
+  exitCode: number | null
+  runId: number
+  /** Mode the Claude tab was started in; set once the process is running. */
+  permissionMode?: PermissionMode | null
+}
 export type ProjectDialogState = { mode: 'create' } | { mode: 'edit'; projectId: string } | null
 export type StatusEntry = AccountStatus | 'checking'
 
@@ -43,6 +52,8 @@ interface AppStore {
   setLanguage: (language: Language | null) => Promise<void>
   setUsageSettings: (patch: Partial<UsageSettings>) => Promise<void>
   setLaunchAtLogin: (enabled: boolean) => Promise<void>
+  setClaudeSettings: (patch: Partial<ClaudeSettings>) => Promise<void>
+  setProjectClaude: (id: string, patch: ProjectClaudePatch) => Promise<void>
   refreshStatus: (accountId: string) => Promise<void>
   /** Creates the account and selects it; returns its id so the caller can start onboarding. */
   createAccount: (input: AccountInput) => Promise<string | null>
@@ -56,7 +67,8 @@ interface AppStore {
   selectAccount: (id: string) => void
   selectProject: (id: string) => void
   selectSession: (id: string) => void
-  createSession: (kind: SessionKind) => Promise<void>
+  /** `permissionMode` pins a new Claude tab's mode; omitted inherits project/global. */
+  createSession: (kind: SessionKind, permissionMode?: PermissionMode) => Promise<void>
   startSession: (id: string, resume: boolean) => void
   spawn: (id: string, resume: boolean, cols: number, rows: number) => Promise<void>
   closeSession: (id: string) => Promise<void>
@@ -215,6 +227,16 @@ export const useApp = create<AppStore>((set, get) => {
       if (data) set({ data })
     },
 
+    async setClaudeSettings(patch) {
+      const data = await guard(() => window.api.settings.setClaude(patch))
+      if (data) set({ data })
+    },
+
+    async setProjectClaude(id, patch) {
+      const data = await guard(() => window.api.projects.setClaude(id, patch))
+      if (data) set({ data })
+    },
+
     async refreshStatus(accountId) {
       const request = (statusRequests[accountId] ?? 0) + 1
       statusRequests[accountId] = request
@@ -343,14 +365,16 @@ export const useApp = create<AppStore>((set, get) => {
       })
     },
 
-    async createSession(kind) {
+    async createSession(kind, permissionMode) {
       const { data, selectedProjectId } = get()
       const project = data?.projects.find((p) => p.id === selectedProjectId)
       if (!data || !project) return
       const n =
         data.sessions.filter((s) => s.projectId === project.id && s.kind === kind).length + 1
       const title = i18n.t(kind === 'claude' ? 'session.claudeTitle' : 'session.shellTitle', { n })
-      const result = await guard(() => window.api.sessions.create(project.id, kind, title))
+      const result = await guard(() =>
+        window.api.sessions.create(project.id, kind, title, permissionMode)
+      )
       if (!result) return
       set({ data: result.state })
       get().selectSession(result.session.id)
@@ -375,7 +399,9 @@ export const useApp = create<AppStore>((set, get) => {
       const result = await guard(() => window.api.pty.startSession(id, resume, cols, rows))
       const running = { ...get().running }
       const run = running[id]
-      if (result && run) running[id] = { ...run, accountId: result.accountId }
+      if (result && run) {
+        running[id] = { ...run, accountId: result.accountId, permissionMode: result.permissionMode }
+      }
       if (!result) delete running[id]
       set({ running })
     },

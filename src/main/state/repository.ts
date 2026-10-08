@@ -2,12 +2,16 @@ import { randomUUID } from 'node:crypto'
 import { isAbsolute, join } from 'node:path'
 import { DomainError } from '../../shared/errors'
 import { LANGUAGES } from '../../shared/language'
+import { defaultClaudeSettings, isPermissionMode } from '../../shared/permissionMode'
 import type {
   Account,
   AccountInput,
   AppState,
+  ClaudeSettings,
   Language,
+  PermissionMode,
   Project,
+  ProjectClaudePatch,
   ProjectInput,
   ProjectTestQueue,
   Session,
@@ -28,7 +32,8 @@ export const defaultSettings = (): Settings => ({
   language: null,
   usage: { display: 'used', trayEnabled: true, trayMetric: 'both', trayAccount: 'auto' },
   launchAtLogin: false,
-  testQueue: defaultTestQueueSettings()
+  testQueue: defaultTestQueueSettings(),
+  claude: defaultClaudeSettings()
 })
 
 export const emptyState = (): AppState => ({
@@ -48,9 +53,26 @@ function withDefaultSettings(state: AppState): AppState {
       ...defaults,
       ...saved,
       usage: { ...defaults.usage, ...(saved.usage ?? {}) },
-      testQueue: withTestQueueDefaults(saved.testQueue)
+      testQueue: withTestQueueDefaults(saved.testQueue),
+      claude: withClaudeDefaults(saved.claude)
     }
   }
+}
+
+/** Saved Claude launch settings with unknown or hand-edited values replaced by defaults. */
+function withClaudeDefaults(saved: unknown): ClaudeSettings {
+  const defaults = defaultClaudeSettings()
+  if (!saved || typeof saved !== 'object') return defaults
+  const { permissionMode, allowBypass } = saved as Partial<Record<keyof ClaudeSettings, unknown>>
+  return {
+    permissionMode: isPermissionMode(permissionMode) ? permissionMode : defaults.permissionMode,
+    allowBypass: typeof allowBypass === 'boolean' ? allowBypass : defaults.allowBypass
+  }
+}
+
+function requireMode(value: unknown): PermissionMode {
+  if (!isPermissionMode(value)) throw new DomainError('INVALID')
+  return value
 }
 
 function requirePath(value: unknown): string {
@@ -164,13 +186,16 @@ export class Repository {
     return { state, removedSessionIds }
   }
 
+  /** `permissionMode` pins a Claude tab's mode; absent inherits the project/global one. */
   createSession(
     projectId: string,
     kind: SessionKind,
-    title: string
+    title: string,
+    permissionMode?: PermissionMode
   ): { state: AppState; session: Session } {
     this.project(projectId)
     if (kind !== 'claude' && kind !== 'shell') throw new DomainError('INVALID')
+    if (permissionMode !== undefined && kind !== 'claude') throw new DomainError('INVALID')
     const session: Session = {
       id: this.newId(),
       projectId,
@@ -178,6 +203,7 @@ export class Repository {
       title: requireText(title),
       createdAt: Date.now()
     }
+    if (permissionMode !== undefined) session.permissionMode = requireMode(permissionMode)
     const state = this.commit({ ...this.state, sessions: [...this.state.sessions, session] })
     return { state, session }
   }
@@ -240,6 +266,37 @@ export class Repository {
   setTestQueueSettings(patch: TestQueueSettingsPatch): AppState {
     const testQueue = applyTestQueuePatch(this.state.settings.testQueue, patch, this.newId)
     return this.commit({ ...this.state, settings: { ...this.state.settings, testQueue } })
+  }
+
+  setClaudeSettings(patch: Partial<ClaudeSettings>): AppState {
+    if (!patch || typeof patch !== 'object') throw new DomainError('INVALID')
+    const claude = { ...this.state.settings.claude }
+    if (patch.permissionMode !== undefined)
+      claude.permissionMode = requireMode(patch.permissionMode)
+    if (patch.allowBypass !== undefined) {
+      if (typeof patch.allowBypass !== 'boolean') throw new DomainError('INVALID')
+      claude.allowBypass = patch.allowBypass
+    }
+    return this.commit({ ...this.state, settings: { ...this.state.settings, claude } })
+  }
+
+  /** Project launch overrides; 'inherit' removes the override (and an empty `claude` field). */
+  setProjectClaude(id: string, patch: ProjectClaudePatch): AppState {
+    this.project(id)
+    if (!patch || typeof patch !== 'object') throw new DomainError('INVALID')
+    const mode = patch.permissionMode
+    if (mode === undefined) return this.state
+    const override = mode === 'inherit' ? undefined : requireMode(mode)
+    return this.commit({
+      ...this.state,
+      projects: this.state.projects.map((p) => {
+        if (p.id !== id) return p
+        const next: Project = { ...p }
+        if (override) next.claude = { ...p.claude, permissionMode: override }
+        else delete next.claude
+        return next
+      })
+    })
   }
 
   /** Project overrides; the field is dropped when it equals the defaults (inherit, no rules). */

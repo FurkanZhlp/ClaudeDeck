@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Account, Language } from '@shared/types'
 import { ProfileSection } from '../onboarding/ProfileSection'
+import { ClaudePermissionsSection } from '../permissions/PermissionSections'
 import {
   AboutSettingsSection,
   GeneralSettingsSection,
@@ -77,6 +78,7 @@ function SettingsContent(): React.JSX.Element | null {
 
       <UsageSettingsSection />
       <GeneralSettingsSection />
+      <ClaudePermissionsSection />
       <TestQueueSettingsSection />
 
       <section className="mt-6 space-y-2">
