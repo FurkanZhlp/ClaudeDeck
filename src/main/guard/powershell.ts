@@ -1,6 +1,7 @@
 import {
   cmdName,
   cmdScript,
+  full,
   nested,
   newState,
   parsePosix,
@@ -360,6 +361,10 @@ function parseTokens(tokens: PsToken[], state: ParseState): void {
   }
 
   for (const token of tokens) {
+    if (full(state)) {
+      state.truncated = true
+      return
+    }
     if (token.kind === 'op') flush(token.text)
     else if (token.kind === 'redir') redir = token.text
     else if (redir !== null) {

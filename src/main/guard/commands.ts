@@ -157,7 +157,8 @@ export const newState = (ctx: ParseContext): ParseState => ({
 
 /** Runs `fn` one level deeper with an extra wrapper name; stops at MAX_DEPTH. */
 export function nested(state: ParseState, via: string, fn: () => void): void {
-  if (state.depth >= MAX_DEPTH) {
+  // Past a limit the input is denied anyway: nothing more is parsed.
+  if (state.depth >= MAX_DEPTH || full(state)) {
     state.truncated = true
     return
   }
@@ -172,6 +173,10 @@ export function nested(state: ParseState, via: string, fn: () => void): void {
     state.cwd = cwd
   }
 }
+
+/** No more commands or arguments fit: the input is uncheckable. */
+export const full = (state: ParseState): boolean =>
+  state.oversized || state.cmds.length >= MAX_COMMANDS
 
 /** Adds a command; null (and `truncated`) past MAX_COMMANDS. */
 export function push(
@@ -680,6 +685,10 @@ export function parsePosix(input: string, state: ParseState): void {
   let pipeline = state.nextPipeline++
   let feeder: Cmd | null = null
   for (const segment of segments) {
+    if (full(state)) {
+      state.truncated = true
+      return
+    }
     const before = state.cmds.length
     addSegment(segment, state, pipeline, feeder)
     // The pipeline's next command reads what the first command of this segment writes.
