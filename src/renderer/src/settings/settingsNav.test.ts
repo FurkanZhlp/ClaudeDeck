@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { navTargetIndex } from './navKeys'
+import { navTargetIndex, pageScrollDelta } from './navKeys'
 import {
   DEFAULT_SETTINGS_SECTION,
   isSettingsSectionId,
@@ -67,5 +67,16 @@ describe('navTargetIndex', () => {
     expect(navTargetIndex('End', 0, 3)).toBe(2)
     expect(navTargetIndex('Enter', 0, 3)).toBeNull()
     expect(navTargetIndex('ArrowDown', 0, 0)).toBeNull()
+  })
+})
+
+describe('pageScrollDelta', () => {
+  it('pages the content by most of its height', () => {
+    expect(pageScrollDelta('PageDown', 800)).toBe(720)
+    expect(pageScrollDelta('PageUp', 800)).toBe(-720)
+  })
+  it('leaves other keys to the navigation', () => {
+    expect(pageScrollDelta('ArrowDown', 800)).toBeNull()
+    expect(pageScrollDelta(' ', 800)).toBeNull()
   })
 })

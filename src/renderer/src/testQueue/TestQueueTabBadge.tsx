@@ -1,13 +1,14 @@
 import { Hourglass, TriangleAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { guardHooksOff } from '../guard/guardModel'
 import { useApp } from '../store'
 import { waitingPosition } from './queueModel'
 import { useTestQueue } from './testQueueStore'
 
 /**
  * Small marker for a Claude tab: an hourglass with the queue position while one of its test
- * runs waits, or a warning when hooks are disabled for its project (the queue cannot see it).
- * Renders nothing while the feature is off.
+ * runs waits, or a warning when hooks are disabled for its project (neither the queue nor the
+ * command guard can see it). Renders nothing while both features are off.
  */
 export function TestQueueTabBadge({
   sessionId,
@@ -24,10 +25,16 @@ export function TestQueueTabBadge({
       !!s.hookStatus &&
       (s.hookStatus.managedHooksOnly || s.hookStatus.hooksDisabledProjectIds.includes(projectId))
   )
-  if (!enabled) return null
+  const guardOff = useTestQueue((s) => guardHooksOff(s.hookStatus, projectId))
+  const queueOff = enabled && hooksOff
 
-  if (hooksOff) {
-    const label = t('testQueue.badge.hooksDisabled')
+  if (queueOff || guardOff) {
+    const label =
+      queueOff && guardOff
+        ? t('guard.badge.hooksDisabledBoth')
+        : guardOff
+          ? t('guard.badge.hooksDisabled')
+          : t('testQueue.badge.hooksDisabled')
     return (
       <span
         role="img"
@@ -39,7 +46,7 @@ export function TestQueueTabBadge({
       </span>
     )
   }
-  if (position === null) return null
+  if (!enabled || position === null) return null
   const label = t('testQueue.badge.waiting', { position })
   return (
     <span

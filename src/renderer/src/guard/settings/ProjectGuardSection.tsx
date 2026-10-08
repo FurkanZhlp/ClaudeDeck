@@ -1,11 +1,18 @@
-import { ChevronRight, RotateCcw } from 'lucide-react'
+import { ChevronRight, Info, RotateCcw } from 'lucide-react'
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { GUARD_ACTIONS, GUARD_CATEGORIES } from '@shared/guardLimits'
-import type { GuardCategoryId, ProjectGuard } from '@shared/types'
+import type { GuardCategoryId, GuardRuleInfo, ProjectGuard } from '@shared/types'
 import { useApp } from '../../store'
 import { Button } from '../../ui/Button'
 import { inputClass } from '../../ui/styles'
-import { INHERIT, needsAllowConfirm, withProjectChoice, type ProjectChoice } from '../guardModel'
+import {
+  INHERIT,
+  needsAllowConfirm,
+  rulesByCategory,
+  withProjectChoice,
+  type ProjectChoice
+} from '../guardModel'
 import { useGuard } from '../guardStore'
 import { useAllowConfirm } from './useAllowConfirm'
 import { GuardCustomRules } from './GuardCustomRules'
@@ -27,7 +34,13 @@ export function ProjectGuardSection({
   const override = useApp((s) => s.data?.projects.find((p) => p.id === projectId)?.guard)
   const global = useApp((s) => s.data?.settings.guard)
   const saveProject = useGuard((s) => s.saveProject)
+  const rules = useGuard((s) => s.rules)
   const { confirm, dialog } = useAllowConfirm()
+
+  useEffect(() => {
+    void useGuard.getState().loadRules()
+  }, [])
+
   if (!global) return null
 
   const save = async (patch: Partial<ProjectGuard> | null): Promise<string | null> => {
@@ -36,6 +49,7 @@ export function ProjectGuardSection({
     return code
   }
   const categories = override?.categories ?? {}
+  const groups = rulesByCategory(rules ?? [])
   const changed = Object.keys(categories).length + (override?.customRules.length ?? 0)
   const choose = (category: GuardCategoryId, choice: ProjectChoice): void =>
     confirm(
@@ -75,7 +89,10 @@ export function ProjectGuardSection({
               return (
                 <li key={id} className="flex items-center gap-2.5">
                   <Icon size={14} aria-hidden className="shrink-0 text-muted" />
-                  <span className="min-w-0 flex-1 truncate">{name}</span>
+                  <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                    <span className="truncate">{name}</span>
+                    <SpecialRulesInfo rules={groups.get(id) ?? []} />
+                  </span>
                   <select
                     aria-label={t('guard.settings.categoryAction', { category: name })}
                     className={`${inputClass} !w-44 shrink-0 !py-1 text-[12px] ${value === INHERIT ? 'text-muted' : ''}`}
@@ -118,5 +135,37 @@ export function ProjectGuardSection({
       </details>
       {dialog}
     </>
+  )
+}
+
+/**
+ * Rules that do not simply follow the category action chosen here: capped ones ask at most, and
+ * default-deny ones deny unless the category allows.
+ */
+function SpecialRulesInfo({
+  rules
+}: {
+  rules: readonly GuardRuleInfo[]
+}): React.JSX.Element | null {
+  const { t } = useTranslation()
+  const names = (list: GuardRuleInfo[]): string => list.map((r) => t(r.label)).join(', ')
+  const capped = rules.filter((r) => r.maxAction)
+  const denied = rules.filter((r) => r.defaultAction)
+  const lines = [
+    capped.length > 0 ? t('guard.project.cappedRules', { rules: names(capped) }) : null,
+    denied.length > 0 ? t('guard.project.defaultRules', { rules: names(denied) }) : null
+  ].filter((line): line is string => line !== null)
+  if (lines.length === 0) return null
+  const text = `${lines.join('. ')}.`
+  return (
+    <span
+      tabIndex={0}
+      role="img"
+      aria-label={text}
+      data-tooltip={text}
+      className="shrink-0 rounded text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+    >
+      <Info size={12} aria-hidden />
+    </span>
   )
 }

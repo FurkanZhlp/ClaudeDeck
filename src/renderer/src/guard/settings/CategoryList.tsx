@@ -7,8 +7,10 @@ import { Segmented } from '../../ui/Segmented'
 import { inputClass } from '../../ui/styles'
 import {
   FOLLOW_CATEGORY,
+  followedRuleAction,
   needsAllowConfirm,
   overrideCount,
+  ruleActionAvailable,
   rulesByCategory,
   withRuleChoice,
   type RuleChoice
@@ -174,29 +176,57 @@ function RuleRow({
   onChange: (choice: RuleChoice) => void
 }): React.JSX.Element {
   const { t } = useTranslation()
+  const hintId = useId()
   const label = t(rule.label)
+  const followed = followedRuleAction(rule, categoryAction)
+  const followedLabel =
+    followed.source === 'default'
+      ? t('guard.settings.ruleDefault', { action: t(`guard.actions.${followed.action}`) })
+      : t('guard.settings.followCategory', { action: t(`guard.actions.${followed.action}`) })
+  const hint = rule.defaultAction
+    ? t('guard.settings.ruleDefaultHint')
+    : rule.maxAction
+      ? t('guard.settings.ruleCappedHint')
+      : null
   return (
     <li className="flex items-center gap-3 py-0.5">
       <span className="min-w-0 flex-1">
-        <span className="block text-[12.5px] leading-snug">{label}</span>
+        <span className="flex items-center gap-1.5 text-[12.5px] leading-snug">
+          <span className="min-w-0">{label}</span>
+          {hint && (
+            <span
+              tabIndex={0}
+              role="img"
+              aria-label={hint}
+              data-tooltip={hint}
+              className="shrink-0 rounded text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <Info size={12} aria-hidden />
+            </span>
+          )}
+        </span>
         <code
           className="block truncate font-mono text-[11px] text-muted [font-variant-ligatures:none]"
           data-tooltip={rule.example}
         >
           {rule.example}
         </code>
+        {hint && (
+          <span id={hintId} hidden>
+            {hint}
+          </span>
+        )}
       </span>
       <select
         aria-label={t('guard.settings.ruleAction', { rule: label })}
+        aria-describedby={hint ? hintId : undefined}
         className={`${inputClass} !w-auto shrink-0 !py-1 text-[12px] ${choice === FOLLOW_CATEGORY ? 'text-muted' : ''}`}
         value={choice}
         onChange={(event) => onChange(event.target.value as RuleChoice)}
       >
-        <option value={FOLLOW_CATEGORY}>
-          {t('guard.settings.followCategory', { action: t(`guard.actions.${categoryAction}`) })}
-        </option>
+        <option value={FOLLOW_CATEGORY}>{followedLabel}</option>
         {GUARD_ACTIONS.map((value) => (
-          <option key={value} value={value}>
+          <option key={value} value={value} disabled={!ruleActionAvailable(rule, value)}>
             {t(`guard.actions.${value}`)}
           </option>
         ))}

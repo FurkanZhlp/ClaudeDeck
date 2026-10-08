@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { GuardSettingsPatch } from '@shared/types'
+import { guardHooksOff } from '../../guard/guardModel'
 import { useGuard } from '../../guard/guardStore'
 import { ActivityLog } from '../../guard/settings/ActivityLog'
 import { CategoryList } from '../../guard/settings/CategoryList'
@@ -35,7 +36,12 @@ export function GuardSection(): React.JSX.Element | null {
         label={t('guard.settings.enabled')}
         hint={t('guard.settings.enabledHint')}
         checked={settings.enabled}
-        onChange={(enabled) => void save({ enabled })}
+        onChange={(enabled) =>
+          void save({ enabled }).then((code) => {
+            // The hook status says whether the guard is on; it changes with the switch.
+            if (!code) void useTestQueue.getState().loadHookStatus()
+          })
+        }
       />
       {settings.enabled && (
         <>
@@ -62,11 +68,12 @@ export function GuardSection(): React.JSX.Element | null {
 
 /**
  * Where the hook cannot run, the guard cannot either: Windows accounts without Git Bash get no
- * hook, and managed settings may allow only managed hooks.
+ * hook, managed settings may allow only managed hooks, and a project may disable all hooks.
  */
 function HookProblems(): React.JSX.Element | null {
   const { t } = useTranslation()
   const status = useTestQueue((s) => s.hookStatus)
+  const projects = useApp((s) => s.data?.projects) ?? []
 
   useEffect(() => {
     void useTestQueue.getState().loadHookStatus()
@@ -74,13 +81,25 @@ function HookProblems(): React.JSX.Element | null {
 
   if (!status) return null
   const noGitBash = status.accounts.some((a) => a.problem === 'noGitBash')
-  if (!status.managedHooksOnly && !noGitBash) return null
+  const disabled = guardHooksOff(status)
+    ? projects.filter((p) => status.hooksDisabledProjectIds.includes(p.id))
+    : []
+  if (!status.managedHooksOnly && !noGitBash && disabled.length === 0) return null
   return (
     <Notice tone="warn">
       {status.managedHooksOnly ? (
         <p>{t('guard.settings.managedOnly')}</p>
       ) : (
-        <p>{t('guard.settings.noGitBash')}</p>
+        <>
+          {noGitBash && <p>{t('guard.settings.noGitBash')}</p>}
+          {disabled.length > 0 && (
+            <p>
+              {t('guard.settings.projectsHooksDisabled', {
+                projects: disabled.map((p) => p.name).join(', ')
+              })}
+            </p>
+          )}
+        </>
       )}
     </Notice>
   )

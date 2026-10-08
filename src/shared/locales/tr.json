@@ -884,7 +884,8 @@
         "rawDevice": "Ham disk aygıtına yazma",
         "systemDelete": "Kök dizini, bir sistem klasörünü, bir ev klasörünü veya proje klasörünü silme",
         "recursivePermissions": "Sistem veya ev klasörlerinde izinleri ya da sahipliği toplu olarak değiştirme",
-        "forkBomb": "Çatallanma bombası (fork bomb)"
+        "forkBomb": "Çatallanma bombası (fork bomb)",
+        "uncheckable": "Denetlenemeyecek kadar uzun veya iç içe komutlar"
       },
       "sensitive": {
         "ssh": "~/.ssh içindeki dosyaları değiştirme",
@@ -896,7 +897,9 @@
         "claudeSettings": "Claude'un ayarlarını, hook'larını veya kimlik bilgilerini değiştirme",
         "claudeConfig": "Claude'un yapılandırma klasöründeki dosyaları değiştirme",
         "claudedeck": "ClaudeDeck verilerini veya diğer hesapların klasörlerini değiştirme",
-        "gitInternals": "Doğrudan .git içindeki dosyaları değiştirme"
+        "gitInternals": "Doğrudan .git içindeki dosyaları değiştirme",
+        "claudedeckProcess": "ClaudeDeck'i, hook'unu veya Claude'u durdurma",
+        "projectAgentConfig": "Projenin Claude hook'ları, ajanları ve MCP sunucuları"
       },
       "git": {
         "forcePush": "Zorla gönderme (force push)",
@@ -908,7 +911,8 @@
         "stashDrop": "Saklanan (stash) değişiklikleri silme",
         "rebaseShared": "Paylaşılan bir dalı yeniden temellendirme (rebase)",
         "historyRewrite": "Geçmişi yeniden yazma veya nesneleri budama",
-        "repoDelete": "Bir depoyu silme"
+        "repoDelete": "Bir depoyu silme",
+        "execConfig": "Komut çalıştıran git ayarları"
       },
       "fetchExec": {
         "pipeShell": "İndirilen içeriği doğrudan bir kabuğa veya yorumlayıcıya aktarma",
@@ -935,7 +939,10 @@
         "sudo": "Bir komutu yönetici olarak çalıştırma (sudo)",
         "killAll": "Tüm süreçleri veya geniş bir süreç grubunu sonlandırma",
         "shutdown": "Bilgisayarı kapatma, yeniden başlatma veya oturumu kapatma",
-        "services": "Sistem hizmetlerini veya zamanlanmış görevleri durdurma ya da devre dışı bırakma"
+        "services": "Sistem hizmetlerini veya zamanlanmış görevleri durdurma ya da devre dışı bırakma",
+        "autostart": "Oturum öğeleri, başlatma ajanları ve zamanlanmış işler",
+        "nestedClaudeEscape": "Claude'u koruma dışında başlatma",
+        "uncheckedCode": "Korumanın okuyamadığı kod"
       }
     },
     "actions": {
@@ -989,7 +996,11 @@
       "ruleAction": "{{rule}} için işlem",
       "followCategory": "Kategori ayarı ({{action}})",
       "noGitBash": "Bu bilgisayarda Git Bash bulunamadığı için ClaudeDeck hook'u kurulmadı ve komut koruması etkin değil. Etkinleştirmek için Git for Windows'u kurup ClaudeDeck'i yeniden başlatın.",
-      "managedOnly": "Kuruluşunuzun yönetilen ayarları yalnızca yönetilen hook'lara izin verdiği için komut koruması çalışamaz."
+      "managedOnly": "Kuruluşunuzun yönetilen ayarları yalnızca yönetilen hook'lara izin verdiği için komut koruması çalışamaz.",
+      "ruleDefault": "Varsayılan ({{action}})",
+      "ruleDefaultHint": "Bu kural, kategorisi Sor olarak ayarlı olsa bile varsayılan olarak reddeder. Kategori İzin ver olarak ayarlanırsa bu kurala da izin verilir.",
+      "ruleCappedHint": "Bu denetim doğrudan engellenemeyecek kadar geniş olduğundan kategori ayarı en fazla Sor olarak uygulanır. Reddet seçeneği bu kural için kullanılamaz.",
+      "projectsHooksDisabled": "Şu projelerin Claude ayarlarında hook'lar kapalı olduğu için oradaki Claude komutları denetlenmez: {{projects}}"
     },
     "confirm": {
       "title": "{{category}} kategorisindeki her şeye izin verilsin mi?",
@@ -1061,7 +1072,13 @@
       "hint": "Bu proje için kategori işlemlerini değiştirin. Ayarlar'da ayrıca ayarlanan kurallar kendi işlemini korur.",
       "inheritAction": "Genel ayar ({{action}})",
       "customRules": "Bu projeye özel ek kurallar",
-      "reset": "Genel ayarları kullan"
+      "reset": "Genel ayarları kullan",
+      "cappedRules": "Kategori reddetse bile en fazla Sor: {{rules}}",
+      "defaultRules": "Kategori izin vermedikçe varsayılan olarak Reddet: {{rules}}"
+    },
+    "badge": {
+      "hooksDisabled": "Bu projede hook'lar kapalı olduğu için komut koruması Claude'un komutlarını burada denetlemez",
+      "hooksDisabledBoth": "Bu projede hook'lar kapalı olduğu için komut koruması ve test kuyruğu burada çalışmaz"
     }
   }
 }

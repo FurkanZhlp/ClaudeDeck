@@ -884,7 +884,8 @@
         "rawDevice": "Writing to a raw disk device",
         "systemDelete": "Deleting the root, a system folder, a home folder or the project folder",
         "recursivePermissions": "Changing permissions or owners recursively on system or home folders",
-        "forkBomb": "Fork bomb"
+        "forkBomb": "Fork bomb",
+        "uncheckable": "Commands too long or nested to check"
       },
       "sensitive": {
         "ssh": "Changing files in ~/.ssh",
@@ -896,7 +897,9 @@
         "claudeSettings": "Changing Claude's settings, hooks or credentials",
         "claudeConfig": "Changing files in Claude's configuration folder",
         "claudedeck": "Changing ClaudeDeck's data or other accounts' folders",
-        "gitInternals": "Changing files inside .git directly"
+        "gitInternals": "Changing files inside .git directly",
+        "claudedeckProcess": "Stopping ClaudeDeck, its hook or Claude",
+        "projectAgentConfig": "Project Claude hooks, agents and MCP servers"
       },
       "git": {
         "forcePush": "Force push",
@@ -908,7 +911,8 @@
         "stashDrop": "Dropping stashed changes",
         "rebaseShared": "Rebasing a shared branch",
         "historyRewrite": "Rewriting history or pruning objects",
-        "repoDelete": "Deleting a repository"
+        "repoDelete": "Deleting a repository",
+        "execConfig": "Git options that run commands"
       },
       "fetchExec": {
         "pipeShell": "Piping a download into a shell or interpreter",
@@ -935,7 +939,10 @@
         "sudo": "Running a command as administrator (sudo)",
         "killAll": "Killing every process or a broad set of processes",
         "shutdown": "Shutting down, restarting or logging out",
-        "services": "Stopping or disabling system services or scheduled jobs"
+        "services": "Stopping or disabling system services or scheduled jobs",
+        "autostart": "Login items, launch agents and scheduled jobs",
+        "nestedClaudeEscape": "Starting Claude outside the guard",
+        "uncheckedCode": "Code the guard cannot read"
       }
     },
     "actions": {
@@ -989,7 +996,11 @@
       "ruleAction": "Action for {{rule}}",
       "followCategory": "Category setting ({{action}})",
       "noGitBash": "Git Bash was not found on this computer, so the ClaudeDeck hook is not installed and the command guard is not active. Install Git for Windows and restart ClaudeDeck to turn it on.",
-      "managedOnly": "Your organisation's managed settings allow only managed hooks, so the command guard cannot run."
+      "managedOnly": "Your organisation's managed settings allow only managed hooks, so the command guard cannot run.",
+      "ruleDefault": "Default ({{action}})",
+      "ruleDefaultHint": "This rule denies by default, even while its category asks. Setting the category to Allow allows it too.",
+      "ruleCappedHint": "This check is too broad to block outright, so the category can make it ask at most. Deny is not available for it.",
+      "projectsHooksDisabled": "Hooks are disabled in these projects' Claude settings, so Claude's commands there are not checked: {{projects}}"
     },
     "confirm": {
       "title": "Allow everything in {{category}}?",
@@ -1061,7 +1072,13 @@
       "hint": "Override category actions for this project. Rules set separately in Settings keep their own action.",
       "inheritAction": "General setting ({{action}})",
       "customRules": "Extra rules for this project",
-      "reset": "Use the general settings"
+      "reset": "Use the general settings",
+      "cappedRules": "At most Ask, even when the category denies: {{rules}}",
+      "defaultRules": "Deny by default unless the category allows: {{rules}}"
+    },
+    "badge": {
+      "hooksDisabled": "Hooks are disabled for this project, so the command guard does not check Claude's commands here",
+      "hooksDisabledBoth": "Hooks are disabled for this project, so the command guard and the test queue do not apply here"
     }
   }
 }

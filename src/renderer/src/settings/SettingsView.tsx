@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useApp } from '../store'
 import { SettingsNav } from './SettingsNav'
+import { pageScrollDelta } from './navKeys'
 import { resolveSettingsSection, visibleSettingsSections } from './registry'
 
 /** Settings mount point: a full-window view over the workspace while open. */
@@ -55,6 +56,14 @@ function SettingsScreen(): React.JSX.Element | null {
   if (!section) return null
   const Content = section.component
 
+  const onNavKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    const pane = scrollRef.current
+    const delta = pane && pageScrollDelta(event.key, pane.clientHeight)
+    if (!pane || !delta || event.altKey || event.ctrlKey || event.metaKey) return
+    event.preventDefault()
+    pane.scrollBy({ top: delta })
+  }
+
   return (
     <div
       role="region"
@@ -63,6 +72,7 @@ function SettingsScreen(): React.JSX.Element | null {
     >
       <div
         ref={navRef}
+        onKeyDown={onNavKeyDown}
         className="flex w-[240px] shrink-0 flex-col border-r border-border bg-panel"
       >
         {/* Title strip: room for the macOS traffic lights; drags the window. */}
@@ -72,7 +82,14 @@ function SettingsScreen(): React.JSX.Element | null {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="drag h-11 shrink-0" />
-        <div ref={scrollRef} className="scroll-area min-h-0 flex-1 overflow-y-auto">
+        {/* Focusable, so the keyboard can scroll a long page once focus leaves the navigation. */}
+        <div
+          ref={scrollRef}
+          tabIndex={0}
+          role="region"
+          aria-labelledby="settings-page-title"
+          className="scroll-area min-h-0 flex-1 overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        >
           <div className="flex justify-center gap-6 px-10 pb-16 pt-4">
             <main aria-labelledby="settings-page-title" className="w-full min-w-0 max-w-[640px]">
               <header className="mb-6 border-b border-border pb-5">

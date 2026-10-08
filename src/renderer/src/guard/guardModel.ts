@@ -6,7 +6,8 @@ import type {
   GuardLogEntry,
   GuardRuleInfo,
   GuardSettings,
-  ProjectGuard
+  ProjectGuard,
+  TestQueueHookStatus
 } from '@shared/types'
 import { checkPattern } from '../testQueue/queueModel'
 
@@ -58,6 +59,38 @@ export function withProjectChoice(
 /** Allowing everything in these categories is confirmed first. */
 export const needsAllowConfirm = (category: GuardCategoryId, action: RuleChoice): boolean =>
   action === 'allow' && GUARD_CONFIRM_ALLOW.includes(category)
+
+/**
+ * What a rule does while it follows its category, mirroring the main process: a rule with a
+ * default deny keeps it unless the category allows, and a capped rule asks at most.
+ */
+export function followedRuleAction(
+  rule: GuardRuleInfo,
+  categoryAction: GuardAction
+): { action: GuardAction; source: 'category' | 'default' | 'capped' } {
+  if (categoryAction !== 'allow' && rule.defaultAction) {
+    return { action: rule.defaultAction, source: 'default' }
+  }
+  if (categoryAction === 'deny' && rule.maxAction === 'ask')
+    return { action: 'ask', source: 'capped' }
+  return { action: categoryAction, source: 'category' }
+}
+
+/** Whether `action` can be chosen for the rule; capped rules cannot be set to deny. */
+export const ruleActionAvailable = (rule: GuardRuleInfo, action: GuardAction): boolean =>
+  !(rule.maxAction === 'ask' && action === 'deny')
+
+/**
+ * The guard is on but the hook cannot run: everywhere (managed hooks only) or in the given
+ * project (its settings disable all hooks). Without a project, any project counts.
+ */
+export function guardHooksOff(status: TestQueueHookStatus | null, projectId?: string): boolean {
+  if (!status?.guardEnabled) return false
+  if (status.managedHooksOnly) return true
+  return projectId === undefined
+    ? status.hooksDisabledProjectIds.length > 0
+    : status.hooksDisabledProjectIds.includes(projectId)
+}
 
 /** Rules in a category with their own action, for the collapsed row's counter. */
 export const overrideCount = (

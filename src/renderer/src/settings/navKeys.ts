@@ -17,3 +17,16 @@ export function navTargetIndex(key: string, current: number, count: number): num
       return null
   }
 }
+
+/** Share of the visible height a Page Up / Page Down moves, like the browser's own paging. */
+const PAGE_SHARE = 0.9
+
+/**
+ * Page Up / Page Down pressed in the navigation scroll the page content instead: focus starts in
+ * the navigation, whose own keys would otherwise leave a long section out of keyboard reach.
+ */
+export function pageScrollDelta(key: string, viewportHeight: number): number | null {
+  if (key === 'PageDown') return Math.round(viewportHeight * PAGE_SHARE)
+  if (key === 'PageUp') return -Math.round(viewportHeight * PAGE_SHARE)
+  return null
+}
