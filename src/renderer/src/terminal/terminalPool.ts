@@ -4,6 +4,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { isWindows, primaryModifier } from '../platform'
+import { useApp } from '../store'
 
 /** Her oturumun xterm örneği burada yaşar; görünüm değişince yalnızca DOM'a takılıp çıkarılır. */
 interface Entry {
@@ -47,7 +48,9 @@ function create(id: string): Entry {
       if (primaryModifier(event)) window.open(uri)
     })
   )
-  if (isWindows) term.attachCustomKeyEventHandler((event) => windowsClipboardKeys(term, event))
+  term.attachCustomKeyEventHandler(
+    (event) => claudeNewlineKey(id, event) && (!isWindows || windowsClipboardKeys(term, event))
+  )
   term.onData((data) => window.api.pty.write(id, data))
   const host = document.createElement('div')
   host.style.width = '100%'
@@ -59,6 +62,24 @@ function create(id: string): Entry {
   host.addEventListener('webglcontextlost', () => onWebglLost(id, entry), { capture: true })
   entries.set(id, entry)
   return entry
+}
+
+/** ESC followed by CR: the Meta+Enter sequence Claude Code reads as "insert a newline". */
+const CLAUDE_NEWLINE = '\x1b\r'
+
+/**
+ * Shift+Enter inserts a new line in Claude's prompt. xterm sends a plain CR for it, which submits
+ * the prompt, so Claude tabs get Meta+Enter instead. Shell tabs keep the plain Enter.
+ */
+function claudeNewlineKey(id: string, event: KeyboardEvent): boolean {
+  if (event.type !== 'keydown' || event.key !== 'Enter') return true
+  if (!event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.isComposing)
+    return true
+  const session = useApp.getState().data?.sessions.find((s) => s.id === id)
+  if (session?.kind !== 'claude') return true
+  event.preventDefault()
+  window.api.pty.write(id, CLAUDE_NEWLINE)
+  return false
 }
 
 /**
