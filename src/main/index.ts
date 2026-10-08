@@ -185,6 +185,9 @@ const optimize = new OptimizeManager({
 function applyLaunchAtLogin(enabled: boolean): void {
   if (!app.isPackaged) return
   try {
+    // Called on every start: skip when macOS already has the wanted state, so an app that may
+    // not register login items (ad-hoc signed) does not log an error each launch.
+    if (app.getLoginItemSettings().openAtLogin === enabled) return
     app.setLoginItemSettings(loginItemSettings(process.platform, enabled))
   } catch (error) {
     console.warn('[login-item]', error)

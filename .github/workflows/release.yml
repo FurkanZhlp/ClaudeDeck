@@ -8,7 +8,7 @@ name: Release
 #   4. publish the draft only when every build and the upload succeeded (marked latest only if its
 #      version is not older than the current latest release).
 # A failed build leaves the draft unpublished, so the in-app update check (releases/latest) never
-# sees a half-filled release. Builds are unsigned for now.
+# sees a half-filled release. macOS builds are ad-hoc signed (no Developer ID yet).
 
 on:
   push:
@@ -93,7 +93,8 @@ jobs:
     permissions:
       contents: read
     env:
-      # Unsigned and not notarized, same as the manual release flow so far.
+      # Ad-hoc signed (mac.identity '-' in electron-builder.yml), not notarized. Discovery stays off
+      # so a runner keychain identity is never picked up.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -105,6 +106,14 @@ jobs:
           node-version: 22
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:mac --arm64 --publish never
+      # An invalid signature kills the app at launch on Apple Silicon (0.4.0 shipped like that).
+      - name: Verify the app signature
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/mac-arm64/ClaudeDeck.app
+          mnt="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" dist/*.dmg
+          codesign --verify --deep --strict --verbose=2 "$mnt/ClaudeDeck.app"
+          hdiutil detach "$mnt"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-mac-arm64

@@ -4,5 +4,9 @@
   <dict>
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
+    <!-- Ad-hoc signed builds have no Team ID; hardened runtime would refuse to load the app's own
+         frameworks and native modules (node-pty) without this. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
   </dict>
 </plist>

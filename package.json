@@ -1,7 +1,7 @@
 {
   "name": "claudedeck",
   "productName": "ClaudeDeck",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Çoklu Claude hesabı ile proje bazlı terminal yöneticisi",
   "main": "./out/main/index.js",

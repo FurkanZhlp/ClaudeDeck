@@ -20,7 +20,12 @@ mac:
     - target: dmg
       arch: [arm64]
   category: public.app-category.developer-tools
+  entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # Ad-hoc signature. Flipping Electron fuses rewrites the framework binary, which breaks the
+  # signature Electron ships with; on Apple Silicon an invalid signature kills the app at launch.
+  # Ad-hoc signing re-signs every binary after the fuses are set. No Developer ID yet.
+  identity: '-'
   notarize: false
 dmg:
   artifactName: ${name}-${version}-${arch}.${ext}
