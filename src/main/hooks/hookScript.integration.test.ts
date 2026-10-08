@@ -397,6 +397,14 @@ describe.runIf(shell)('generated hook script', { timeout: 30_000 }, () => {
           { script: keyScript }
         )
         expect(failed).toEqual({ stdout: `${GUARD_UNAVAILABLE_REPLY}\n`, status: 0 })
+        // Connected but no answer in time: denied.
+        const slow = await runHook(
+          'pre',
+          JSON.stringify(sentinel('ALLOW-K5', { note: 'hang' })),
+          {},
+          { script: keyScript }
+        )
+        expect(slow).toEqual({ stdout: `${GUARD_UNAVAILABLE_REPLY}\n`, status: 0 })
         // A key the server does not know (rotated twice since) is a failure too.
         writeFileSync(
           join(keyDir, GUARD_KEY_FILE),

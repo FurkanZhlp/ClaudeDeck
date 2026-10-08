@@ -80,20 +80,22 @@ describe('hookScript', () => {
       }
       trap finish HUP INT TERM
       # send <body event> <route> <seconds>: the answer in $out, its first line in $answer,
-      # curl's exit code in $rc.
+      # curl's exit code in $rc and whether it connected at all in $connected.
       send() {
         status=
         answer=
         rc=0
+        connected=
         : >"$out" && : >"$code" || return 0
         printf '%s' "{\\"t\\":\\"$token\\",\\"e\\":\\"$1\\",\\"p\\":$input}" |
-          curl -q -s --noproxy '*' --connect-timeout 2 --max-time "$3" -w '%{http_code}' \\
+          curl -q -s --noproxy '*' --connect-timeout 2 --max-time "$3" -w '%{http_code} %{time_connect}' \\
             -H 'Content-Type: application/json' --data-binary @- -o "$out" "$url$2" >"$code" &
         pid=$!
         wait "$pid"
         rc=$?
         pid=
-        IFS= read -r status <"$code" || :
+        read -r status connect <"$code" || :
+        case $connect in *[1-9]*) connected=1 ;; esac
         IFS= read -r answer <"$out" || :
       }
       if [ "$event" = post ]; then
@@ -110,11 +112,12 @@ describe('hookScript', () => {
         route=guard
         send guard "$route" 5
       fi
-      # With the key, curl 7 (connection refused) means ClaudeDeck is not running: pass.
+      # With the key, no connection (refused, or never answered on Windows) means ClaudeDeck is
+      # not running: pass.
       case $mode:$status in
         *:200) ;;
         tab:401) stage=; finish ;;
-        key:000) [ "$rc" = 7 ] && { stage=; finish; }; stage=; deny; finish ;;
+        key:000) [ "$rc" = 7 ] || [ -z "$connected" ] && { stage=; finish; }; stage=; deny; finish ;;
         *) stage=; deny; finish ;;
       esac
       stage=
