@@ -15,12 +15,23 @@ export interface Word {
   opaque: boolean
   /** Starts with an unquoted `NAME=` (or `NAME+=`), so it is an assignment in command position. */
   assignable: boolean
+  /** Set on a heredoc delimiter word: the body that follows the command line. */
+  heredoc?: HeredocBody
+}
+
+export interface HeredocBody {
+  /** Lines between the operator's line and the delimiter (tabs stripped for `<<-`). */
+  body: string
+  /** The delimiter was not quoted: the body undergoes `$(...)` and variable expansion. */
+  expands: boolean
 }
 
 export interface Redirect {
   /** Operator as written (`>`, `>>`, `&>`, `<`, `2>` is `>` with the fd dropped, ...). */
   op: string
   target: Word
+  /** Heredoc (`<<`, `<<-`) body; here-strings (`<<<`) keep their text in `target`. */
+  heredoc?: HeredocBody
 }
 
 export interface Segment {
@@ -41,12 +52,29 @@ type Token =
 interface Heredoc {
   delimiter: string
   stripTabs: boolean
+  doc: HeredocBody
 }
 
 /** Nested `$(...)` levels scanned before the rest of the input is treated as opaque. */
 const MAX_NESTING = 32
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/
 const REDIRECTIONS = ['<<<', '<<-', '<<', '<>', '<&', '<', '>>', '>&', '>|', '>']
+
+const ANSI_C_SIMPLE: Record<string, string> = {
+  a: '\x07',
+  b: '\b',
+  e: '\x1b',
+  E: '\x1b',
+  f: '\f',
+  n: '\n',
+  r: '\r',
+  t: '\t',
+  v: '\v',
+  '\\': '\\',
+  "'": "'",
+  '"': '"',
+  '?': '?'
+}
 
 const isBlank = (ch: string): boolean => ch === ' ' || ch === '\t' || ch === '\r'
 const isMeta = (ch: string): boolean => ';&|()<>\n'.includes(ch) || isBlank(ch)
@@ -56,6 +84,8 @@ class Lexer {
   private pending: Heredoc[] = []
   private heredocNext: { stripTabs: boolean } | null = null
   private nesting = 0
+  /** Nesting went past MAX_NESTING: the rest of the input was not followed. */
+  truncated = false
 
   constructor(private readonly src: string) {}
 
@@ -198,8 +228,10 @@ class Lexer {
     const assignment = ASSIGNMENT.exec(text)
     const assignable = !!assignment && (literalPrefix < 0 || assignment[0].length <= literalPrefix)
     if (this.heredocNext) {
-      this.pending.push({ delimiter: text, stripTabs: this.heredocNext.stripTabs })
+      const doc: HeredocBody = { body: '', expands: !quoted }
+      this.pending.push({ delimiter: text, stripTabs: this.heredocNext.stripTabs, doc })
       this.heredocNext = null
+      return { text, quoted, opaque, assignable, heredoc: doc }
     }
     return { text, quoted, opaque, assignable }
   }
@@ -231,16 +263,34 @@ class Lexer {
     return { text, opaque }
   }
 
+  /** `$'...'` with the escapes bash applies (`\n`, `\x72`, `\162`, `\u0072`, `\cX`, ...). */
   private readAnsiC(): string {
     const { src } = this
     let text = ''
     while (this.pos < src.length && src[this.pos] !== "'") {
-      if (src[this.pos] === '\\' && this.pos + 1 < src.length) {
-        const esc = src[this.pos + 1]
-        text += esc === 'n' ? '\n' : esc === 't' ? '\t' : esc
-        this.pos += 2
-      } else {
+      if (src[this.pos] !== '\\' || this.pos + 1 >= src.length) {
         text += src[this.pos++]
+        continue
+      }
+      const esc = src[this.pos + 1]
+      this.pos += 2
+      const simple = ANSI_C_SIMPLE[esc]
+      if (simple !== undefined) {
+        text += simple
+      } else if (esc === 'x' || esc === 'u' || esc === 'U') {
+        const max = esc === 'x' ? 2 : esc === 'u' ? 4 : 8
+        const digits = /^[0-9A-Fa-f]+/.exec(src.slice(this.pos, this.pos + max))?.[0] ?? ''
+        this.pos += digits.length
+        const code = digits ? parseInt(digits, 16) : NaN
+        text += digits && code <= 0x10ffff ? String.fromCodePoint(code) : `\\${esc}`
+      } else if (esc >= '0' && esc <= '7') {
+        const digits = esc + (/^[0-7]{0,2}/.exec(src.slice(this.pos, this.pos + 2))?.[0] ?? '')
+        this.pos += digits.length - 1
+        text += String.fromCharCode(parseInt(digits, 8) & 0xff)
+      } else if (esc === 'c' && this.pos < src.length) {
+        text += String.fromCharCode(src.charCodeAt(this.pos++) & 0x1f)
+      } else {
+        text += `\\${esc}`
       }
     }
     this.pos++
@@ -252,6 +302,7 @@ class Lexer {
     const start = this.pos
     this.pos += 2
     if (this.nesting >= MAX_NESTING) {
+      this.truncated = true
       this.pos = this.src.length
       return this.src.slice(start)
     }
@@ -293,6 +344,7 @@ class Lexer {
     const { src } = this
     while (this.pending.length) {
       const doc = this.pending.shift() as Heredoc
+      const lines: string[] = []
       while (this.pos < src.length) {
         const newline = src.indexOf('\n', this.pos)
         const lineEnd = newline < 0 ? src.length : newline
@@ -300,14 +352,22 @@ class Lexer {
         if (doc.stripTabs) line = line.replace(/^\t+/, '')
         this.pos = newline < 0 ? src.length : newline + 1
         if (line === doc.delimiter) break
+        lines.push(line)
       }
+      doc.doc.body = lines.join('\n')
     }
   }
 }
 
 /** Splits a shell command line into simple commands. Never throws; bad syntax degrades. */
 export function lex(input: string): Segment[] {
-  const tokens = new Lexer(input).readList(false)
+  return lexInfo(input).segments
+}
+
+/** `lex`, and whether nesting limits cut the input short (the rest was not followed). */
+export function lexInfo(input: string): { segments: Segment[]; truncated: boolean } {
+  const lexer = new Lexer(input)
+  const tokens = lexer.readList(false)
   const segments: Segment[] = []
   let words: Word[] = []
   let redirects: Redirect[] = []
@@ -335,14 +395,15 @@ export function lex(input: string): Segment[] {
     if (token.kind === 'redir') {
       redirOp = input.slice(token.start, token.end)
     } else if (redirOp !== null) {
-      redirects.push({ op: redirOp, target: token.word })
+      const { heredoc, ...target } = token.word
+      redirects.push(heredoc ? { op: redirOp, target, heredoc } : { op: redirOp, target })
       redirOp = null
     } else {
       words.push(token.word)
     }
   }
   flush('')
-  return segments
+  return { segments, truncated: lexer.truncated }
 }
 
 /**

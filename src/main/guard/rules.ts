@@ -11,6 +11,16 @@ export interface GuardRule {
   /** What Claude should do instead when the rule asks or denies. */
   advice?: string
   example: string
+  /**
+   * Highest action the category gives this rule: `ask` for checks that are too broad to block
+   * outright. A rule override set by the user still applies as it is.
+   */
+  maxAction?: 'ask'
+  /**
+   * Action of the rule while its category keeps a blocking action (ask or deny); the category
+   * set to allow still allows it, and a rule override applies as it is.
+   */
+  defaultAction?: 'deny'
 }
 
 /** English category names used in reasons for Claude and the terminal. */
@@ -53,6 +63,13 @@ export const GUARD_RULES: readonly GuardRule[] = [
     example: 'chmod -R 777 /'
   },
   { id: 'disk.forkBomb', category: 'disk', what: 'a fork bomb', example: ':(){ :|:& };:' },
+  {
+    id: 'disk.uncheckable',
+    category: 'disk',
+    what: 'a command that is too long or too deeply nested to check',
+    advice: 'Split it into smaller commands.',
+    example: 'bash -c "bash -c \\"...\\"" (7 levels)'
+  },
   // Sensitive files
   {
     id: 'sensitive.ssh',
@@ -107,6 +124,20 @@ export const GUARD_RULES: readonly GuardRule[] = [
     category: 'sensitive',
     what: "changing ClaudeDeck's data or other accounts' folders",
     example: 'ClaudeDeck/config.json'
+  },
+  {
+    id: 'sensitive.claudedeckProcess',
+    category: 'sensitive',
+    what: 'stopping ClaudeDeck, its hook or Claude processes',
+    example: 'pkill -f claudedeck/hook.sh'
+  },
+  {
+    id: 'sensitive.projectAgentConfig',
+    category: 'sensitive',
+    what: "changing the project's Claude hooks, agents or MCP servers",
+    advice: 'Ask the user before changing them.',
+    example: '.claude/hooks/format.sh',
+    maxAction: 'ask'
   },
   {
     id: 'sensitive.gitInternals',
@@ -170,6 +201,13 @@ export const GUARD_RULES: readonly GuardRule[] = [
     category: 'git',
     what: 'rewriting history or pruning objects',
     example: 'git filter-branch ...'
+  },
+  {
+    id: 'git.execConfig',
+    category: 'git',
+    what: 'setting a git option that runs commands (hooks path, aliases, fsmonitor, ssh command)',
+    advice: 'Ask the user before changing it.',
+    example: 'git config core.hooksPath /tmp/hooks'
   },
   {
     id: 'git.repoDelete',
@@ -283,6 +321,27 @@ export const GUARD_RULES: readonly GuardRule[] = [
     category: 'system',
     what: 'stopping or disabling system services or scheduled jobs',
     example: 'launchctl bootout system/x'
+  },
+  {
+    id: 'system.autostart',
+    category: 'system',
+    what: 'adding login items, launch agents or scheduled jobs',
+    example: 'launchctl load ~/Library/LaunchAgents/x.plist'
+  },
+  {
+    id: 'system.nestedClaudeEscape',
+    category: 'system',
+    what: "starting Claude without ClaudeDeck's guard or with permission checks turned off",
+    advice: 'Run claude without changing its settings, permissions or ClaudeDeck variables.',
+    example: 'env -u CLAUDEDECK_MCP_TOKEN claude -p "..." --dangerously-skip-permissions',
+    defaultAction: 'deny'
+  },
+  {
+    id: 'system.uncheckedCode',
+    category: 'system',
+    what: 'running code the guard cannot read (from a variable, standard input or inline code)',
+    advice: 'Run the commands directly so they can be checked, or ask the user.',
+    example: 'echo cm0gLXJmIH4= | base64 -d | sh'
   }
 ]
 
@@ -296,6 +355,8 @@ export function guardRuleList(): GuardRuleInfo[] {
     id: r.id,
     category: r.category,
     label: `guard.rules.${r.id}`,
-    example: r.example
+    example: r.example,
+    ...(r.maxAction ? { maxAction: r.maxAction } : {}),
+    ...(r.defaultAction ? { defaultAction: r.defaultAction } : {})
   }))
 }

@@ -6,8 +6,9 @@ import type {
   GuardSettings,
   ProjectGuard
 } from '../../shared/types'
-import { type Cmd, type ParseContext, parseCommandLine } from './commands'
+import { type Cmd, type ParseContext, type ParseState, parseCommandLine } from './commands'
 import { matchesCommand, matchesRaw } from './custom'
+import { claudeRules } from './detectors/claude'
 import { databaseRules } from './detectors/database'
 import { diskTools, forkBomb } from './detectors/disk'
 import { dockerRules } from './detectors/docker'
@@ -34,7 +35,7 @@ export interface GuardContext extends LocationEnv {
   gitBranch?: string | null
 }
 
-/** Longer inputs are cut before parsing. */
+/** Longer inputs are not parsed: they are denied as uncheckable (`disk.uncheckable`). */
 export const MAX_GUARD_INPUT = 128 * 1024
 /** Excerpts in reasons and the log. */
 export const MAX_EXCERPT = 200
@@ -47,7 +48,8 @@ const DETECTORS: CmdDetector[] = [
   dockerRules,
   databaseRules,
   publishRules,
-  systemRules
+  systemRules,
+  claudeRules
 ]
 
 const SEVERITY: Record<GuardAction, number> = { allow: 0, ask: 1, deny: 2 }
@@ -92,19 +94,21 @@ export function ruleAction(
   ctx: GuardContext
 ): GuardAction {
   const project = ctx.projectOverrides
-  return (
-    project?.ruleOverrides[ruleId] ??
-    ctx.settings.ruleOverrides[ruleId] ??
-    project?.categories[category] ??
-    ctx.settings.categories[category]
-  )
+  const override = project?.ruleOverrides[ruleId] ?? ctx.settings.ruleOverrides[ruleId]
+  if (override) return override
+  const action = project?.categories[category] ?? ctx.settings.categories[category]
+  const rule = findRule(ruleId)
+  if (action !== 'allow' && rule?.defaultAction) return rule.defaultAction
+  return action === 'deny' && rule?.maxAction === 'ask' ? 'ask' : action
 }
 
-function score(h: Hit, ctx: GuardContext): Scored | null {
+function score(h: Hit, ctx: GuardContext, cmds: Cmd[] = []): Scored | null {
   const rule = findRule(h.ruleId)
   if (!rule) return null
   let action = ruleAction(rule.id, rule.category, ctx)
-  if (h.cap === 'ask' && action === 'deny') action = 'ask'
+  // Commands run on another machine (`ssh host 'rm -rf ~'`) are checked, but only asked about.
+  const remote = h.cmd !== undefined && cmds[h.cmd]?.via.includes('remote')
+  if ((h.cap === 'ask' || remote) && action === 'deny') action = 'ask'
   return {
     action,
     category: rule.category,
@@ -129,8 +133,9 @@ const customScore = (rule: GuardCustomRule, text: string): Scored => ({
 })
 
 /** Built-in and custom results for a command line; custom `allow` rules exempt their commands. */
-function commandResults(input: string, cmds: Cmd[], ctx: GuardContext): Scored[] {
-  const detect: DetectContext = { ...ctx, input }
+function commandResults(input: string, parsed: ParseState, ctx: GuardContext): Scored[] {
+  const cmds = parsed.cmds
+  const detect: DetectContext = { ...ctx, input, shadowed: parsed.assigned }
   const rules = customRules(ctx)
   const results: Scored[] = []
   if (rules.some((r) => r.action === 'allow' && matchesRaw(r, input))) return []
@@ -143,7 +148,7 @@ function commandResults(input: string, cmds: Cmd[], ctx: GuardContext): Scored[]
     for (const rule of matching) results.push(customScore(rule, cmd.raw))
     for (const detector of DETECTORS) {
       for (const h of detector(cmd, index, detect, cmds)) {
-        const s = score(h, ctx)
+        const s = score(h, ctx, cmds)
         if (s) results.push(s)
       }
     }
@@ -186,11 +191,20 @@ const parseContext = (ctx: GuardContext): ParseContext => ({
 })
 
 /** Parses a command line for a tool (`posix` for Bash and Monitor). */
-export function parseFor(shell: 'posix' | 'powershell', input: string, ctx: GuardContext): Cmd[] {
+export function parseFor(
+  shell: 'posix' | 'powershell',
+  input: string,
+  ctx: GuardContext
+): ParseState {
   const text = input.slice(0, MAX_GUARD_INPUT)
   const pctx = parseContext(ctx)
-  return (shell === 'powershell' ? parsePowerShellLine(text, pctx) : parseCommandLine(text, pctx))
-    .cmds
+  return shell === 'powershell' ? parsePowerShellLine(text, pctx) : parseCommandLine(text, pctx)
+}
+
+/** The input could not be followed to the end: it is denied rather than checked in part. */
+function uncheckable(input: string, ctx: GuardContext): Scored[] {
+  const s = score({ ruleId: 'disk.uncheckable', excerpt: input.slice(0, MAX_EXCERPT) }, ctx)
+  return s ? [s] : []
 }
 
 /**
@@ -211,8 +225,14 @@ export function evaluateGuard(
   const shell = COMMAND_TOOLS[toolName]
   if (shell) {
     if (typeof input.command !== 'string' || !input.command.trim()) return { action: 'allow' }
-    const text = input.command.slice(0, MAX_GUARD_INPUT)
-    results = commandResults(text, parseFor(shell, text, ctx), ctx)
+    const text = input.command
+    if (text.length > MAX_GUARD_INPUT) {
+      results = uncheckable(text, ctx)
+    } else {
+      const parsed = parseFor(shell, text, ctx)
+      results = parsed.oversized ? [] : commandResults(text, parsed, ctx)
+      if (parsed.truncated) results.push(...uncheckable(text, ctx))
+    }
   } else if (FILE_TOOLS[toolName]) {
     const path = input[FILE_TOOLS[toolName]]
     if (typeof path !== 'string' || !path) return { action: 'allow' }

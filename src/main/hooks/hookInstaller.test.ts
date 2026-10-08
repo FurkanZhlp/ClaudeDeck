@@ -2,15 +2,17 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { expectMode } from '../../test/platform'
+import { expectMode, isWindows } from '../../test/platform'
+import { lstatSync, renameSync, symlinkSync } from 'node:fs'
 import {
+  guardKeyPath,
   hookScriptPath,
   installHooks,
   removeHooks,
   type HookFeatures,
   type HookHost
 } from './hookInstaller'
-import { GUARD_MATCHER } from './hookScript'
+import { GUARD_MATCHER, hookCommand, hookScript } from './hookScript'
 
 const both: HookFeatures = { guard: true, queue: true, maxWaitMinutes: 60 }
 const queueOnly: HookFeatures = { guard: false, queue: true, maxWaitMinutes: 60 }
@@ -97,8 +99,17 @@ describe('installHooks (test queue only)', () => {
           {
             matcher: 'Bash',
             hooks: [
-              { type: 'command', command: '/bin/sh /old/claudedeck/test-queue.sh pre' },
-              { type: 'command', command: 'mine' }
+              {
+                type: 'command',
+                command: hookCommand(
+                  join(dir, 'claudedeck', 'test-queue.sh'),
+                  'pre',
+                  process.platform
+                )
+              },
+              { type: 'command', command: 'mine' },
+              // Only mentions a ClaudeDeck script path: the user's, kept.
+              { type: 'command', command: "/bin/sh '/other/claudedeck/hook.sh' pre" }
             ]
           }
         ]
@@ -106,7 +117,15 @@ describe('installHooks (test queue only)', () => {
     })
     removeTestQueueHooks(dir)
     expect(read().hooks).toEqual({
-      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'mine' }] }]
+      PreToolUse: [
+        {
+          matcher: 'Bash',
+          hooks: [
+            { type: 'command', command: 'mine' },
+            { type: 'command', command: "/bin/sh '/other/claudedeck/hook.sh' pre" }
+          ]
+        }
+      ]
     })
   })
 
@@ -241,5 +260,39 @@ describe('installHooks (command guard)', () => {
     writeFileSync(legacy, '#!/bin/sh\n')
     expect(removeHooks(dir).changed).toBe(true)
     expect(existsSync(legacy)).toBe(false)
+  })
+})
+
+describe('guard key and script integrity', () => {
+  const key = 'ab'.repeat(32)
+
+  it('writes the guard key with the hook URL, private, and removes it with the guard', () => {
+    write({})
+    installHooks(dir, { ...guardOnly, guardKey: { key, url: 'http://127.0.0.1:4000/hooks/' } }, mac)
+    expect(readFileSync(guardKeyPath(dir), 'utf8')).toBe(`${key}\nhttp://127.0.0.1:4000/hooks/\n`)
+    expectMode(guardKeyPath(dir), 0o600)
+    installHooks(dir, queueOnly, mac)
+    expect(existsSync(guardKeyPath(dir))).toBe(false)
+    installHooks(dir, { ...guardOnly, guardKey: { key, url: null } }, mac)
+    removeHooks(dir, 'darwin')
+    expect(existsSync(guardKeyPath(dir))).toBe(false)
+  })
+
+  it('rewrites a changed script and replaces a symlink instead of writing through it', () => {
+    write({})
+    installHooks(dir, guardOnly, mac)
+    const script = hookScript({ guard: true, maxWaitMinutes: 60 })
+    writeFileSync(hookScriptPath(dir), 'exit 0\n')
+    expect(installHooks(dir, guardOnly, mac).changed).toBe(true)
+    expect(readFileSync(hookScriptPath(dir), 'utf8')).toBe(script)
+    expect(installHooks(dir, guardOnly, mac).changed).toBe(false)
+
+    const elsewhere = join(dir, 'elsewhere.sh')
+    writeFileSync(elsewhere, script)
+    if (isWindows) return // Symlinks need extra rights there.
+    renameSync(hookScriptPath(dir), join(dir, 'moved.sh'))
+    symlinkSync(elsewhere, hookScriptPath(dir))
+    expect(installHooks(dir, guardOnly, mac).changed).toBe(true)
+    expect(lstatSync(hookScriptPath(dir)).isSymbolicLink()).toBe(false)
   })
 })

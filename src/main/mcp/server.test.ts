@@ -13,6 +13,7 @@ import {
   configureTimeouts,
   IDLE_TIMEOUT_MS,
   startMcpServer,
+  type RouteScope,
   type RunningMcpServer
 } from './server'
 import { createSessionTokens, type SessionScope, type SessionTokens } from './sessionTokens'
@@ -222,7 +223,7 @@ describe('hook routes', () => {
   const PRE = '/hooks/test-queue/pre'
   let hooks: RunningMcpServer
   let base: string
-  let calls: { scope: SessionScope; payload: unknown; signal: AbortSignal }[]
+  let calls: { scope: RouteScope; payload: unknown; signal: AbortSignal }[]
   let release: ((body: string) => void) | null = null
   const finish = (body: string): void => {
     const done = release as ((body: string) => void) | null

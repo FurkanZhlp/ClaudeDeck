@@ -21,7 +21,8 @@ function setup(): {
     guard,
     service,
     queueEnabled: () => state.queue,
-    isLive: () => state.live
+    isLive: () => state.live,
+    accountForKey: (key) => (key === 'k'.repeat(64) ? 'a' : null)
   })
   return { routes, guard, service, state }
 }
@@ -69,5 +70,24 @@ describe('hookRoutes', () => {
     expect(guard.check).not.toHaveBeenCalled()
     expect(service.pre).not.toHaveBeenCalled()
     expect(service.post).not.toHaveBeenCalled()
+  })
+
+  it('serves guard-only calls of an account key, without the queue', async () => {
+    const { routes, guard, service } = setup()
+    const route = routes['/hooks/guard']
+    expect(route.authenticate?.('k'.repeat(64))).toEqual({ kind: 'account', accountId: 'a' })
+    expect(route.authenticate?.('0'.repeat(64))).toBeNull()
+    const account = { kind: 'account' as const, accountId: 'a' }
+    expect(await route.handle(account, { tool_name: 'Bash', deny: true }, signal, 'guard')).toBe(
+      DENY
+    )
+    expect(await route.handle(account, { tool_name: 'Bash' }, signal, 'guard')).toBe('')
+    expect(await route.handle(account, { tool_name: 'Bash' }, signal, 'pre')).toBe('')
+    expect(guard.check).toHaveBeenCalledTimes(2)
+    expect(service.pre).not.toHaveBeenCalled()
+    // Tab routes never accept an account caller.
+    expect(await routes['/hooks/pre'].handle(account, { tool_name: 'Bash' }, signal, 'guard')).toBe(
+      ''
+    )
   })
 })

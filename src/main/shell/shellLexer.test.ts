@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { lex, substitutionBodies } from './shellLexer'
+import { lex, lexInfo, substitutionBodies } from './shellLexer'
 
 const texts = (input: string): string[][] => lex(input).map((s) => s.words.map((w) => w.text))
 
@@ -125,5 +125,27 @@ describe('substitutionBodies', () => {
     expect(substitutionBodies('$((1 + 2))')).toEqual([])
     expect(substitutionBodies('$(rm -rf x')).toEqual(['rm -rf x'])
     expect(substitutionBodies('`id')).toEqual(['id'])
+  })
+})
+
+describe('lex: escapes, heredoc bodies and limits', () => {
+  it('applies ANSI-C escapes like bash', () => {
+    const [segment] = lex("$'\\x72m' $'\\162\\155' $'\\u0072m' $'a\\'b' $'\\cA'")
+    expect(segment.words.map((w) => w.text)).toEqual(['rm', 'rm', 'rm', "a'b", '\x01'])
+  })
+
+  it('keeps heredoc bodies on their redirection', () => {
+    const [segment] = lex('sh <<EOF\nrm x\nEOF\necho after')
+    expect(segment.redirects[0].heredoc).toEqual({ body: 'rm x', expands: true })
+    expect(lex("cat <<'X'\n$(y)\nX")[0].redirects[0].heredoc).toEqual({
+      body: '$(y)',
+      expands: false
+    })
+    expect(lex('cat <<-E\n\tz\n\tE')[0].redirects[0].heredoc?.body).toBe('z')
+  })
+
+  it('reports input cut short by nesting', () => {
+    expect(lexInfo('echo $(a $(b))').truncated).toBe(false)
+    expect(lexInfo(`echo ${'$('.repeat(40)}`).truncated).toBe(true)
   })
 })

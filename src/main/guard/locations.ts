@@ -1,4 +1,5 @@
 import type { OsName } from '../platform/types'
+import { ANY, type Candidate, type CandidatePart, fixedParts, NON_DOT } from './globs'
 import { canon, isRoot, pathApi, relativeParts, segments, within, type PathEnv } from './paths'
 
 /**
@@ -22,6 +23,8 @@ const CLAUDE_CONTROL_FILES = new Set([
   'managed-settings.json'
 ])
 const CLAUDE_CONTROL_DIRS = new Set(['claudedeck', 'hooks'])
+/** Folders of a project's `.claude` that run code or define agents. */
+const PROJECT_AGENT_DIRS = new Set(['hooks', 'agents'])
 /** Claude's own working data written through its tools (auto memory, plans, todos). */
 const CLAUDE_WORK_DIRS = new Set(['projects', 'plans', 'todos', 'tasks'])
 
@@ -93,6 +96,20 @@ const homeRel = (path: string, e: LocationEnv): string | null => {
 const startsWithDir = (rel: string, dir: string): boolean =>
   rel === dir || rel.startsWith(`${dir}/`)
 
+const MEMO = new Map<string, unknown>()
+
+/** Lists built from the context folders, kept per context (they are checked per target). */
+function memo<T>(name: string, e: LocationEnv, make: () => T): T {
+  const key = [name, e.os, e.home, e.cwd, e.configDir, e.appDataDir, e.env.SystemRoot, e.env.windir]
+    .map(String)
+    .join('\0')
+  if (MEMO.has(key)) return MEMO.get(key) as T
+  if (MEMO.size > 256) MEMO.clear()
+  const value = make()
+  MEMO.set(key, value)
+  return value
+}
+
 function claudeDirs(e: LocationEnv): string[] {
   const p = pathApi(e.os)
   const dirs = [p.join(e.home, '.claude')]
@@ -135,6 +152,7 @@ function inSystem(path: string, e: LocationEnv): boolean {
  */
 export function writeRule(path: string, e: LocationEnv): string | null {
   if (isRawDevice(path, e.os)) return 'disk.rawDevice'
+  if (isGuardKey(path, e)) return 'sensitive.claudedeck'
   const claude = claudeRule(path, e)
   if (claude !== undefined) return claude
   const p = pathApi(e.os)
@@ -146,6 +164,12 @@ export function writeRule(path: string, e: LocationEnv): string | null {
     return 'sensitive.claudeSettings'
   }
   if (e.appDataDir && within(path, e.appDataDir, e.os)) return 'sensitive.claudedeck'
+  // A project's own Claude hooks, agents and MCP servers run code or steer Claude.
+  const dotClaude = parts.lastIndexOf('.claude')
+  if (dotClaude >= 0 && PROJECT_AGENT_DIRS.has(parts[dotClaude + 1] ?? '')) {
+    return 'sensitive.projectAgentConfig'
+  }
+  if (name === '.mcp.json') return 'sensitive.projectAgentConfig'
 
   const rel = homeRel(path, e)
   if (rel !== null && rel !== '') {
@@ -162,6 +186,7 @@ export function writeRule(path: string, e: LocationEnv): string | null {
       return 'sensitive.shellRc'
     }
     if (GITCONFIG.has(rel)) return 'sensitive.gitconfig'
+    if (startsWithDir(rel, 'library/launchagents')) return 'system.autostart'
   }
   if (parts.includes('.git')) return 'sensitive.gitInternals'
   if (inSystem(path, e)) return 'sensitive.system'
@@ -171,12 +196,12 @@ export function writeRule(path: string, e: LocationEnv): string | null {
 /** Protected locations below `dir`: a recursive delete of `dir` takes them along. */
 export function protectedInside(dir: string, e: LocationEnv): string | null {
   const p = pathApi(e.os)
-  const candidates: [string, string][] = [
+  const candidates = memo('inside', e, (): [string, string][] => [
     [p.join(e.home, '.ssh'), 'sensitive.ssh'],
     ...CREDENTIAL_DIRS.map((d): [string, string] => [p.join(e.home, d), 'sensitive.credentials']),
     ...claudeDirs(e).map((d): [string, string] => [d, 'sensitive.claudeSettings']),
     ...(e.appDataDir ? [[e.appDataDir, 'sensitive.claudedeck'] as [string, string]] : [])
-  ]
+  ])
   for (const [location, rule] of candidates) {
     if (within(location, dir, e.os) && canon(location, e.os) !== canon(dir, e.os)) return rule
   }
@@ -209,6 +234,81 @@ export function isCriticalDir(path: string, e: LocationEnv): boolean {
   return false
 }
 
+/** An account's guard key (`<config>/claudedeck/guard.key`): reading it is as bad as writing. */
+export function isGuardKey(path: string, e: LocationEnv): boolean {
+  const parts = segments(path, e.os)
+  return parts[parts.length - 1] === 'guard.key' && parts[parts.length - 2] === 'claudedeck'
+}
+
+/** Candidates for globs (`rm -rf ~/D*`, `~/.ss?`): critical folders and protected locations. */
+export function globCandidates(e: LocationEnv): Candidate[] {
+  return memo('glob', e, () => buildGlobCandidates(e))
+}
+
+function buildGlobCandidates(e: LocationEnv): Candidate[] {
+  const { os } = e
+  const p = pathApi(os)
+  const fixed = (path: string): CandidatePart[] => fixedParts(path, os)
+  const home = fixed(e.home)
+  const critical = (parts: CandidatePart[]): Candidate => ({
+    parts,
+    rule: 'disk.systemDelete',
+    critical: true
+  })
+  const out: Candidate[] = []
+  if (os === 'win32') {
+    for (const dir of WINDOWS_SYSTEM_DIRS) out.push(critical([ANY, dir]))
+    out.push(critical([ANY, 'users', ANY]))
+  } else {
+    out.push(critical([ANY]))
+    for (const dir of ['users', 'home', 'volumes', 'mnt', 'media']) out.push(critical([dir, ANY]))
+    out.push(critical(['media', ANY, ANY]))
+  }
+  out.push(critical(home), critical([...home, NON_DOT]))
+  if (e.cwd) {
+    let dir = e.cwd
+    for (let level = 0; level < 64; level++) {
+      out.push(critical(fixed(dir)))
+      const parent = p.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  }
+  const at = (rel: string, rule: string): Candidate => ({
+    parts: [...home, ...rel.split('/')],
+    rule,
+    critical: false
+  })
+  out.push(at('.ssh', 'sensitive.ssh'))
+  for (const dir of CREDENTIAL_DIRS) out.push(at(dir, 'sensitive.credentials'))
+  for (const file of CREDENTIAL_FILES) out.push(at(file, 'sensitive.credentials'))
+  for (const file of SHELL_RC) out.push(at(file, 'sensitive.shellRc'))
+  for (const file of GITCONFIG) out.push(at(file, 'sensitive.gitconfig'))
+  for (const dir of claudeDirs(e))
+    out.push({ parts: fixed(dir), rule: 'sensitive.claudeSettings', critical: false })
+  if (e.appDataDir)
+    out.push({ parts: fixed(e.appDataDir), rule: 'sensitive.claudedeck', critical: false })
+  for (const dir of systemDirs(e))
+    out.push({ parts: fixed(dir), rule: 'sensitive.system', critical: false })
+  return out
+}
+
+/** Folders holding keys and credentials: copying or archiving them exposes secrets. */
+const SECRET_DIRS = ['.ssh', '.aws', '.gnupg', '.kube', '.azure', '.config/gcloud', '.docker']
+
+/**
+ * A recursive read (`cp -r`, `tar`, `zip -r`, `grep -r`) of `path` takes a secret folder along:
+ * the path is in one, or (`parents`) it is a folder that contains one.
+ */
+export function readsSecretDir(path: string, e: LocationEnv, parents: boolean): boolean {
+  const p = pathApi(e.os)
+  const dirs = memo('secret', e, () => [
+    ...SECRET_DIRS.map((d) => p.join(e.home, d)),
+    ...claudeDirs(e)
+  ])
+  return dirs.some((dir) => within(path, dir, e.os) || (parents && within(dir, path, e.os)))
+}
+
 const SSH_PUBLIC = new Set(['known_hosts', 'known_hosts.old', 'config', 'authorized_keys'])
 const KEY_NAME = /^id_(rsa|dsa|ecdsa|ed25519|ecdsa_sk|ed25519_sk)$/
 const SECRET_FILES = new Set([
@@ -231,7 +331,7 @@ const SECRET_FILES = new Set([
 export function isSecretFile(path: string, e: LocationEnv): boolean {
   const parts = segments(path, e.os)
   const name = parts[parts.length - 1] ?? ''
-  if (KEY_NAME.test(name)) return true
+  if (KEY_NAME.test(name) || isGuardKey(path, e)) return true
   const claude = claudeDirs(e).some((dir) => {
     const rel = relativeParts(path, dir, e.os)
     return !!rel && rel.length === 1 && rel[0] === '.credentials.json'

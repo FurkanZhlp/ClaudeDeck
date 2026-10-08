@@ -25,7 +25,7 @@ import { renameWithRetryAsync } from '../platform/fs'
 import { ensureGuidelines } from '../profile/guidelines'
 import { copyEntry, type CopyRunner } from '../profile/importer'
 import { APP_MANAGED_USAGE_FILES } from '../usage/statuslineScript'
-import { HOOK_SCRIPT_FILE, LEGACY_HOOK_SCRIPT_FILE } from '../hooks/hookScript'
+import { GUARD_KEY_FILE, HOOK_SCRIPT_FILE, LEGACY_HOOK_SCRIPT_FILE } from '../hooks/hookScript'
 import { readSettingsText, restoreProtectedSettings } from './settingsGuard'
 
 type Env = Record<string, string>
@@ -108,7 +108,9 @@ export const APP_MANAGED_FILES = [
   ...APP_MANAGED_USAGE_FILES.map((name) => `claudedeck/${name}`),
   // Runs on every guarded tool call of the account (command guard and test queue).
   `claudedeck/${HOOK_SCRIPT_FILE}`,
-  `claudedeck/${LEGACY_HOOK_SCRIPT_FILE}`
+  `claudedeck/${LEGACY_HOOK_SCRIPT_FILE}`,
+  // The account's guard key: a run must neither read nor replace it.
+  `claudedeck/${GUARD_KEY_FILE}`
 ]
 
 /**
@@ -127,7 +129,8 @@ export function profileDenyRules(
     '.credentials.json',
     'projects/**',
     'sessions/**',
-    'history.jsonl'
+    'history.jsonl',
+    `claudedeck/${GUARD_KEY_FILE}`
   ]
   const readOnly = ['plugins/**', ...APP_MANAGED_FILES]
   return [

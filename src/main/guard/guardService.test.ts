@@ -1,10 +1,19 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import * as nodePath from 'node:path'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { DomainError } from '../../shared/errors'
 import type { GuardSettings, Project } from '../../shared/types'
 import type { SessionScope } from '../mcp/sessionTokens'
 import { defaultGuardSettings } from '../state/guardSettings'
-import { readGitBranch, type BranchFs } from './gitBranch'
+import {
+  BRANCH_CACHE_MS,
+  cachedGitBranch,
+  readGitBranch,
+  readSmallFile,
+  type BranchFs
+} from './gitBranch'
 import { createGuardLog, type GuardLog } from './guardLog'
 import { createGuardService, GUARD_ERROR_REPLY, type GuardService } from './guardService'
 
@@ -31,6 +40,7 @@ function setup(settings: GuardSettings = defaultGuardSettings()): {
   const service = createGuardService({
     settings: () => settings,
     project: (id) => (id === 'p1' ? project : undefined),
+    projects: () => [project],
     account: (id) =>
       id === 'a1'
         ? { id, name: 'A', color: 'blue', configDir: '/Users/dev/cd/accounts/a1' }
@@ -40,15 +50,22 @@ function setup(settings: GuardSettings = defaultGuardSettings()): {
     os: 'darwin',
     env: {},
     gitBranch,
+    realpath: (path) => {
+      const links: Record<string, string> = { '/Users/dev/app/notes': '/Users/dev/.ssh' }
+      const existing = ['/', '/Users', '/Users/dev', '/Users/dev/app', '/Users/dev/app/src']
+      if (links[path]) return links[path]
+      if (existing.includes(path)) return path
+      throw new Error('ENOENT')
+    },
     log
   })
   return { service, log, events, gitBranch }
 }
 
 describe('guard service', () => {
-  it('replies with the decision and logs it with the tab', () => {
+  it('replies with the decision and logs it with the tab', async () => {
     const { service, log, events } = setup()
-    const reply = service.check(scope, {
+    const reply = await service.check(scope, {
       tool_name: 'Bash',
       tool_input: { command: 'git push origin main --force' },
       cwd: '/Users/dev/app',
@@ -76,35 +93,63 @@ describe('guard service', () => {
     expect(events).toHaveLength(1)
   })
 
-  it('protects the tab account and ClaudeDeck data', () => {
+  it('protects the tab account and ClaudeDeck data', async () => {
     const { service } = setup()
-    const write = (path: string): string | null =>
+    const write = (path: string): Promise<string | null> =>
       service.check(scope, { tool_name: 'Write', tool_input: { file_path: path } })
-    expect(write('/Users/dev/cd/accounts/a1/settings.json')).toContain('deny')
-    expect(write('/Users/dev/cd/accounts/a2/settings.json')).toContain('deny')
-    expect(write('/Users/dev/cd/accounts/a1/projects/k/memory/MEMORY.md')).toBeNull()
-    expect(write('/Users/dev/app/src/a.ts')).toBeNull()
+    expect(await write('/Users/dev/cd/accounts/a1/settings.json')).toContain('deny')
+    expect(await write('/Users/dev/cd/accounts/a2/settings.json')).toContain('deny')
+    expect(await write('/Users/dev/cd/accounts/a1/projects/k/memory/MEMORY.md')).toBeNull()
+    expect(await write('/Users/dev/app/src/a.ts')).toBeNull()
   })
 
-  it('lets allowed and unknown calls through without logging', () => {
-    const { service, log } = setup()
-    expect(service.check(scope, { tool_name: 'Bash', tool_input: { command: 'ls' } })).toBeNull()
+  it('checks where a written path leads through symlinks too', async () => {
+    const { service } = setup()
+    const reply = await service.check(scope, {
+      tool_name: 'Write',
+      tool_input: { file_path: '/Users/dev/app/notes/authorized_keys' }
+    })
+    expect(JSON.parse(reply as string).hookSpecificOutput.permissionDecision).toBe('deny')
     expect(
-      service.check(scope, { tool_name: 'Read', tool_input: { file_path: '/etc/x' } })
+      await service.check(scope, {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/Users/dev/app/src/new/a.ts' }
+      })
     ).toBeNull()
-    expect(service.check(scope, null)).toBeNull()
-    expect(service.check(scope, { tool_name: 7 })).toBeNull()
+  })
+
+  it('checks a guard-only call in the project that holds its folder', async () => {
+    const { service, log } = setup()
+    const reply = await service.check(
+      { kind: 'account', accountId: 'a1' },
+      { tool_name: 'Bash', tool_input: { command: 'git push -f' }, cwd: '/Users/dev/app/src' }
+    )
+    // The project sets git to deny; the global default is ask.
+    expect(JSON.parse(reply as string).hookSpecificOutput.permissionDecision).toBe('deny')
+    expect(log.list()[0]).toMatchObject({ sessionId: '', projectId: 'p1', accountId: 'a1' })
+  })
+
+  it('lets allowed and unknown calls through without logging', async () => {
+    const { service, log } = setup()
+    expect(
+      await service.check(scope, { tool_name: 'Bash', tool_input: { command: 'ls' } })
+    ).toBeNull()
+    expect(
+      await service.check(scope, { tool_name: 'Read', tool_input: { file_path: '/etc/x' } })
+    ).toBeNull()
+    expect(await service.check(scope, null)).toBeNull()
+    expect(await service.check(scope, { tool_name: 7 })).toBeNull()
     expect(log.list()).toEqual([])
   })
 
-  it('does nothing while the guard is off', () => {
+  it('does nothing while the guard is off', async () => {
     const { service } = setup({ ...defaultGuardSettings(), enabled: false })
     expect(
-      service.check(scope, { tool_name: 'Bash', tool_input: { command: 'rm -rf ~' } })
+      await service.check(scope, { tool_name: 'Bash', tool_input: { command: 'rm -rf ~' } })
     ).toBeNull()
   })
 
-  it('denies when the guard itself fails', () => {
+  it('denies when the guard itself fails', async () => {
     const { service } = setup()
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const payload = {
@@ -113,20 +158,20 @@ describe('guard service', () => {
         throw new Error('bad')
       }
     }
-    expect(service.check(scope, payload)).toBe(GUARD_ERROR_REPLY)
+    expect(await service.check(scope, payload)).toBe(GUARD_ERROR_REPLY)
     expect(JSON.stringify(error.mock.calls)).not.toContain('tool_input')
     error.mockRestore()
   })
 
-  it('reads the branch only for git commands', () => {
+  it('reads the branch only for git commands', async () => {
     const { service, gitBranch } = setup()
-    service.check(scope, {
+    await service.check(scope, {
       tool_name: 'Bash',
       tool_input: { command: 'ls' },
       cwd: '/Users/dev/app'
     })
     expect(gitBranch).not.toHaveBeenCalled()
-    const reply = service.check(scope, {
+    const reply = await service.check(scope, {
       tool_name: 'Bash',
       tool_input: { command: 'git rebase origin/main' },
       cwd: '/Users/dev/app'
@@ -135,15 +180,15 @@ describe('guard service', () => {
     expect(reply).toContain('rebasing a shared branch')
   })
 
-  it('evaluates "try a command" with the project folder and overrides', () => {
+  it('evaluates "try a command" with the project folder and overrides', async () => {
     const { service, log } = setup()
-    expect(service.evaluate({ input: 'git push -f' }).action).toBe('ask')
-    expect(service.evaluate({ input: 'git push -f', projectId: 'p1' }).action).toBe('deny')
-    expect(service.evaluate({ tool: 'Write', input: '/Users/dev/.zshrc' }).ruleId).toBe(
+    expect((await service.evaluate({ input: 'git push -f' })).action).toBe('ask')
+    expect((await service.evaluate({ input: 'git push -f', projectId: 'p1' })).action).toBe('deny')
+    expect((await service.evaluate({ tool: 'Write', input: '/Users/dev/.zshrc' })).ruleId).toBe(
       'sensitive.shellRc'
     )
     expect(
-      service.evaluate({ tool: 'NotebookEdit', input: '/Users/dev/.ssh/x.ipynb' }).ruleId
+      (await service.evaluate({ tool: 'NotebookEdit', input: '/Users/dev/.ssh/x.ipynb' })).ruleId
     ).toBe('sensitive.ssh')
     expect(log.list()).toEqual([])
     for (const bad of [
@@ -152,9 +197,9 @@ describe('guard service', () => {
       { tool: 'Read', input: 'x' },
       { input: 'x'.repeat(70_000) }
     ]) {
-      expect(() => service.evaluate(bad as never)).toThrow(DomainError)
+      await expect(service.evaluate(bad as never)).rejects.toThrow(DomainError)
     }
-    expect(() => service.evaluate({ input: 'ls', projectId: 'nope' })).toThrow(DomainError)
+    await expect(service.evaluate({ input: 'ls', projectId: 'nope' })).rejects.toThrow(DomainError)
   })
 })
 
@@ -206,5 +251,29 @@ describe('readGitBranch', () => {
   it('is null outside a repository or on a detached HEAD', () => {
     expect(readGitBranch('/x/y', fake({}, []), p)).toBeNull()
     expect(readGitBranch('/r', fake({ '/r/.git/HEAD': 'abc123\n' }, ['/r/.git']), p)).toBeNull()
+  })
+})
+
+describe('git branch reads', () => {
+  it('reads at most 4 KB of a regular file and nothing else', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claudedeck-branch-'))
+    const big = join(dir, 'big')
+    writeFileSync(big, 'x'.repeat(10_000))
+    expect(readSmallFile(big)).toHaveLength(4096)
+    expect(readSmallFile(dir)).toBeNull()
+    expect(readSmallFile(join(dir, 'missing'))).toBeNull()
+  })
+
+  it('caches the branch per folder for a short time', () => {
+    let t = 0
+    const read = vi.fn((cwd: string) => (cwd === '/a' ? 'main' : null))
+    const branch = cachedGitBranch(read, () => t)
+    expect(branch('/a')).toBe('main')
+    expect(branch('/a')).toBe('main')
+    expect(branch('/b')).toBeNull()
+    expect(read).toHaveBeenCalledTimes(2)
+    t += BRANCH_CACHE_MS
+    branch('/a')
+    expect(read).toHaveBeenCalledTimes(3)
   })
 })

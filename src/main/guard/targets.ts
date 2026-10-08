@@ -83,9 +83,18 @@ const PS_PATH_PARAMS = [
   'stream'
 ]
 
+/** A PowerShell array argument (`a,b`) as its items. */
+const psItems = (a: Arg): Arg[] =>
+  a.opaque || !a.text.includes(',')
+    ? [a]
+    : a.text
+        .split(',')
+        .filter((t) => t.trim())
+        .map((text) => ({ ...a, text: text.trim() }))
+
 function psPaths(args: Arg[], ...params: string[]): Arg[] {
   const named = params.map((p) => psValue(args, p, 2)).filter((a): a is Arg => !!a)
-  return named.length ? named : psPositionals(args, PS_PATH_PARAMS).slice(0, 1)
+  return (named.length ? named : psPositionals(args, PS_PATH_PARAMS).slice(0, 1)).flatMap(psItems)
 }
 
 /** Files and folders a command deletes. */
@@ -125,7 +134,7 @@ export function deleteTargets(cmd: Cmd): DeleteTargets | null {
     const named = [psValue(args, 'path', 1), psValue(args, 'literalpath', 1)].filter(
       (a): a is Arg => !!a
     )
-    const targets = named.length ? named : psPositionals(args, PS_PATH_PARAMS)
+    const targets = (named.length ? named : psPositionals(args, PS_PATH_PARAMS)).flatMap(psItems)
     return { targets, recursive: psParam(args, 'recurse', 1) }
   }
   return null
@@ -231,8 +240,97 @@ export function writeTargets(cmd: Cmd): Arg[] {
     case 'copy':
     case 'move':
       return [...out, ...last(args.filter((a) => !a.text.startsWith('/')))]
+    case 'curl':
+      return [...out, ...flagValues(args, ['-o', '--output'], ['--output'])]
+    case 'wget':
+      return [...out, ...flagValues(args, ['-O', '--output-document'], ['--output-document'])]
+    case 'tar':
+    case 'bsdtar':
+    case 'gtar': {
+      // Extracting into a folder writes there.
+      const extract = args.some((a) => a.text === '--extract' || /^-?[A-Za-z]*x/.test(a.text))
+      return extract ? [...out, ...flagValues(args, ['-C', '--directory'], ['--directory'])] : out
+    }
+    case 'unzip':
+      return [...out, ...flagValues(args, ['-d'], [])]
   }
   return out
+}
+
+/** Values of `-o x`, `--output x`, `--output=x` (and `-ox`) style options. */
+function flagValues(args: Arg[], flags: string[], longEq: string[]): Arg[] {
+  const out: Arg[] = []
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i].text
+    if (flags.includes(t) && args[i + 1]) out.push(args[++i])
+    else {
+      const long = longEq.find((f) => t.startsWith(`${f}=`))
+      if (long) out.push({ ...args[i], text: t.slice(long.length + 1) })
+      else if (
+        /^-[A-Za-z]$/.test(flags[0]) &&
+        t.startsWith(flags[0]) &&
+        t.length > 2 &&
+        !t.startsWith('--')
+      )
+        out.push({ ...args[i], text: t.slice(2) })
+    }
+  }
+  return out
+}
+
+/** Folders a command copies, archives or searches recursively (for secret folders). */
+export function recursiveReads(cmd: Cmd): { sources: Arg[]; parents: boolean } | null {
+  const { name, args } = cmd
+  if (cmd.shell !== 'posix') return null
+  switch (name) {
+    case 'cp':
+    case 'scp':
+      if (!hasFlag(args, name === 'cp' ? 'rRa' : 'r', '--recursive', '--archive')) return null
+      return {
+        sources: positionals(args, set('-t', '-S', '-P', '-i', '-o', '-F')).slice(0, -1),
+        parents: true
+      }
+    case 'rsync':
+    case 'ditto':
+      return {
+        sources: positionals(
+          args,
+          set('-e', '--rsh', '--exclude', '--include', '--filter', '-f')
+        ).slice(0, -1),
+        parents: true
+      }
+    case 'tar':
+    case 'bsdtar':
+    case 'gtar': {
+      const create = args.some((a) => a.text === '--create' || /^-?[A-Za-z]*c/.test(a.text))
+      if (!create) return null
+      // Old style option letters (`tar czf out.tgz dir`) come first; they are not folders.
+      return {
+        sources: positionals(args, set('-f', '--file', '-C', '--directory', '-T', '-X')),
+        parents: true
+      }
+    }
+    case 'zip':
+    case '7z':
+    case '7za':
+      return {
+        sources: positionals(args, set('-x', '-i', '-P')).slice(name === 'zip' ? 1 : 2),
+        parents: true
+      }
+    case 'grep':
+    case 'egrep':
+    case 'rg':
+    case 'ag':
+      if (name !== 'rg' && name !== 'ag' && !hasFlag(args, 'rR', '--recursive')) return null
+      return {
+        sources: positionals(
+          args,
+          set('-e', '-f', '-A', '-B', '-C', '-m', '-g', '--glob', '-t')
+        ).slice(1),
+        parents: false
+      }
+  }
+  return null
 }
 
 /** `mv` sources: moving a folder away removes it from where it was. */

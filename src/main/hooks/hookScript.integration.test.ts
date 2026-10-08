@@ -11,7 +11,14 @@ import { createSessionTokens, type SessionScope } from '../mcp/sessionTokens'
 import { defaultGuardSettings } from '../state/guardSettings'
 import { findGitBash } from '../usage/statuslineScript'
 import { hookRoutes } from './hookRoutes'
-import { GUARD_UNAVAILABLE_REPLY, hookBaseUrl, hookScript, WAIT_MARKER } from './hookScript'
+import { createGuardKeys } from './guardKeys'
+import {
+  GUARD_KEY_FILE,
+  GUARD_UNAVAILABLE_REPLY,
+  hookBaseUrl,
+  hookScript,
+  WAIT_MARKER
+} from './hookScript'
 
 /*
  * The generated script against a real server, the real routes and the real guard. Only
@@ -25,8 +32,12 @@ const scope: SessionScope = { kind: 'session', sessionId: 'tab', projectId: 'p',
 const tokens = createSessionTokens()
 const log = createGuardLog()
 
+const keys = createGuardKeys()
 let server: RunningMcpServer
 let guardScript: string
+/** A copy of the guard script with the account's guard key next to it. */
+let keyScript: string
+let keyDir: string
 let queueScript: string
 let token: string
 let queueOn = true
@@ -101,13 +112,14 @@ beforeAll(async () => {
       post: () => undefined
     },
     queueEnabled: () => queueOn,
-    isLive: () => true
+    isLive: () => true,
+    accountForKey: (key) => keys.lookup(key)
   })
   // Records every request, and holds a guard step marked `hang` past the script's 5 s budget.
   const recorded: Record<string, HookRoute> = {}
   for (const [path, route] of Object.entries(routes)) {
     recorded[path] = {
-      maxBodyBytes: route.maxBodyBytes,
+      ...route,
       handle: (s, payload, signal, event) => {
         received.push({ event, payload })
         if ((payload as { note?: string }).note === 'hang')
@@ -117,7 +129,16 @@ beforeAll(async () => {
     }
   }
   server = await startMcpServer({ tools: {}, tokens, preferredPort: 0, routes: recorded })
+  keyDir = mkdtempSync(join(tmpdir(), 'claudedeck-hook-key-'))
+  keyScript = join(keyDir, 'hook.sh')
+  writeFileSync(keyScript, hookScript({ guard: true, maxWaitMinutes: 1 }))
+  writeKey(hookBaseUrl(server.url))
 })
+
+/** The account's key file next to `keyScript`, pointing at `url`. */
+function writeKey(url: string): void {
+  writeFileSync(join(keyDir, GUARD_KEY_FILE), `${keys.rotate('a')}\n${url}\n`, { mode: 0o600 })
+}
 
 afterAll(async () => {
   await server?.stop()
@@ -302,4 +323,95 @@ describe.runIf(shell)('generated hook script', { timeout: 30_000 }, () => {
       }
     }
   )
+
+  // Windows cannot deliver SIGTERM to a Git Bash process (it is terminated outright).
+  it.skipIf(isWindows)('denies when it is killed during the guard step', async () => {
+    let child: ReturnType<typeof spawn> | null = null
+    const run = runHook('pre', JSON.stringify(sentinel('ALLOW-7', { note: 'hang' })), tab(), {
+      onSpawn: (c) => (child = c)
+    })
+    await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 5000 })
+    ;(child as ReturnType<typeof spawn> | null)?.kill('SIGTERM')
+    expect(await run).toEqual({ stdout: `${GUARD_UNAVAILABLE_REPLY}\n`, status: 0 })
+  })
+
+  describe('without the tab env (guard key next to the script)', () => {
+    it('checks the call with the account key, guard only', async () => {
+      const denied = await runHook(
+        'pre',
+        JSON.stringify(sentinel('DENY-K1')),
+        {},
+        { script: keyScript }
+      )
+      expect(JSON.parse(denied.stdout).hookSpecificOutput.permissionDecision).toBe('deny')
+      expect(received.map((r) => r.event)).toEqual(['guard'])
+      expect(log.list()[0]).toMatchObject({
+        ruleId: 'deny-sentinel',
+        sessionId: '',
+        accountId: 'a'
+      })
+      // Allowed calls get no answer and no queue polls, even with the queue on.
+      const allowed = await runHook(
+        'pre',
+        JSON.stringify(sentinel('QUEUE-K1')),
+        {},
+        { script: keyScript }
+      )
+      expect(allowed).toEqual({ stdout: '', status: 0 })
+      expect(received.map((r) => r.event)).toEqual(['guard'])
+      expect(
+        await runHook('post', JSON.stringify(sentinel('POST-K1')), {}, { script: keyScript })
+      ).toEqual({ stdout: '', status: 0 })
+    })
+
+    it('uses the env token first and the key when the server does not know the token', async () => {
+      const viaTab = await runHook('pre', JSON.stringify(sentinel('QUEUE-K2')), tab(), {
+        script: keyScript
+      })
+      expect(viaTab.stdout).toBe('{"queue":"done"}')
+      const other = createSessionTokens().issue(scope)
+      const viaKey = await runHook(
+        'pre',
+        JSON.stringify(sentinel('DENY-K2')),
+        { CLAUDEDECK_MCP_TOKEN: other, CLAUDEDECK_HOOK_URL: hookBaseUrl(server.url) },
+        { script: keyScript }
+      )
+      expect(JSON.parse(viaKey.stdout).hookSpecificOutput.permissionDecision).toBe('deny')
+    })
+
+    it('passes when ClaudeDeck is not running and denies on any other failure', async () => {
+      try {
+        writeKey('http://127.0.0.1:9/hooks/')
+        const gone = await runHook(
+          'pre',
+          JSON.stringify(sentinel('DENY-K3')),
+          {},
+          { script: keyScript }
+        )
+        expect(gone).toEqual({ stdout: '', status: 0 })
+        writeKey(hookBaseUrl(server.url))
+        const failed = await runHook(
+          'pre',
+          JSON.stringify(sentinel('ALLOW-K3', { note: 'boom' })),
+          {},
+          { script: keyScript }
+        )
+        expect(failed).toEqual({ stdout: `${GUARD_UNAVAILABLE_REPLY}\n`, status: 0 })
+        // A key the server does not know (rotated twice since) is a failure too.
+        writeFileSync(
+          join(keyDir, GUARD_KEY_FILE),
+          `${'0'.repeat(64)}\n${hookBaseUrl(server.url)}\n`
+        )
+        const unknown = await runHook(
+          'pre',
+          JSON.stringify(sentinel('ALLOW-K4')),
+          {},
+          { script: keyScript }
+        )
+        expect(unknown).toEqual({ stdout: `${GUARD_UNAVAILABLE_REPLY}\n`, status: 0 })
+      } finally {
+        writeKey(hookBaseUrl(server.url))
+      }
+    })
+  })
 })

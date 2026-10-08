@@ -1,5 +1,13 @@
 import { commandName } from '../shell/normalize'
-import { lex, substitutionBodies, type Segment, type Word } from '../shell/shellLexer'
+import {
+  type HeredocBody,
+  lex,
+  lexInfo,
+  substitutionBodies,
+  type Segment,
+  type Word
+} from '../shell/shellLexer'
+import { embeddedShell, inlineCode } from './inlineCode'
 import { resolvePath, type PathEnv } from './paths'
 
 /**
@@ -22,8 +30,8 @@ export interface Cmd {
   /** Lower case basename without `.exe`/`.cmd`; '' for a redirection-only segment. */
   name: string
   args: Arg[]
-  /** Output and input redirections (`>`, `>>`, `<`, ...). */
-  redirects: { op: string; target: Arg }[]
+  /** Output and input redirections (`>`, `>>`, `<`, ...); heredocs carry their body. */
+  redirects: { op: string; target: Arg; heredoc?: HeredocBody }[]
   /** Source text of the segment the command came from (for log excerpts). */
   raw: string
   /** Commands joined by `|` share a pipeline id. */
@@ -37,6 +45,12 @@ export interface Cmd {
   findRoots?: Arg[]
   /** The `find` feeding this command filters by name, path, type, age or size. */
   findFiltered?: boolean
+  /** Variables set (`X=1 cmd`, `env X=1 cmd`) or removed (`env -u X cmd`) for this command. */
+  env?: { set: string[]; unset: string[] }
+  /** `xargs` (or `parallel`) adds arguments from a source the guard cannot see. */
+  unknownArgs?: boolean
+  /** A shell reading its script from standard input the guard cannot see. */
+  unknownScript?: boolean
 }
 
 export interface ParseContext extends PathEnv {
@@ -55,12 +69,27 @@ export interface ParseState {
   cwd: string | null
   /** Set when the input could not be fully followed (nesting or size limits). */
   truncated: boolean
+  /** More than MAX_ARGS arguments: too many to check, nothing else is looked at. */
+  oversized: boolean
+  /** Arguments collected so far. */
+  argCount: number
+  /** Variables the input assigns, reads into or unsets: their values are unknown. */
+  assigned: Set<string>
+  /** `alias name='value'` seen so far: later commands named `name` run `value`. */
+  aliases: Map<string, Word[]>
+  /** PowerShell variables assigned a literal string (`$c = "..."`). */
+  psVars: Map<string, string>
 }
 
 /** Nested shells, substitutions and wrappers followed before giving up. */
 export const MAX_DEPTH = 6
 /** Commands collected per input. */
 export const MAX_COMMANDS = 1000
+/**
+ * Arguments of all commands together. Each is a path to check; an input with more (only a
+ * pathological one has) is denied as uncheckable instead of being checked for seconds.
+ */
+export const MAX_ARGS = 8192
 
 export const arg = (w: Word): Arg => ({ text: w.text, quoted: w.quoted, opaque: w.opaque })
 
@@ -118,7 +147,12 @@ export const newState = (ctx: ParseContext): ParseState => ({
   depth: 0,
   via: [],
   cwd: ctx.cwd,
-  truncated: false
+  truncated: false,
+  oversized: false,
+  argCount: 0,
+  assigned: new Set(),
+  aliases: new Map(),
+  psVars: new Map()
 })
 
 /** Runs `fn` one level deeper with an extra wrapper name; stops at MAX_DEPTH. */
@@ -139,15 +173,27 @@ export function nested(state: ParseState, via: string, fn: () => void): void {
   }
 }
 
+/** Adds a command; null (and `truncated`) past MAX_COMMANDS. */
 export function push(
   state: ParseState,
   cmd: Omit<Cmd, 'via' | 'cwd'> & { cwd?: string | null }
-): void {
+): Cmd | null {
   if (state.cmds.length >= MAX_COMMANDS) {
     state.truncated = true
-    return
+    return null
   }
-  state.cmds.push({ ...cmd, cwd: cmd.cwd === undefined ? state.cwd : cmd.cwd, via: state.via })
+  state.argCount += cmd.args.length + cmd.redirects.length
+  // PowerShell arrays (`a,b,c`) are split into one target each.
+  if (cmd.shell === 'powershell') {
+    for (const a of cmd.args) state.argCount += a.text.split(',').length - 1
+  }
+  if (state.argCount > MAX_ARGS) {
+    state.truncated = true
+    state.oversized = true
+  }
+  const full: Cmd = { ...cmd, cwd: cmd.cwd === undefined ? state.cwd : cmd.cwd, via: state.via }
+  state.cmds.push(full)
+  return full
 }
 
 /* Wrappers ------------------------------------------------------------------------------------ */
@@ -227,7 +273,7 @@ const SIMPLE_WRAPPERS = set(
   'gsudo',
   'xargs'
 )
-const SHELLS = set('bash', 'sh', 'zsh', 'dash', 'ksh', 'mksh', 'fish', 'ash', 'busybox')
+const SHELLS = set('bash', 'sh', 'zsh', 'dash', 'ksh', 'mksh', 'fish', 'ash')
 const POWERSHELLS = set('powershell', 'pwsh')
 const NPX_LIKE = set('npx', 'pnpx', 'bunx', 'uvx')
 const PACKAGE_MANAGERS = set('npm', 'pnpm', 'yarn', 'bun')
@@ -312,7 +358,6 @@ function innerWords(name: string, words: Word[]): Word[] | null {
 function shellScript(words: Word[]): Word | null {
   let hasC = false
   let i = 1
-  if (cmdName(words[0].text) === 'busybox') i = 2
   for (; i < words.length && /^[-+]/.test(words[i].text) && words[i].text !== '--'; i++) {
     const text = words[i].text
     if (WRAPPER_FLAGS.shell.has(text)) i++
@@ -497,16 +542,150 @@ export function findInfo(args: Arg[]): { roots: Arg[]; filtered: boolean } {
 
 /* Parsing ------------------------------------------------------------------------------------- */
 
+/** Shell keywords that may precede a command in the same segment. */
+const KEYWORDS = set('!', '{', '}', 'then', 'do', 'else', 'elif', 'if', 'while', 'until', 'coproc')
+const ASSIGNMENT_NAME = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/
+const VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+/** Aliases remembered per input. */
+const MAX_ALIASES = 64
+/** Commands `parallel` builds from its `:::` arguments. */
+const MAX_PARALLEL = 16
+
+const READ_FLAGS = set('-a', '-d', '-i', '-n', '-N', '-p', '-t', '-u')
+const SSH_FLAGS = set(
+  '-B',
+  '-b',
+  '-c',
+  '-D',
+  '-E',
+  '-e',
+  '-F',
+  '-I',
+  '-i',
+  '-J',
+  '-L',
+  '-l',
+  '-m',
+  '-O',
+  '-o',
+  '-P',
+  '-p',
+  '-Q',
+  '-R',
+  '-S',
+  '-W',
+  '-w'
+)
+const SCRIPT_FLAGS = set('-t', '-T', '-B', '-I', '-O', '-E', '-m', '--log-io', '--log-timing')
+const WATCH_FLAGS = set('-n', '--interval', '-q', '--equexit')
+const PARALLEL_FLAGS = set(
+  '-j',
+  '--jobs',
+  '-S',
+  '--sshlogin',
+  '--joblog',
+  '--results',
+  '-a',
+  '--arg-file',
+  '--delay',
+  '--timeout',
+  '-n',
+  '--max-args',
+  '-N',
+  '--tagstring',
+  '--colsep',
+  '-C',
+  '--workdir',
+  '--tmpdir',
+  '--env',
+  '-I',
+  '--replace'
+)
+
+/** Leading keywords (`if`, `then`, `do`, `{`, `!`) and `function NAME` dropped. */
+function withoutKeywords(words: Word[]): Word[] {
+  let out = words
+  for (let round = 0; round < 16 && out.length; round++) {
+    const head = out[0]
+    const text = head.quoted || head.opaque ? '' : head.text
+    if (KEYWORDS.has(text)) out = out.slice(1)
+    else if (text === 'function') out = out.slice(2)
+    else break
+  }
+  return out
+}
+
+/** Names a command assigns to or unsets (`for x`, `read x`, `export X=`, `unset X`, ...). */
+function assignedNames(words: Word[]): string[] {
+  const name = words[0].quoted ? '' : words[0].text
+  const texts = words.slice(1).map((w) => w.text)
+  const names = (list: string[]): string[] =>
+    list.map((t) => ASSIGNMENT_NAME.exec(t)?.[1] ?? t).filter((t) => VAR_NAME.test(t))
+  switch (name) {
+    case 'for':
+    case 'select':
+      return names(texts.slice(0, 1))
+    case 'read': {
+      const out: string[] = []
+      for (let i = 0; i < texts.length; i++) {
+        if (texts[i] === '-a') out.push(texts[i + 1] ?? '')
+        if (READ_FLAGS.has(texts[i])) i++
+        else if (!texts[i].startsWith('-')) out.push(texts[i])
+      }
+      return names(out)
+    }
+    case 'export':
+    case 'declare':
+    case 'typeset':
+    case 'local':
+    case 'readonly':
+    case 'unset':
+    case 'let':
+      return names(texts.filter((t) => !t.startsWith('-')))
+    case 'getopts':
+      return names(texts.slice(1, 2))
+    case 'mapfile':
+    case 'readarray':
+      return names(texts.filter((t) => !t.startsWith('-')).slice(-1))
+    case 'printf': {
+      const v = texts.indexOf('-v')
+      return v >= 0 ? names([texts[v + 1] ?? '']) : []
+    }
+  }
+  return []
+}
+
+/** Words of `alias name='value'` arguments, remembered for later commands. */
+function rememberAliases(args: Word[], state: ParseState): void {
+  for (const a of args) {
+    const m = /^([^=\s/$`'"]+)=(.*)$/s.exec(a.text)
+    if (!m || state.aliases.size >= MAX_ALIASES) continue
+    state.aliases.set(m[1], lex(m[2])[0]?.words ?? [])
+    nested(state, 'alias', () => parsePosix(m[2], state))
+  }
+}
+
+/** The command an alias stands for, with the rest of the words. */
+function withAlias(words: Word[], state: ParseState): Word[] {
+  const head = words[0]
+  if (head.quoted || head.opaque) return words
+  const value = state.aliases.get(head.text)
+  return value && value.length ? [...value, ...words.slice(1)] : words
+}
+
 /** Parses a POSIX shell command line into `state.cmds`. */
 export function parsePosix(input: string, state: ParseState): void {
-  const segments = lex(input)
+  const { segments, truncated } = lexInfo(input)
+  if (truncated) state.truncated = true
   let pipeline = state.nextPipeline++
   let feeder: Cmd | null = null
   for (const segment of segments) {
+    const before = state.cmds.length
     addSegment(segment, state, pipeline, feeder)
-    const last = state.cmds[state.cmds.length - 1]
+    // The pipeline's next command reads what the first command of this segment writes.
+    const first = state.cmds[before]
     if (segment.op === '|' || segment.op === '|&') {
-      feeder = last ?? null
+      feeder = first ?? null
     } else {
       feeder = null
       pipeline = state.nextPipeline++
@@ -520,26 +699,53 @@ function addSegment(
   pipeline: number,
   feeder: Cmd | null
 ): void {
-  const redirects = segment.redirects.map((r) => ({ op: r.op, target: arg(r.target) }))
-  let words = segment.words
+  const redirects: Cmd['redirects'] = segment.redirects.map((r) =>
+    r.heredoc
+      ? { op: r.op, target: arg(r.target), heredoc: r.heredoc }
+      : { op: r.op, target: arg(r.target) }
+  )
+  // An unquoted heredoc delimiter: `$(...)` in the body runs.
+  for (const r of segment.redirects) if (r.heredoc?.expands) followText(r.heredoc.body, state)
+  let words = withoutKeywords(segment.words)
+  const assigned: string[] = []
   let i = 0
-  while (i < words.length && words[i].assignable) followSubstitutions(words[i++], state)
+  while (i < words.length && words[i].assignable) {
+    assigned.push(ASSIGNMENT_NAME.exec(words[i].text)?.[1] ?? '')
+    followSubstitutions(words[i++], state)
+  }
   words = words.slice(i)
   if (!words.length) {
+    // `X=/` on its own sets X for the rest of the line.
+    for (const name of assigned) if (name) state.assigned.add(name)
     if (redirects.length) {
       push(state, { name: '', args: [], redirects, raw: segment.raw, pipeline, shell: 'posix' })
     }
     return
   }
+  for (const name of assignedNames(words)) state.assigned.add(name)
+  words = withAlias(words, state)
   const fromFind = feeder?.name === 'find' ? findInfo(feeder.args) : null
-  addWords(words, state, { raw: segment.raw, pipeline, redirects, fromFind })
+  addWords(words, state, {
+    raw: segment.raw,
+    pipeline,
+    redirects,
+    fromFind,
+    feeder,
+    input: redirects.filter((r) => r.op === '<' || r.op === '<<<' || !!r.heredoc),
+    env: { set: assigned.filter(Boolean), unset: [] }
+  })
   // `cd` changes the folder for the commands after it on the same line.
   const name = cmdName(words[0].text)
   if (name === 'cd' || name === 'pushd') {
     const target = words.slice(1).find((w) => !w.text.startsWith('-'))
     if (!target) state.cwd = state.ctx.home
     else if (target.opaque || target.text === '-') state.cwd = null
-    else state.cwd = resolvePath(target.text, { ...state.ctx, cwd: state.cwd })
+    else
+      state.cwd = resolvePath(target.text, {
+        ...state.ctx,
+        cwd: state.cwd,
+        shadowed: state.assigned
+      })
   }
 }
 
@@ -548,21 +754,79 @@ interface SegmentInfo {
   pipeline: number
   redirects: Cmd['redirects']
   fromFind: { roots: Arg[]; filtered: boolean } | null
+  /** The command whose output this one reads (`a | b`). */
+  feeder: Cmd | null
+  /** Input redirections of the segment (`<`, `<<<`, heredocs); wrapped commands keep them. */
+  input: Cmd['redirects']
+  env: { set: string[]; unset: string[] }
+  /** Set for the command `xargs` or `parallel` runs with arguments it cannot see. */
+  unknownArgs?: boolean
 }
 
+/** Text given on standard input: a here-string, a heredoc, or `echo`/`printf` in a pipe. */
+function stdinText(info: SegmentInfo): string | null {
+  for (const r of info.input) {
+    if (r.op === '<<<') return r.target.opaque ? null : r.target.text
+    if (r.heredoc) return r.heredoc.body
+    if (r.op === '<') return null
+  }
+  const feeder = info.feeder
+  if (!feeder) return null
+  if (feeder.args.some((a) => a.opaque)) return null
+  if (feeder.name === 'echo') {
+    return positionals(feeder.args.filter((a) => !/^-[neE]+$/.test(a.text)))
+      .map((a) => a.text)
+      .join(' ')
+  }
+  if (feeder.name === 'printf' && feeder.args.length) {
+    return feeder.args
+      .map((a) => a.text)
+      .join(' ')
+      .replace(/\\n/g, '\n')
+  }
+  const body = feeder.redirects.find((r) => r.heredoc || r.op === '<<<')
+  if (feeder.name === 'cat' && body) return body.heredoc ? body.heredoc.body : body.target.text
+  return null
+}
+
+/** Something writes to this command's standard input (a pipe or an input redirection). */
+const hasStdin = (info: SegmentInfo): boolean => !!info.feeder || info.input.length > 0
+
+/** A shell without `-c` and without a script file reads its script from standard input. */
+function shellReadsStdin(words: Word[]): boolean {
+  let i = 1
+  for (; i < words.length && /^[-+]/.test(words[i].text); i++) {
+    const text = words[i].text
+    if (text === '-' || text === '--') return true
+    if (/^-[a-zA-Z]*s/.test(text)) return true
+    if (WRAPPER_FLAGS.shell.has(text)) i++
+  }
+  return i >= words.length
+}
+
+/** Words of a text given as one argument (`env -S 'rm -rf ~'`). */
+const splitWords = (text: string): Word[] => lex(text).flatMap((s) => s.words)
+
 /** Adds the command, then whatever it wraps, then its substitutions. */
-function addWords(words: Word[], state: ParseState, info: SegmentInfo): void {
+function addWords(input: Word[], state: ParseState, info: SegmentInfo): void {
+  let words = input
+  // zsh `=rm` is the path of `rm`.
+  if (!words[0].quoted && !words[0].opaque && /^=[^=]/.test(words[0].text)) {
+    words = [{ ...words[0], text: words[0].text.slice(1) }, ...words.slice(1)]
+  }
   const head = words[0]
   const name = head.opaque ? head.text.toLowerCase() : cmdName(head.text)
   const args = words.slice(1).map(arg)
   const viaXargs = state.via[state.via.length - 1] === 'xargs'
-  push(state, {
+  const self = push(state, {
     name,
     args,
     redirects: info.redirects,
     raw: info.raw,
     pipeline: info.pipeline,
     shell: 'posix',
+    ...(info.env.set.length || info.env.unset.length ? { env: info.env } : {}),
+    ...(info.unknownArgs ? { unknownArgs: true } : {}),
     ...(info.fromFind && (viaXargs || name === 'xargs')
       ? { findRoots: info.fromFind.roots, findFiltered: info.fromFind.filtered }
       : {})
@@ -570,46 +834,78 @@ function addWords(words: Word[], state: ParseState, info: SegmentInfo): void {
   for (const w of words) followSubstitutions(w, state)
   for (const r of info.redirects) if (r.target.opaque) followText(r.target.text, state)
 
-  const inner = (via: string, next: Word[] | null, keepFind = false): boolean => {
+  const inner = (
+    via: string,
+    next: Word[] | null,
+    extra: Partial<SegmentInfo> & { keepFind?: boolean } = {}
+  ): boolean => {
     if (!next) return false
     if (!next.length) return true
     let k = 0
-    while (k < next.length && next[k].assignable) k++
+    const env = { set: [...info.env.set], unset: [...info.env.unset, ...(extra.env?.unset ?? [])] }
+    while (k < next.length && next[k].assignable) {
+      env.set.push(ASSIGNMENT_NAME.exec(next[k].text)?.[1] ?? '')
+      k++
+    }
     if (k >= next.length) return true
     nested(state, via, () =>
       addWords(next.slice(k), state, {
         ...info,
         redirects: [],
-        fromFind: keepFind ? info.fromFind : null
+        env,
+        fromFind: extra.keepFind ? info.fromFind : null,
+        unknownArgs: extra.unknownArgs ?? (via === 'xargs' ? false : info.unknownArgs)
       })
     )
     return true
   }
+  const script = (via: string, text: string): void =>
+    nested(state, via, () => parsePosix(text, state))
 
+  if (name === 'xargs') {
+    xargs(words, state, info, inner)
+    return
+  }
+  if (name === 'env') {
+    envWrapper(words, inner, script)
+    return
+  }
   if (SIMPLE_WRAPPERS.has(name)) {
-    inner(name, innerWords(name, words), name === 'xargs' || viaXargs)
+    inner(name, innerWords(name, words), { keepFind: viaXargs })
+    return
+  }
+  if (name === 'busybox' || name === 'toybox') {
+    inner(name, words.slice(1), { keepFind: viaXargs })
+    return
+  }
+  if (name === 'alias') {
+    rememberAliases(words.slice(1), state)
     return
   }
   if (name === 'eval' || name === 'source' || name === '.') {
-    if (name === 'eval')
-      nested(state, 'shell', () => parsePosix(args.map((a) => a.text).join(' '), state))
+    if (name === 'eval') script('shell', args.map((a) => a.text).join(' '))
     return
   }
   if (SHELLS.has(name)) {
-    const script = shellScript(words)
-    if (script) nested(state, 'shell', () => parsePosix(script.text, state))
+    const body = shellScript(words)
+    if (body) script('shell', body.text)
+    else if (shellReadsStdin(words) && hasStdin(info)) {
+      const text = stdinText(info)
+      if (text !== null) script('shell', text)
+      else if (self) self.unknownScript = true
+    }
     return
   }
   if (POWERSHELLS.has(name)) {
-    const script = powershellScript(args.map((a) => a.text))
-    const ps = state.ctx.powershell
-    if (script && ps) nested(state, 'powershell', () => ps(script, state))
+    const ps = powershellScript(args.map((a) => a.text))
+    const parse = state.ctx.powershell
+    if (ps && parse) nested(state, 'powershell', () => parse(ps, state))
     return
   }
   if (name === 'cmd') {
-    const script = cmdScript(args.map((a) => a.text))
-    const cmd = state.ctx.cmd
-    if (script && cmd) nested(state, 'cmd', () => cmd(script, state))
+    const text = cmdScript(args.map((a) => a.text))
+    const parse = state.ctx.cmd
+    if (text && parse) nested(state, 'cmd', () => parse(text, state))
     return
   }
   if (name === 'find') {
@@ -617,7 +913,7 @@ function addWords(words: Word[], state: ParseState, info: SegmentInfo): void {
     for (const exec of findExecs(words)) {
       if (!exec.length) continue
       nested(state, 'find', () =>
-        addWords(exec, state, { ...info, redirects: [], fromFind: { roots, filtered } })
+        addWords(exec, state, { ...info, redirects: [], input: [], fromFind: { roots, filtered } })
       )
       const added = state.cmds[state.cmds.length - 1]
       if (added && added.via[added.via.length - 1] === 'find') {
@@ -627,17 +923,174 @@ function addWords(words: Word[], state: ParseState, info: SegmentInfo): void {
     }
     return
   }
+  if (otherRunners(name, words, state, info, inner, script)) return
   if (name === 'bundle' && words[1]?.text === 'exec') {
     inner('runner', words.slice(2))
     return
   }
-  if (/^python[\d.]*$/.test(name)) {
-    inner('python', pythonModule(words))
-    return
-  }
+  if (/^python[\d.]*$/.test(name) && inner('python', pythonModule(words))) return
+  embedded(name, args, info, script)
   if (inner('container', containerInner(name, words))) return
   inner('runner', packageRunner(name, words))
 }
+
+type Inner = (
+  via: string,
+  next: Word[] | null,
+  extra?: Partial<SegmentInfo> & { keepFind?: boolean }
+) => boolean
+type Script = (via: string, text: string) => void
+
+/** `xargs CMD`: CMD gets the items `echo`, a here-string or `find` feeds it, or unknown ones. */
+function xargs(words: Word[], state: ParseState, info: SegmentInfo, inner: Inner): void {
+  let next = innerWords('xargs', words) ?? []
+  const text = stdinText(info)
+  const items = text === null ? null : splitWords(text)
+  const r = words.findIndex((w) => w.text === '-I' || w.text === '--replace' || w.text === '-i')
+  const replace = r >= 0 ? (words[r].text === '-i' ? '{}' : (words[r + 1]?.text ?? '{}')) : null
+  if (items && next.length) {
+    next = replace
+      ? next.flatMap((w) =>
+          w.text.includes(replace)
+            ? items.map((it) => ({ ...w, text: w.text.split(replace).join(it.text) }))
+            : [w]
+        )
+      : [...next, ...items]
+  }
+  const viaXargs = state.via[state.via.length - 1] === 'xargs'
+  inner('xargs', next, {
+    keepFind: true,
+    unknownArgs: !items && !info.fromFind && !viaXargs && hasStdin(info)
+  })
+}
+
+/** `env [-i] [-u X] [X=1] [-S 'cmd args'] cmd`. */
+function envWrapper(words: Word[], inner: Inner, script: Script): void {
+  const unset: string[] = []
+  let i = 1
+  if (words[1]?.text === '-') {
+    unset.push('*')
+    i = 2
+  }
+  while (i < words.length && words[i].text.startsWith('-') && words[i].text !== '-') {
+    const text = words[i].text
+    const split = /^(?:-S|--split-string=?)(.*)$/s.exec(text)
+    if (split) {
+      const value = split[1] || words[i + 1]?.text || ''
+      const rest = words.slice(split[1] ? i + 1 : i + 2).map((w) => w.text)
+      script('env', [value, ...rest].join(' '))
+      return
+    }
+    if (text === '-i' || text === '--ignore-environment') unset.push('*')
+    if ((text === '-u' || text === '--unset') && words[i + 1]) unset.push(words[i + 1].text)
+    else if (text.startsWith('--unset=')) unset.push(text.slice('--unset='.length))
+    i++
+    if (text === '--') break
+    if (!text.includes('=') && WRAPPER_FLAGS.env.has(text)) i++
+  }
+  inner('env', words.slice(i), { env: { set: [], unset } })
+}
+
+/** Commands that run a command line given to them: `su -c`, `ssh host cmd`, `trap`, ... */
+function otherRunners(
+  name: string,
+  words: Word[],
+  state: ParseState,
+  info: SegmentInfo,
+  inner: Inner,
+  script: Script
+): boolean {
+  const texts = words.slice(1).map((w) => w.text)
+  switch (name) {
+    case 'su': {
+      const c = texts.findIndex((t) => t === '-c' || t === '--command' || t === '--session-command')
+      const glued = texts.find((t) => t.startsWith('--command='))
+      const body = c >= 0 ? texts[c + 1] : glued?.slice('--command='.length)
+      if (body) script('shell', body)
+      return true
+    }
+    case 'ssh': {
+      const i = afterFlags(words, 1, SSH_FLAGS)
+      const remote = words.slice(i + 1).map((w) => w.text)
+      if (remote.length) script('remote', remote.join(' '))
+      return true
+    }
+    case 'trap': {
+      const action = words.slice(1).find((w) => !w.text.startsWith('-'))
+      if (action && action.text) script('shell', action.text)
+      return true
+    }
+    case 'watch': {
+      const i = afterFlags(words, 1, WATCH_FLAGS)
+      const rest = words.slice(i).map((w) => w.text)
+      if (rest.length) script('shell', rest.join(' '))
+      return true
+    }
+    case 'script': {
+      const c = texts.findIndex((t) => t === '-c' || t === '--command')
+      if (c >= 0 && texts[c + 1]) {
+        script('shell', texts[c + 1])
+        return true
+      }
+      const i = afterFlags(words, 1, SCRIPT_FLAGS)
+      return words.length > i + 1 ? inner('script', words.slice(i + 1)) : true
+    }
+    case 'parallel': {
+      const start = afterFlags(words, 1, PARALLEL_FLAGS)
+      const sep = words.findIndex((w, k) => k >= start && /^:::[+]?$|^::::$/.test(w.text))
+      if (sep < 0) {
+        inner('xargs', words.slice(start), { unknownArgs: hasStdin(info) })
+        return true
+      }
+      const template = words.slice(start, sep)
+      const items = words.slice(sep + 1).filter((w) => !/^:::[+]?$|^::::$/.test(w.text))
+      if (!template.length) {
+        for (const item of items.slice(0, MAX_PARALLEL)) script('shell', item.text)
+      } else if (template.some((w) => w.text.includes('{}'))) {
+        for (const item of items.slice(0, MAX_PARALLEL)) {
+          inner(
+            'xargs',
+            template.map((w) => ({ ...w, text: w.text.split('{}').join(item.text) }))
+          )
+        }
+      } else {
+        inner('xargs', [...template, ...items])
+      }
+      if (items.length > MAX_PARALLEL) state.truncated = true
+      return true
+    }
+    case 'git': {
+      // `git -c alias.x='!cmd' x` and `git config alias.x '!cmd'` define shell aliases.
+      for (let i = 1; i < words.length; i++) {
+        const t = words[i].text
+        const value = t === '-c' ? words[i + 1]?.text : t.startsWith('-c') ? t.slice(2) : null
+        const m = value ? /^alias\.[^=]+=\s*!(.*)$/is.exec(value) : null
+        if (m) script('shell', m[1])
+      }
+      const config = texts.indexOf('config')
+      if (config >= 0) {
+        const pos = texts.slice(config + 1).filter((t) => !t.startsWith('-'))
+        if (/^alias\./i.test(pos[0] ?? '') && pos[1]?.startsWith('!'))
+          script('shell', pos[1].slice(1))
+      }
+      return false
+    }
+  }
+  return false
+}
+
+/** Shell commands inside an interpreter's inline code (`osascript -e 'do shell script ...'`). */
+function embedded(name: string, args: Arg[], info: SegmentInfo, script: Script): void {
+  const stdin = info.input.flatMap((r) =>
+    r.heredoc ? [r.heredoc.body] : r.op === '<<<' && !r.target.opaque ? [r.target.text] : []
+  )
+  for (const code of inlineCode({ name, args, stdin })) {
+    for (const command of embeddedShell(code.slice(0, MAX_CODE), name)) script('shell', command)
+  }
+}
+
+/** Inline code scanned for embedded commands and paths. */
+export const MAX_CODE = 16 * 1024
 
 /** Parses the commands inside the substitutions of an opaque word. */
 function followSubstitutions(w: Word, state: ParseState): void {

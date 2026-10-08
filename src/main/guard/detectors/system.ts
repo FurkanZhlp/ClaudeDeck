@@ -1,3 +1,4 @@
+import { isSafeRegex } from '../../../shared/safeRegex'
 import { positionals, type Arg, type Cmd } from '../commands'
 import { psParam, psValue } from '../targets'
 import { hit, type CmdDetector, type Hit } from './types'
@@ -101,6 +102,149 @@ function killHits(cmd: Cmd, index: number): Hit[] {
   return []
 }
 
+/* ClaudeDeck's own processes ------------------------------------------------------------------ */
+
+/** Process names of ClaudeDeck, Claude and the hook script (which runs under sh). */
+const OWN_NAMES = ['claude', 'claudedeck', 'ClaudeDeck', 'ClaudeDeck Helper', 'sh', 'bash']
+/** Command lines `pkill -f` patterns are matched against. */
+const OWN_COMMAND_LINES = [
+  '/bin/sh /Users/dev/Library/Application Support/ClaudeDeck/accounts/a1/claudedeck/hook.sh pre',
+  '/bin/sh C:/Users/dev/AppData/Roaming/ClaudeDeck/accounts/a1/claudedeck/hook.sh pre',
+  '/Applications/ClaudeDeck.app/Contents/MacOS/ClaudeDeck',
+  'C:\\Users\\dev\\AppData\\Local\\Programs\\ClaudeDeck\\ClaudeDeck.exe',
+  'claude --resume 0f0e',
+  'node /usr/local/bin/claude --resume 0f0e'
+]
+const MAX_PROCESS_PATTERN = 200
+
+/** A pkill-style pattern (a regex) that selects one of ClaudeDeck's processes. */
+function selectsOwn(pattern: string, full: boolean, ignoreCase: boolean): boolean {
+  const samples = full ? OWN_COMMAND_LINES : OWN_NAMES
+  if (pattern.length > MAX_PROCESS_PATTERN) return true
+  let regex: RegExp | null = null
+  if (isSafeRegex(pattern)) {
+    try {
+      regex = new RegExp(pattern, ignoreCase ? 'i' : '')
+    } catch {
+      regex = null
+    }
+  }
+  if (regex) return samples.some((s) => (regex as RegExp).test(s))
+  const lower = pattern.toLowerCase()
+  return samples.some((s) => s.toLowerCase().includes(lower))
+}
+
+/** An exact process name (killall, taskkill /im, Stop-Process -Name; `*` wildcards). */
+function namesOwn(name: string): boolean {
+  const base = name.replace(/\.exe$/i, '').replace(/\*+/g, '*')
+  if ((base.match(/\*/g)?.length ?? 0) > 3) return true
+  if (base.includes('*') || base.includes('?')) {
+    const re = new RegExp(
+      `^${base
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '.*')
+        .replace(/\?/g, '.')}$`,
+      'i'
+    )
+    return OWN_NAMES.some((n) => re.test(n))
+  }
+  return OWN_NAMES.some((n) => n.toLowerCase() === base.toLowerCase())
+}
+
+/** Text that names ClaudeDeck's processes (`$(pgrep -f hook.sh)`, `$PPID`). */
+const OWN_TEXT = /hook\.sh|claudedeck|\bclaude\b|\$\{?PPID\b/i
+
+function ownProcessHits(cmd: Cmd, index: number, all: Cmd[]): Hit[] {
+  const { name, args } = cmd
+  const one = (): Hit[] => [hit('sensitive.claudedeckProcess', cmd, index)]
+  const texts = args.map((a) => a.text)
+  if (name === 'kill' && cmd.shell !== 'powershell') {
+    if (texts.some((t) => OWN_TEXT.test(t) && (/[$`]/.test(t) || /hook\.sh/.test(t)))) return one()
+    // `pgrep -f hook.sh | xargs kill`
+    if (cmd.via.includes('xargs')) {
+      const feeder = all.find(
+        (c) =>
+          c.pipeline === cmd.pipeline && (c.name === 'pgrep' || c.name === 'pidof') && c !== cmd
+      )
+      if (feeder && ownProcessHits({ ...feeder, name: 'pkill' }, index, all).length) return one()
+    }
+    return []
+  }
+  if (name === 'pkill' || name === 'pgrep') {
+    if (name === 'pgrep') return []
+    const values = new Set([
+      '-u',
+      '-U',
+      '-g',
+      '-G',
+      '-t',
+      '-s',
+      '-P',
+      '--signal',
+      '-F',
+      '--pidfile'
+    ])
+    const pattern = positionals(
+      args.filter((a) => !KILL_SIGNAL.test(a.text)),
+      values
+    )[0]
+    if (!pattern) return []
+    const full = args.some(
+      (a) => a.text === '-f' || a.text === '--full' || /^-[a-zA-Z]*f[a-zA-Z]*$/.test(a.text)
+    )
+    const ci = args.some((a) => a.text === '-i' || a.text === '--ignore-case')
+    return pattern.opaque || selectsOwn(pattern.text, full, ci) ? one() : []
+  }
+  if (name === 'killall') {
+    const regex = args.some((a) => a.text === '-r' || a.text === '--regexp' || a.text === '-m')
+    const list = positionals(
+      args.filter((a) => !KILL_SIGNAL.test(a.text) || a.text === '-u'),
+      new Set(['-u', '-t', '-c', '-s', '--signal', '-o', '-y'])
+    )
+    return list.some(
+      (p) => p.opaque || (regex ? selectsOwn(p.text, false, true) : namesOwn(p.text))
+    )
+      ? one()
+      : []
+  }
+  if (name === 'taskkill') {
+    const im = args.findIndex((a) => /^\/im$/i.test(a.text))
+    return im >= 0 && args[im + 1] && namesOwn(args[im + 1].text) ? one() : []
+  }
+  if (name === 'stop-process') {
+    const target = psValue(args, 'name', 1)
+    return target && namesOwn(target.text) ? one() : []
+  }
+  return []
+}
+
+/* Login items, launch agents and scheduled jobs --------------------------------------------- */
+
+const LAUNCHCTL_ADD = /^(load|bootstrap|enable|submit|kickstart)$/
+const PS_AUTOSTART = new Set([
+  'register-scheduledtask',
+  'new-scheduledtask',
+  'new-service',
+  'set-scheduledtask'
+])
+
+function autostartHits(cmd: Cmd, index: number): Hit[] {
+  const { name, args } = cmd
+  const texts = args.map((a) => a.text)
+  const one = (): Hit[] => [hit('system.autostart', cmd, index)]
+  if (name === 'launchctl') return LAUNCHCTL_ADD.test(texts[0] ?? '') ? one() : []
+  if (name === 'crontab') {
+    if (texts.some((t) => t === '-l' || t === '-r')) return []
+    return one()
+  }
+  if (name === 'schtasks' && texts.some((t) => /^\/create$/i.test(t))) return one()
+  if (name === 'reg' && /^add$/i.test(texts[0] ?? '') && /\\Run(Once)?\b/i.test(texts[1] ?? ''))
+    return one()
+  if (PS_AUTOSTART.has(name)) return one()
+  if (name === 'systemctl' && /^(enable|link)$/.test(positionals(args)[0]?.text ?? '')) return one()
+  return []
+}
+
 const SHUTDOWN = new Set([
   'shutdown',
   'reboot',
@@ -164,8 +308,11 @@ function elevation(cmd: Cmd, index: number): Hit[] {
   return []
 }
 
-export const systemRules: CmdDetector = (cmd, index) => [
+export const systemRules: CmdDetector = (cmd, index, _ctx, all) => [
   ...elevation(cmd, index),
+  ...ownProcessHits(cmd, index, all),
   ...killHits(cmd, index),
-  ...shutdownOrService(cmd, index)
+  ...shutdownOrService(cmd, index),
+  ...autostartHits(cmd, index),
+  ...(cmd.unknownScript ? [hit('system.uncheckedCode', cmd, index)] : [])
 ]

@@ -13,7 +13,13 @@ describe('isSafeRegex', () => {
     '(a+)?',
     '(?<name>x)y',
     '[(+*]+(x)',
-    'go test ./\\.\\.\\.'
+    'go test ./\\.\\.\\.',
+    'rm\\s+-rf\\s+/',
+    '^git\\s+push\\b.*--force',
+    '\\bcurl\\b[^|]*\\|\\s*sh',
+    '\\w+\\s+\\w+',
+    '[a-z]+=[0-9]+',
+    'a.{0,10}b.{0,10}c'
   ])('accepts %s', (pattern) => {
     expect(isSafeRegex(pattern)).toBe(true)
   })
@@ -28,7 +34,17 @@ describe('isSafeRegex', () => {
     '(?:a+){3}',
     '(a)\\1',
     '(?<n>a)\\k<n>',
-    '((a+))+'
+    '((a+))+',
+    '.*.*',
+    '.*.*.*.*x',
+    '.+\\w*.*',
+    'rm.*-rf.*/.*x',
+    '\\s*\\s*\\s*x',
+    '\\w+-?\\w+',
+    '.*x(y)?.*',
+    '[a-z]*[a-c]+',
+    '.{0,100}.{0,100}',
+    'a.*|b.*.*'
   ])('refuses %s', (pattern) => {
     expect(isSafeRegex(pattern)).toBe(false)
   })

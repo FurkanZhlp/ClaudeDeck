@@ -37,14 +37,27 @@ export type ToolSet = Record<string, Tool>
  * server checks it and the token (session tokens only) before calling `handle`. Every refusal
  * answers with an empty body: a hook treats it as "no decision".
  */
+/** A caller known only by its account's guard key (no tab). */
+export interface AccountScope {
+  kind: 'account'
+  accountId: string
+}
+
+export type RouteScope = SessionScope | AccountScope
+
 export interface HookRoute {
   maxBodyBytes: number
+  /**
+   * Checks the body's `t` itself instead of a tab token (the account guard key); null refuses
+   * with 401. Without it only tab (session) tokens are accepted.
+   */
+  authenticate?: (token: string) => AccountScope | null
   /**
    * Resolves with the response body ('' = no decision). `signal` aborts when the client leaves;
    * `event` is the body's `e` ('' when missing).
    */
   handle(
-    scope: SessionScope,
+    scope: RouteScope,
     payload: unknown,
     signal: AbortSignal,
     event: string
@@ -158,10 +171,17 @@ function readBody(
   })
 }
 
-/** A session token at the start of a hook body (cheap check before reading the rest). */
-function sessionTokenAhead(prefix: string, tokens: SessionTokens): boolean {
+/** The caller a route accepts for a token: a tab, or an account for `authenticate` routes. */
+function routeCaller(route: HookRoute, tokens: SessionTokens, token: string): RouteScope | null {
+  if (route.authenticate) return route.authenticate(token)
+  const scope = tokens.lookup(token)
+  return scope?.kind === 'session' ? scope : null
+}
+
+/** A known token at the start of a hook body (cheap check before reading the rest). */
+function tokenAhead(prefix: string, route: HookRoute, tokens: SessionTokens): boolean {
   const match = TOKEN_PREFIX.exec(prefix)
-  return !!match && tokens.lookup(match[1])?.kind === 'session'
+  return !!match && routeCaller(route, tokens, match[1]) !== null
 }
 
 async function handleRoute(
@@ -175,7 +195,7 @@ async function handleRoute(
   const body = await readBody(
     req,
     route.maxBodyBytes,
-    (prefix) => sessionTokenAhead(prefix, tokens),
+    (prefix) => tokenAhead(prefix, route, tokens),
     TOKEN_PREFIX_BYTES
   )
   if (!body.ok) return sendEmpty(res, body.status)
@@ -186,10 +206,11 @@ async function handleRoute(
     return sendEmpty(res, 400)
   }
   const { t, e, p } = (parsed ?? {}) as { t?: unknown; e?: unknown; p?: unknown }
-  const scope = typeof t === 'string' ? tokens.lookup(t) : null
   // Optimize runs never reach hook routes.
-  if (!scope || scope.kind !== 'session') return sendEmpty(res, 401)
-  if (!allow(scopeId(scope))) return sendEmpty(res, 429)
+  const scope = typeof t === 'string' ? routeCaller(route, tokens, t) : null
+  if (!scope) return sendEmpty(res, 401)
+  if (!allow(scope.kind === 'account' ? `account:${scope.accountId}` : scopeId(scope)))
+    return sendEmpty(res, 429)
   // An authorised poll is held up to 20 s by the queue; no idle timeout applies to it.
   req.setTimeout(0)
 

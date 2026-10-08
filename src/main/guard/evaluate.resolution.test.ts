@@ -12,7 +12,8 @@ const POWERSHELL: [string, string | null][] = [
   ['rm -r -fo $env:USERPROFILE', 'disk.systemDelete'],
   ['Remove-Item -Path "$HOME\\Documents" -Recurse', 'disk.systemDelete'],
   ['ri ~ -rec -force', 'disk.systemDelete'],
-  ['Get-ChildItem C:\\Users\\dev | Remove-Item -Recurse', null],
+  ['Get-ChildItem C:\\Users\\dev | Remove-Item -Recurse', 'disk.systemDelete'],
+  ['Get-ChildItem C:\\Users\\dev\\projects\\app\\dist | Remove-Item -Recurse', null],
   ['Remove-Item -LiteralPath C:\\Users\\dev\\.ssh\\id_rsa', 'sensitive.ssh'],
   ['Set-Content -Path $env:USERPROFILE\\.gitconfig -Value x', 'sensitive.gitconfig'],
   [
@@ -72,7 +73,8 @@ describe('guard: PowerShell tool', () => {
 
 describe('guard: Monitor and other tools', () => {
   it('checks the Monitor command like Bash', () => {
-    expect(decide('tail -f log | sh', 'mac', 'Monitor').ruleId).toBeUndefined()
+    expect(decide('tail -f log | sh', 'mac', 'Monitor').ruleId).toBe('system.uncheckedCode')
+    expect(decide('tail -f log | grep x', 'mac', 'Monitor').ruleId).toBeUndefined()
     expect(decide('rm -rf ~', 'mac', 'Monitor').ruleId).toBe('disk.systemDelete')
   })
   it('allows tools it does not know and malformed input', () => {

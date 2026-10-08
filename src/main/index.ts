@@ -49,10 +49,13 @@ import { createSystemLoad, nodeSystemLoadDeps } from './platform/systemLoad'
 import { builtinPatternList, classify, fingerprint } from './testQueue/classifier'
 import { createGuardLog } from './guard/guardLog'
 import { registerGuardIpc } from './guard/guardIpc'
+import { createGuardRunner } from './guard/guardRunner'
 import { createGuardService } from './guard/guardService'
-import { readGitBranch } from './guard/gitBranch'
+import createGuardWorker from './guard/guardWorker?nodeWorker'
+import { cachedGitBranch } from './guard/gitBranch'
 import { guardRuleList } from './guard/rules'
 import { createClaudeDeckHooks } from './hooks/claudeDeckHooks'
+import { createGuardKeys } from './hooks/guardKeys'
 import { hookRoutes } from './hooks/hookRoutes'
 import { hookBaseUrl } from './hooks/hookScript'
 import { createStopProcess } from './testQueue/stopProcess'
@@ -149,7 +152,10 @@ const testQueue = createTestQueueService({
 })
 // The hook in each account's settings.json follows `settings.guard.enabled` and
 // `settings.testQueue.enabled` (installed while either is on).
+const guardKeys = createGuardKeys()
 const claudeDeckHooks = createClaudeDeckHooks({
+  keys: guardKeys,
+  hookUrl: () => (mcp ? hookBaseUrl(mcp.url) : null),
   accounts: () => repo.get().accounts,
   projects: () => repo.get().projects,
   settings: () => ({ guard: repo.get().settings.guard, testQueue: repo.get().settings.testQueue }),
@@ -163,12 +169,15 @@ const guardLog = createGuardLog({ onEntry: (entry) => send(IPC.guardEvent, entry
 const guard = createGuardService({
   settings: () => repo.get().settings.guard,
   project: (id) => repo.get().projects.find((p) => p.id === id),
+  projects: () => repo.get().projects,
+  // The evaluator runs in a worker with a hard time limit, never on the main thread.
+  runner: createGuardRunner({ spawn: () => createGuardWorker({}) }),
   account: (id) => repo.get().accounts.find((a) => a.id === id),
   appDataDir: userData,
   home: homedir(),
   os: platform.os,
   env: process.env,
-  gitBranch: (cwd) => readGitBranch(cwd),
+  gitBranch: cachedGitBranch(),
   log: guardLog
 })
 
@@ -302,7 +311,8 @@ async function startMcp(): Promise<void> {
         guard,
         service: testQueue,
         queueEnabled: () => repo.get().settings.testQueue.enabled,
-        isLive: (id) => ptys.has(id)
+        isLive: (id) => ptys.has(id),
+        accountForKey: (key) => guardKeys.lookup(key)
       })
     })
   } catch (error) {

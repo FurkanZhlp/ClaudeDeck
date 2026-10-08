@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { TestQueueHookProblem } from '../../shared/types'
 import type { OsName } from '../platform/types'
@@ -7,12 +8,13 @@ import {
   type Json,
   readSettings,
   settingsPath,
-  updateSettings,
-  writeIfChanged
+  updateSettings
 } from '../profile/settingsFile'
+import { writeFileAtomic } from '../profile/guidelines'
 import { findGitBash } from '../usage/statuslineScript'
 import {
   GUARD_HOOK_TIMEOUT_SECONDS,
+  GUARD_KEY_FILE,
   GUARD_MATCHER,
   HOOK_SCRIPT_FILE,
   hookCommand,
@@ -37,6 +39,27 @@ export const HOOK_EVENTS: readonly (readonly [string, HookEvent])[] = [
 export const hookScriptPath = (configDir: string): string =>
   join(configDir, 'claudedeck', HOOK_SCRIPT_FILE)
 
+export const guardKeyPath = (configDir: string): string =>
+  join(configDir, 'claudedeck', GUARD_KEY_FILE)
+
+const KEY_MODE = 0o600
+const sha256 = (data: string | Buffer): string => createHash('sha256').update(data).digest('hex')
+
+/**
+ * Writes `content` unless the file is a regular file with exactly this content (compared by
+ * hash). A symlink or anything else in its place is replaced, never written through.
+ */
+export function writeVerified(file: string, content: string, mode: number): boolean {
+  try {
+    const stat = lstatSync(file)
+    if (stat.isFile() && sha256(readFileSync(file)) === sha256(content)) return false
+  } catch {
+    // Missing: written below.
+  }
+  writeFileAtomic(file, content, mode)
+  return true
+}
+
 const legacyScriptPath = (configDir: string): string =>
   join(configDir, 'claudedeck', LEGACY_HOOK_SCRIPT_FILE)
 
@@ -48,6 +71,8 @@ export interface HookFeatures {
   queue: boolean
   /** Test queue max wait (pre hook timeout and poll count). */
   maxWaitMinutes: number
+  /** Guard key and hook base URL for claude processes without the tab's env (guard only). */
+  guardKey?: { key: string; url: string | null }
 }
 
 /** Where the hooks are installed; tests pass a Windows host on a Mac. */
@@ -66,21 +91,37 @@ export interface HookInstallResult {
   changed: boolean
 }
 
-const isOurHook = (hook: unknown): boolean =>
-  isObject(hook) && typeof hook.command === 'string' && OURS.test(hook.command)
+/** Commands ClaudeDeck writes for this account's scripts (old script names included). */
+const ourCommands = (configDir: string, os: OsName): Set<string> =>
+  new Set(
+    [hookScriptPath(configDir), legacyScriptPath(configDir)].flatMap((path) =>
+      (['pre', 'post'] as const).map((event) => hookCommand(path, event, os))
+    )
+  )
+
+/** Exactly our generated command; a look-alike that only mentions the path is the user's. */
+const isOurHook = (hook: unknown, ours: ReadonlySet<string>): boolean =>
+  isObject(hook) &&
+  typeof hook.command === 'string' &&
+  OURS.test(hook.command) &&
+  ours.has(hook.command)
 
 /**
  * Event groups without ClaudeDeck's hooks. Our hooks are dropped from every group; a group left
  * empty by that is dropped too. Anything else stays exactly as it was.
  */
-function withoutOurs(groups: unknown[]): unknown[] {
+function withoutOurs(groups: unknown[], ours: ReadonlySet<string>): unknown[] {
   const out: unknown[] = []
   for (const group of groups) {
-    if (!isObject(group) || !Array.isArray(group.hooks) || !group.hooks.some(isOurHook)) {
+    if (
+      !isObject(group) ||
+      !Array.isArray(group.hooks) ||
+      !group.hooks.some((h) => isOurHook(h, ours))
+    ) {
       out.push(group)
       continue
     }
-    const hooks = group.hooks.filter((h) => !isOurHook(h))
+    const hooks = group.hooks.filter((h) => !isOurHook(h, ours))
     if (hooks.length > 0) out.push({ ...group, hooks })
   }
   return out
@@ -112,13 +153,17 @@ function ourGroup(
  * New `hooks` value with our groups replaced (`install`) or removed; null when the existing
  * value has a shape we must not touch (not an object, or an event that is not an array).
  */
-function nextHooks(current: unknown, add: ((event: HookEvent) => Json | null) | null): Json | null {
+function nextHooks(
+  current: unknown,
+  add: ((event: HookEvent) => Json | null) | null,
+  ours: ReadonlySet<string>
+): Json | null {
   if (current !== undefined && !isObject(current)) return null
   const hooks: Json = { ...(current ?? {}) }
   for (const [name, event] of HOOK_EVENTS) {
     const existing = hooks[name]
     if (existing !== undefined && !Array.isArray(existing)) return null
-    const kept = withoutOurs(existing ?? [])
+    const kept = withoutOurs(existing ?? [], ours)
     const group = add ? add(event) : null
     if (group) hooks[name] = [...kept, group]
     else if (kept.length > 0) hooks[name] = kept
@@ -140,16 +185,18 @@ export function installHooks(
   features: HookFeatures,
   host: HookHost = currentHookHost()
 ): HookInstallResult {
-  if (!features.guard && !features.queue) return removeHooks(configDir)
+  if (!features.guard && !features.queue) return removeHooks(configDir, host.os)
   if (host.os === 'win32' && !findGitBash(host.env, host.exists)) {
-    const removed = removeHooks(configDir)
+    const removed = removeHooks(configDir, host.os)
     return { installed: false, problem: 'noGitBash', changed: removed.changed }
   }
   const file = settingsPath(configDir)
   const scriptPath = hookScriptPath(configDir)
   const withOurs = (settings: Json): Json | null => {
-    const hooks = nextHooks(settings.hooks, (event) =>
-      ourGroup(scriptPath, event, host.os, features)
+    const hooks = nextHooks(
+      settings.hooks,
+      (event) => ourGroup(scriptPath, event, host.os, features),
+      ourCommands(configDir, host.os)
     )
     return hooks && { ...settings, hooks }
   }
@@ -163,7 +210,15 @@ export function installHooks(
     mkdirSync(join(configDir, 'claudedeck'), { recursive: true })
     // The script first: a hook pointing at a missing file would fail every Bash call's hook.
     const script = hookScript({ guard: features.guard, maxWaitMinutes: features.maxWaitMinutes })
-    let changed = writeIfChanged(scriptPath, script, SCRIPT_MODE)
+    let changed = writeVerified(scriptPath, script, SCRIPT_MODE)
+    const keyFile = guardKeyPath(configDir)
+    if (features.guard && features.guardKey) {
+      const { key, url } = features.guardKey
+      changed = writeVerified(keyFile, `${key}\n${url ?? ''}\n`, KEY_MODE) || changed
+    } else if (existsSync(keyFile)) {
+      rmSync(keyFile, { force: true })
+      changed = true
+    }
     const result = updateSettings(file, (settings) => {
       const next = withOurs(settings)
       if (!next) return 'invalid'
@@ -183,8 +238,8 @@ export function installHooks(
   }
 }
 
-/** Removes ClaudeDeck's groups (only those) and the scripts, old names included. */
-export function removeHooks(configDir: string): HookInstallResult {
+/** Removes ClaudeDeck's groups (only those), the scripts (old names included) and the key. */
+export function removeHooks(configDir: string, os: OsName = process.platform): HookInstallResult {
   const file = settingsPath(configDir)
   let changed = false
   let problem: TestQueueHookProblem | null = null
@@ -192,7 +247,7 @@ export function removeHooks(configDir: string): HookInstallResult {
     if (existsSync(file)) {
       const result = updateSettings(file, (settings) => {
         if (settings.hooks === undefined) return 'unchanged'
-        const hooks = nextHooks(settings.hooks, null)
+        const hooks = nextHooks(settings.hooks, null, ourCommands(configDir, os))
         if (!hooks) return 'invalid'
         if (sameJson(settings.hooks, hooks)) return 'unchanged'
         const next = { ...settings }
@@ -203,7 +258,11 @@ export function removeHooks(configDir: string): HookInstallResult {
       if (result === 'invalid') problem = 'invalidSettings'
       if (result === 'written') changed = true
     }
-    for (const script of [hookScriptPath(configDir), legacyScriptPath(configDir)]) {
+    for (const script of [
+      hookScriptPath(configDir),
+      legacyScriptPath(configDir),
+      guardKeyPath(configDir)
+    ]) {
       if (existsSync(script)) {
         rmSync(script, { force: true })
         changed = true

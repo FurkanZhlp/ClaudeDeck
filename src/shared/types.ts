@@ -403,6 +403,11 @@ export interface TestQueueAccountHookStatus {
 
 export interface TestQueueHookStatus {
   accounts: TestQueueAccountHookStatus[]
+  /**
+   * The command guard is on: a project in `hooksDisabledProjectIds` (or `managedHooksOnly`)
+   * means its tool calls are not guarded, which the UI should warn about.
+   */
+  guardEnabled?: boolean
   /** Managed settings set `allowManagedHooksOnly`: the queue cannot work anywhere. */
   managedHooksOnly: boolean
   /** Projects whose settings set `disableAllHooks`: the queue is off in their tabs. */
@@ -560,6 +565,10 @@ export interface GuardRuleInfo {
   label: string
   /** A command or path it matches. */
   example: string
+  /** The category's action is capped at this for the rule (a rule override is not). */
+  maxAction?: 'ask'
+  /** The rule's action while its category is not set to allow (a rule override wins). */
+  defaultAction?: 'deny'
 }
 
 /** Result of the guard for one tool call. */

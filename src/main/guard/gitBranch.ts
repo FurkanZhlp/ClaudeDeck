@@ -1,9 +1,9 @@
-import { readFileSync, statSync } from 'node:fs'
+import { closeSync, constants, fstatSync, openSync, readSync, statSync } from 'node:fs'
 import * as nodePath from 'node:path'
 
 /** File reads of the branch lookup; tests pass fakes. */
 export interface BranchFs {
-  /** File text, or null when missing or unreadable. */
+  /** File text, or null when missing, unreadable or not a regular file. */
   read(path: string): string | null
   /** 'dir', 'file' or null when missing. */
   kind(path: string): 'dir' | 'file' | null
@@ -11,15 +11,37 @@ export interface BranchFs {
 
 const MAX_HEAD_BYTES = 4096
 const MAX_LEVELS = 64
+/** Branches are cached per folder this long (a hook call per tool call reads them). */
+export const BRANCH_CACHE_MS = 2000
+const MAX_CACHED = 64
+
+/**
+ * Reads at most 4 KB of a regular file. Opened non-blocking, so a FIFO planted as `.git/HEAD`
+ * cannot hang the read, and checked with fstat on the open descriptor before reading.
+ */
+export function readSmallFile(path: string): string | null {
+  let fd: number | null = null
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))
+    if (!fstatSync(fd).isFile()) return null
+    const buffer = Buffer.alloc(MAX_HEAD_BYTES)
+    const length = readSync(fd, buffer, 0, MAX_HEAD_BYTES, 0)
+    return buffer.subarray(0, length).toString('utf8')
+  } catch {
+    return null
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd)
+      } catch {
+        // Already closed.
+      }
+    }
+  }
+}
 
 export const nodeBranchFs: BranchFs = {
-  read(path) {
-    try {
-      return readFileSync(path, 'utf8').slice(0, MAX_HEAD_BYTES)
-    } catch {
-      return null
-    }
-  },
+  read: readSmallFile,
   kind(path) {
     try {
       const stat = statSync(path)
@@ -58,4 +80,21 @@ export function readGitBranch(
     dir = parent
   }
   return null
+}
+
+/** `readGitBranch` with a short per-folder cache. */
+export function cachedGitBranch(
+  read: (cwd: string) => string | null = readGitBranch,
+  now: () => number = Date.now
+): (cwd: string) => string | null {
+  const cache = new Map<string, { at: number; branch: string | null }>()
+  return (cwd) => {
+    const hit = cache.get(cwd)
+    const t = now()
+    if (hit && t - hit.at < BRANCH_CACHE_MS) return hit.branch
+    const branch = read(cwd)
+    if (cache.size >= MAX_CACHED) cache.clear()
+    cache.set(cwd, { at: t, branch })
+    return branch
+  }
 }

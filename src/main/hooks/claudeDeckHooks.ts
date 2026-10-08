@@ -6,6 +6,7 @@ import type {
   TestQueueSettings
 } from '../../shared/types'
 import type { RunFile } from '../platform/processList'
+import type { GuardKeys } from './guardKeys'
 import {
   currentHookHost,
   type HookHost,
@@ -29,6 +30,10 @@ export interface ClaudeDeckHooksDeps {
   fs?: HookStatusFs
   /** Best effort MDM / registry policy reads; omitted in tests. */
   run?: RunFile
+  /** Guard keys: a fresh one is written next to the script on every sync while the guard is on. */
+  keys?: GuardKeys
+  /** Hook base URL of the running server (written with the key); null when it is not running. */
+  hookUrl?: () => string | null
 }
 
 export interface ClaudeDeckHooks {
@@ -58,7 +63,10 @@ export function createClaudeDeckHooks(deps: ClaudeDeckHooksDeps): ClaudeDeckHook
         {
           guard: guard.enabled,
           queue: testQueue.enabled,
-          maxWaitMinutes: testQueue.maxWaitMinutes
+          maxWaitMinutes: testQueue.maxWaitMinutes,
+          ...(guard.enabled && deps.keys
+            ? { guardKey: { key: deps.keys.rotate(account.id), url: deps.hookUrl?.() ?? null } }
+            : {})
         },
         host
       )
@@ -80,8 +88,9 @@ export function createClaudeDeckHooks(deps: ClaudeDeckHooksDeps): ClaudeDeckHook
       accounts.forEach(sync)
     },
     remove(account) {
+      deps.keys?.forget(account.id)
       try {
-        removeHooks(account.configDir)
+        removeHooks(account.configDir, host.os)
       } catch (error) {
         console.warn('[hooks] could not remove hooks', account.id, error)
       }
@@ -101,6 +110,7 @@ export function createClaudeDeckHooks(deps: ClaudeDeckHooksDeps): ClaudeDeckHook
             problem: enabled ? (result?.problem ?? null) : null
           }
         }),
+        guardEnabled: guard.enabled,
         managedHooksOnly: await managedHooksOnly({ os: host.os, env: host.env, fs, run: deps.run }),
         hooksDisabledProjectIds: hooksDisabledProjects(deps.projects(), accounts, fs, host.os)
       }
