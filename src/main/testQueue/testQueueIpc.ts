@@ -8,7 +8,7 @@ import type {
 } from '../../shared/types'
 import type { IpcTools } from '../ipcUtil'
 import type { ClassifyOptions } from './classifier'
-import type { TestQueueHooks } from './testQueueHooks'
+import type { ClaudeDeckHooks } from '../hooks/claudeDeckHooks'
 import type { TestQueueService } from './testQueueService'
 
 /** Longest command "try a command" accepts; the classifier cuts at 16 KB anyway. */
@@ -18,7 +18,7 @@ export interface TestQueueIpcDeps {
   /** Main window only: none of these channels is in the popover's allowlist. */
   handle: IpcTools['handle']
   service: TestQueueService
-  hooks: Pick<TestQueueHooks, 'status'>
+  hooks: Pick<ClaudeDeckHooks, 'status'>
   settings(): TestQueueSettings
   /** Throws DomainError('NOT_FOUND') for an unknown project. */
   project(projectId: string): Project

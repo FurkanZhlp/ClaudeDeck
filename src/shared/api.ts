@@ -4,9 +4,15 @@ import type {
   AccountStatus,
   AppState,
   ClaudeSettings,
+  GuardDecision,
+  GuardEvaluateRequest,
+  GuardLogEntry,
+  GuardRuleInfo,
+  GuardSettingsPatch,
   Language,
   PermissionMode,
   ProjectClaudePatch,
+  ProjectGuard,
   ProjectInput,
   Session,
   GuidelinesUpdate,
@@ -58,6 +64,11 @@ export interface Api {
     setTestQueue(id: string, patch: Partial<ProjectTestQueue>): Promise<AppState>
     /** Project permission mode override; 'inherit' removes it. */
     setClaude(id: string, patch: ProjectClaudePatch): Promise<AppState>
+    /**
+     * Project command guard overrides; the fields given replace the stored ones (leave a
+     * category out to inherit it). null, or a patch that leaves nothing, removes the override.
+     */
+    setGuard(id: string, patch: Partial<ProjectGuard> | null): Promise<AppState>
   }
   sessions: {
     create(
@@ -80,6 +91,13 @@ export interface Api {
     setTestQueue(patch: TestQueueSettingsPatch): Promise<AppState>
     /** Starting permission mode and the bypass switch for Claude tabs started afterwards. */
     setClaude(patch: Partial<ClaudeSettings>): Promise<AppState>
+    /**
+     * Command guard settings. `categories` merges into the stored actions; `ruleOverrides` and
+     * `customRules` replace them. Rejects with INVALID on unknown categories or actions, bad
+     * rule ids, or a custom regex that does not compile or could backtrack catastrophically.
+     * Turning the guard on or off installs or removes the accounts' hook (with the test queue).
+     */
+    setGuard(patch: GuardSettingsPatch): Promise<AppState>
   }
   pty: {
     startSession(
@@ -180,6 +198,17 @@ export interface Api {
     hookStatus(): Promise<TestQueueHookStatus>
     /** Built-in patterns, then the built-in exclusions (group `exclusions`), in display order. */
     builtins(): Promise<TestQueueBuiltin[]>
+  }
+  /** Command guard (main window only). */
+  guard: {
+    /** Built-in rules in display order; labels are locale keys (`guard.rules.<id>`). */
+    rules(): Promise<GuardRuleInfo[]>
+    /** Decision for a command (or a path for Write/Edit) with the current settings. */
+    evaluate(request: GuardEvaluateRequest): Promise<GuardDecision>
+    /** The last 200 decisions with a matching rule, newest first (memory only). */
+    log(): Promise<GuardLogEntry[]>
+    /** Each new log entry; show a notice when `action` is 'deny'. */
+    onEvent(cb: (entry: GuardLogEntry) => void): Unsubscribe
   }
   /** Live subagent transcripts of Claude tabs; main derives every path (main window only). */
   agents: {

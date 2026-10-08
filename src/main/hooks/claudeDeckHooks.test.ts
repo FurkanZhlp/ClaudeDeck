@@ -2,11 +2,12 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Account, Project, TestQueueSettings } from '../../shared/types'
+import type { Account, GuardSettings, Project, TestQueueSettings } from '../../shared/types'
+import { defaultGuardSettings } from '../state/guardSettings'
 import { defaultTestQueueSettings } from '../state/testQueueSettings'
 import { hookScriptPath, type HookHost } from './hookInstaller'
 import type { HookStatusFs } from './hookStatus'
-import { createTestQueueHooks, type TestQueueHooks } from './testQueueHooks'
+import { createClaudeDeckHooks, type ClaudeDeckHooks } from './claudeDeckHooks'
 
 const mac: HookHost = { os: 'darwin', env: {} }
 const emptyFs: HookStatusFs = { readJson: () => undefined, list: () => [], exists: () => false }
@@ -14,8 +15,9 @@ const emptyFs: HookStatusFs = { readJson: () => undefined, list: () => [], exist
 let accounts: Account[]
 let projects: Project[]
 let settings: TestQueueSettings
+let guard: GuardSettings
 let lastCalls: Record<string, number>
-let hooks: TestQueueHooks
+let hooks: ClaudeDeckHooks
 
 const account = (id: string): Account => ({
   id,
@@ -30,18 +32,19 @@ beforeEach(() => {
   accounts = [account('a1'), account('a2')]
   projects = []
   settings = { ...defaultTestQueueSettings(), enabled: true }
+  guard = { ...defaultGuardSettings(), enabled: false }
   lastCalls = {}
-  hooks = createTestQueueHooks({
+  hooks = createClaudeDeckHooks({
     accounts: () => accounts,
     projects: () => projects,
-    settings: () => settings,
+    settings: () => ({ guard, testQueue: settings }),
     lastCallAt: (id) => lastCalls[id] ?? null,
     host: mac,
     fs: emptyFs
   })
 })
 
-describe('createTestQueueHooks', () => {
+describe('createClaudeDeckHooks', () => {
   it('installs every account while enabled and reports it', async () => {
     hooks.syncAll()
     for (const a of accounts) {
@@ -96,5 +99,19 @@ describe('createTestQueueHooks', () => {
     expect(() => hooks.sync(broken)).not.toThrow()
     const status = await hooks.status()
     expect(status.accounts[0]).toMatchObject({ installed: false, problem: 'writeFailed' })
+  })
+
+  it('keeps the hook while the guard is on, without the queue', async () => {
+    settings = { ...settings, enabled: false }
+    guard = { ...guard, enabled: true }
+    hooks.syncAll()
+    for (const a of accounts) {
+      expect(existsSync(hookScriptPath(a.configDir))).toBe(true)
+      expect(Object.keys(settingsOf(a).hooks as object)).toEqual(['PreToolUse'])
+    }
+    expect((await hooks.status()).accounts.every((a) => a.installed)).toBe(true)
+    guard = { ...guard, enabled: false }
+    hooks.syncAll()
+    for (const a of accounts) expect(settingsOf(a)).not.toHaveProperty('hooks')
   })
 })

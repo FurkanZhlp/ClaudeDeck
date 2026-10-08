@@ -25,7 +25,7 @@ import { renameWithRetryAsync } from '../platform/fs'
 import { ensureGuidelines } from '../profile/guidelines'
 import { copyEntry, type CopyRunner } from '../profile/importer'
 import { APP_MANAGED_USAGE_FILES } from '../usage/statuslineScript'
-import { HOOK_SCRIPT_FILE } from '../testQueue/hookScript'
+import { HOOK_SCRIPT_FILE, LEGACY_HOOK_SCRIPT_FILE } from '../hooks/hookScript'
 import { readSettingsText, restoreProtectedSettings } from './settingsGuard'
 
 type Env = Record<string, string>
@@ -106,8 +106,9 @@ export const APP_MANAGED_FILES = [
   'claudedeck/guidelines.md',
   'claudedeck/backups/**',
   ...APP_MANAGED_USAGE_FILES.map((name) => `claudedeck/${name}`),
-  // Runs on every Bash call of the account once the test queue is on.
-  `claudedeck/${HOOK_SCRIPT_FILE}`
+  // Runs on every guarded tool call of the account (command guard and test queue).
+  `claudedeck/${HOOK_SCRIPT_FILE}`,
+  `claudedeck/${LEGACY_HOOK_SCRIPT_FILE}`
 ]
 
 /**

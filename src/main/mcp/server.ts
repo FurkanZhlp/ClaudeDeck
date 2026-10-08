@@ -39,8 +39,16 @@ export type ToolSet = Record<string, Tool>
  */
 export interface HookRoute {
   maxBodyBytes: number
-  /** Resolves with the response body ('' = no decision). `signal` aborts when the client leaves. */
-  handle(scope: SessionScope, payload: unknown, signal: AbortSignal): Promise<string> | string
+  /**
+   * Resolves with the response body ('' = no decision). `signal` aborts when the client leaves;
+   * `event` is the body's `e` ('' when missing).
+   */
+  handle(
+    scope: SessionScope,
+    payload: unknown,
+    signal: AbortSignal,
+    event: string
+  ): Promise<string> | string
 }
 
 export interface McpServerOptions {
@@ -50,7 +58,7 @@ export interface McpServerOptions {
   version?: string
   /** Tool calls allowed per session or run and window; defaults to 60 per minute. */
   rateLimit?: RateLimit
-  /** Hook routes by exact path (e.g. `/hooks/test-queue/pre`). */
+  /** Hook routes by exact path (e.g. `/hooks/pre`). */
   routes?: Record<string, HookRoute>
   /** Hook calls allowed per session and window; defaults to 600 per minute. */
   routeRateLimit?: RateLimit
@@ -177,7 +185,7 @@ async function handleRoute(
   } catch {
     return sendEmpty(res, 400)
   }
-  const { t, p } = (parsed ?? {}) as { t?: unknown; p?: unknown }
+  const { t, e, p } = (parsed ?? {}) as { t?: unknown; e?: unknown; p?: unknown }
   const scope = typeof t === 'string' ? tokens.lookup(t) : null
   // Optimize runs never reach hook routes.
   if (!scope || scope.kind !== 'session') return sendEmpty(res, 401)
@@ -189,7 +197,7 @@ async function handleRoute(
   res.on('close', () => {
     if (!res.writableFinished) aborted.abort()
   })
-  const reply = await route.handle(scope, p, aborted.signal)
+  const reply = await route.handle(scope, p, aborted.signal, typeof e === 'string' ? e : '')
   if (res.destroyed || res.writableEnded) return
   res.writeHead(200, {
     'Content-Type': 'application/json',

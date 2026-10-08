@@ -47,10 +47,15 @@ import { loginItemSettings, wasOpenedAtLogin } from './window/loginItem'
 import { runFile } from './platform/processList'
 import { createSystemLoad, nodeSystemLoadDeps } from './platform/systemLoad'
 import { builtinPatternList, classify, fingerprint } from './testQueue/classifier'
-import { testQueueRoutes } from './testQueue/hookRoutes'
-import { hookBaseUrl } from './testQueue/hookScript'
+import { createGuardLog } from './guard/guardLog'
+import { registerGuardIpc } from './guard/guardIpc'
+import { createGuardService } from './guard/guardService'
+import { readGitBranch } from './guard/gitBranch'
+import { guardRuleList } from './guard/rules'
+import { createClaudeDeckHooks } from './hooks/claudeDeckHooks'
+import { hookRoutes } from './hooks/hookRoutes'
+import { hookBaseUrl } from './hooks/hookScript'
 import { createStopProcess } from './testQueue/stopProcess'
-import { createTestQueueHooks } from './testQueue/testQueueHooks'
 import { registerTestQueueIpc } from './testQueue/testQueueIpc'
 import { createTestQueueService } from './testQueue/testQueueService'
 import { titleBarOverlay, windowBackground, windowChrome } from './window/windowChrome'
@@ -142,13 +147,29 @@ const testQueue = createTestQueueService({
   // Process discovery goes through CIM on Windows, which takes about a second per call.
   processCheckMs: platform.os === 'win32' ? 5000 : 2000
 })
-// The hooks in each account's settings.json follow `settings.testQueue.enabled`.
-const testQueueHooks = createTestQueueHooks({
+// The hook in each account's settings.json follows `settings.guard.enabled` and
+// `settings.testQueue.enabled` (installed while either is on).
+const claudeDeckHooks = createClaudeDeckHooks({
   accounts: () => repo.get().accounts,
   projects: () => repo.get().projects,
-  settings: () => repo.get().settings.testQueue,
+  settings: () => ({ guard: repo.get().settings.guard, testQueue: repo.get().settings.testQueue }),
   lastCallAt: (accountId) => testQueue.lastCallAt(accountId),
   run: runFile
+})
+
+// Command guard: the first step of every PreToolUse hook call of a Claude tab. Its decisions
+// with a matching rule are kept in memory and pushed to the main window.
+const guardLog = createGuardLog({ onEntry: (entry) => send(IPC.guardEvent, entry) })
+const guard = createGuardService({
+  settings: () => repo.get().settings.guard,
+  project: (id) => repo.get().projects.find((p) => p.id === id),
+  account: (id) => repo.get().accounts.find((a) => a.id === id),
+  appDataDir: userData,
+  home: homedir(),
+  os: platform.os,
+  env: process.env,
+  gitBranch: (cwd) => readGitBranch(cwd),
+  log: guardLog
 })
 
 /**
@@ -177,7 +198,7 @@ const optimize = new OptimizeManager({
   // settingsGuard put `hooks` back as it was before the run; make sure ours match the settings.
   onRunEnded: (accountId) => {
     const account = repo.get().accounts.find((a) => a.id === accountId)
-    if (account) testQueueHooks.sync(account)
+    if (account) claudeDeckHooks.sync(account)
   }
 })
 
@@ -222,7 +243,7 @@ function prepareAccount(account: Account): void {
   } catch (error) {
     console.warn('[usage] could not prepare account', account.id, error)
   }
-  testQueueHooks.sync(account)
+  claudeDeckHooks.sync(account)
 }
 
 /** Native confirmation for MCP actions that change the app; Cancel is the default. */
@@ -277,7 +298,12 @@ async function startMcp(): Promise<void> {
       tools: { ...tools, ...createOptimizeTools(optimize.port) },
       tokens: mcpTokens,
       version: app.getVersion(),
-      routes: testQueueRoutes({ service: testQueue, isLive: (id) => ptys.has(id) })
+      routes: hookRoutes({
+        guard,
+        service: testQueue,
+        queueEnabled: () => repo.get().settings.testQueue.enabled,
+        isLive: (id) => ptys.has(id)
+      })
     })
   } catch (error) {
     console.error('[mcp] server did not start', error)
@@ -575,11 +601,12 @@ app.whenReady().then(() => {
     },
     applyLaunchAtLogin,
     onTestQueueSettingsChange: () => {
-      testQueueHooks.syncAll()
+      claudeDeckHooks.syncAll()
       testQueue.settingsChanged()
     },
+    onGuardSettingsChange: () => claudeDeckHooks.syncAll(),
     hookUrl: () => (mcp ? hookBaseUrl(mcp.url) : null),
-    onAccountRemoving: (account) => testQueueHooks.remove(account),
+    onAccountRemoving: (account) => claudeDeckHooks.remove(account),
     cancelOptimize: (accountId) => {
       if (optimize.isActive(accountId)) void optimize.cancel(accountId)
     }
@@ -629,12 +656,13 @@ app.whenReady().then(() => {
   registerTestQueueIpc({
     handle: ipcTools.handle,
     service: testQueue,
-    hooks: testQueueHooks,
+    hooks: claudeDeckHooks,
     settings: () => repo.get().settings.testQueue,
     project: (id) => repo.project(id),
     classify,
     builtins: builtinPatternList
   })
+  registerGuardIpc({ handle: ipcTools.handle, service: guard, log: guardLog, rules: guardRuleList })
   registerUsageIpc({ handle: ipcTools.handle, service: usage, poller: usagePoller, repo })
   registerStatsIpc({ handle: ipcTools.handle, service: stats })
   registerMcpIpc({

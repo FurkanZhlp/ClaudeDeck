@@ -1,11 +1,17 @@
-import type { Account, Project, TestQueueHookStatus, TestQueueSettings } from '../../shared/types'
+import type {
+  Account,
+  GuardSettings,
+  Project,
+  TestQueueHookStatus,
+  TestQueueSettings
+} from '../../shared/types'
 import type { RunFile } from '../platform/processList'
 import {
   currentHookHost,
   type HookHost,
   type HookInstallResult,
-  installTestQueueHooks,
-  removeTestQueueHooks
+  installHooks,
+  removeHooks
 } from './hookInstaller'
 import {
   hooksDisabledProjects,
@@ -14,10 +20,10 @@ import {
   type HookStatusFs
 } from './hookStatus'
 
-export interface TestQueueHooksDeps {
+export interface ClaudeDeckHooksDeps {
   accounts(): Account[]
   projects(): Project[]
-  settings(): TestQueueSettings
+  settings(): { guard: GuardSettings; testQueue: TestQueueSettings }
   lastCallAt(accountId: string): number | null
   host?: HookHost
   fs?: HookStatusFs
@@ -25,7 +31,7 @@ export interface TestQueueHooksDeps {
   run?: RunFile
 }
 
-export interface TestQueueHooks {
+export interface ClaudeDeckHooks {
   /** Installs or removes the hooks of one account to match the settings. */
   sync(account: Account): void
   syncAll(): void
@@ -34,24 +40,33 @@ export interface TestQueueHooks {
   status(): Promise<TestQueueHookStatus>
 }
 
-/** Keeps every account's settings.json in line with `testQueue.enabled` and remembers results. */
-export function createTestQueueHooks(deps: TestQueueHooksDeps): TestQueueHooks {
+/**
+ * Keeps every account's settings.json in line with `guard.enabled` and `testQueue.enabled`
+ * (the hook is installed while either is on) and remembers the results.
+ */
+export function createClaudeDeckHooks(deps: ClaudeDeckHooksDeps): ClaudeDeckHooks {
   const host = deps.host ?? currentHookHost()
   const fs = deps.fs ?? nodeHookStatusFs
   const results = new Map<string, HookInstallResult>()
 
   const sync = (account: Account): void => {
-    const settings = deps.settings()
+    const { guard, testQueue } = deps.settings()
     let result: HookInstallResult
     try {
-      result = settings.enabled
-        ? installTestQueueHooks(account.configDir, settings.maxWaitMinutes, host)
-        : removeTestQueueHooks(account.configDir)
+      result = installHooks(
+        account.configDir,
+        {
+          guard: guard.enabled,
+          queue: testQueue.enabled,
+          maxWaitMinutes: testQueue.maxWaitMinutes
+        },
+        host
+      )
     } catch (error) {
-      console.warn('[test-queue] hook sync failed', account.id, error)
+      console.warn('[hooks] hook sync failed', account.id, error)
       result = { installed: false, problem: 'writeFailed', changed: false }
     }
-    if (result.problem) console.warn('[test-queue] hooks', account.id, result.problem)
+    if (result.problem) console.warn('[hooks]', account.id, result.problem)
     results.set(account.id, result)
   }
 
@@ -66,15 +81,16 @@ export function createTestQueueHooks(deps: TestQueueHooksDeps): TestQueueHooks {
     },
     remove(account) {
       try {
-        removeTestQueueHooks(account.configDir)
+        removeHooks(account.configDir)
       } catch (error) {
-        console.warn('[test-queue] could not remove hooks', account.id, error)
+        console.warn('[hooks] could not remove hooks', account.id, error)
       }
       results.delete(account.id)
     },
     async status() {
       const accounts = deps.accounts()
-      const enabled = deps.settings().enabled
+      const { guard, testQueue } = deps.settings()
+      const enabled = guard.enabled || testQueue.enabled
       return {
         accounts: accounts.map((a) => {
           const result = results.get(a.id)

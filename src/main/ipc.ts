@@ -9,9 +9,11 @@ import type {
   Account,
   AccountInput,
   ClaudeSettings,
+  GuardSettingsPatch,
   Language,
   PermissionMode,
   ProjectClaudePatch,
+  ProjectGuard,
   ProjectInput,
   ProjectTestQueue,
   SessionKind,
@@ -27,7 +29,7 @@ import {
 import type { PtyManager } from './pty/ptyManager'
 import { isSize, isText, type IpcTools } from './ipcUtil'
 import { MCP_TOKEN_ENV } from './mcp/sessionTokens'
-import { HOOK_URL_ENV } from './testQueue/hookScript'
+import { HOOK_URL_ENV } from './hooks/hookScript'
 import { platform } from './platform'
 import { withEnvVars } from './platform/env'
 import type { Repository } from './state/repository'
@@ -70,7 +72,9 @@ interface Deps {
   applyLaunchAtLogin: (enabled: boolean) => void
   /** Global or project test queue settings changed (hooks and scheduler follow). */
   onTestQueueSettingsChange?: () => void
-  /** Test queue hook base URL for Claude tabs; null while the server is not running. */
+  /** Global command guard settings changed (the accounts' hooks follow). */
+  onGuardSettingsChange?: () => void
+  /** Hook base URL for Claude tabs; null while the server is not running. */
   hookUrl?: () => string | null
   /** An account is about to be removed: app-managed hooks come out of its settings.json. */
   onAccountRemoving?: (account: Account) => void
@@ -104,6 +108,7 @@ export function registerIpc({
   forgetUsage,
   applyLaunchAtLogin,
   onTestQueueSettingsChange,
+  onGuardSettingsChange,
   hookUrl,
   onAccountRemoving
 }: Deps): void {
@@ -245,6 +250,17 @@ export function registerIpc({
 
   handle(IPC.projectSetClaude, (id: string, patch: ProjectClaudePatch) =>
     repo.setProjectClaude(id, { permissionMode: patch?.permissionMode })
+  )
+
+  // Applies to the next tool call of every tab (the hook asks the server each time).
+  handle(IPC.settingsSetGuard, (patch: GuardSettingsPatch) => {
+    const state = repo.setGuardSettings(patch)
+    if (patch && typeof patch === 'object' && 'enabled' in patch) onGuardSettingsChange?.()
+    return state
+  })
+
+  handle(IPC.projectSetGuard, (id: string, patch: Partial<ProjectGuard> | null) =>
+    repo.setProjectGuard(id, patch)
   )
 
   handle(

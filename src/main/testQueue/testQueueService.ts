@@ -14,7 +14,7 @@ import type { ProcessInfo } from '../platform/processList'
 import { defaultAutoMax, type SystemLoad } from '../platform/systemLoad'
 import type { SessionScope } from '../mcp/sessionTokens'
 import { parsePostToolUse, parsePreToolUse } from './hookPayload'
-import { WAIT_MARKER } from './hookScript'
+import { WAIT_MARKER } from '../hooks/hookScript'
 import { findRunProcesses, stopTarget, type StopTarget } from './processMatch'
 
 /** Fixed reasons the agent sees; never built from request data. */

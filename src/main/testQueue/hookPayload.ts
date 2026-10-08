@@ -28,9 +28,12 @@ const cleanText = (value: unknown, max: number): string | undefined => {
   return text ? text.slice(0, max) : undefined
 }
 
-/** A PreToolUse payload for the Bash tool; null for anything the queue must not handle. */
+/** Shell tools the queue handles; PowerShell takes the same input shape as Bash. */
+const isShellTool = (name: unknown): boolean => name === 'Bash' || name === 'PowerShell'
+
+/** A PreToolUse payload for a shell tool; null for anything the queue must not handle. */
 export function parsePreToolUse(payload: unknown): PreToolUse | null {
-  if (!isObject(payload) || payload.tool_name !== 'Bash') return null
+  if (!isObject(payload) || !isShellTool(payload.tool_name)) return null
   const input = payload.tool_input
   if (!isObject(input) || typeof input.command !== 'string') return null
   if (input.command.length > MAX_COMMAND || input.command.trim() === '') return null
@@ -44,9 +47,9 @@ export function parsePreToolUse(payload: unknown): PreToolUse | null {
   return { command: input.command, toolUseId, agentId, agentType }
 }
 
-/** A PostToolUse / PostToolUseFailure payload for the Bash tool. */
+/** A PostToolUse / PostToolUseFailure payload for a shell tool. */
 export function parsePostToolUse(payload: unknown): PostToolUse | null {
-  if (!isObject(payload) || payload.tool_name !== 'Bash') return null
+  if (!isObject(payload) || !isShellTool(payload.tool_name)) return null
   const toolUseId = payload.tool_use_id
   if (typeof toolUseId !== 'string' || !TOOL_USE_ID.test(toolUseId)) return null
   const response = payload.tool_response

@@ -31,7 +31,8 @@ const api: Api = {
     update: (id, patch) => call(IPC.projectUpdate, id, patch),
     remove: (id) => call(IPC.projectRemove, id),
     setTestQueue: (id, patch) => call(IPC.projectSetTestQueue, id, patch),
-    setClaude: (id, patch) => call(IPC.projectSetClaude, id, patch)
+    setClaude: (id, patch) => call(IPC.projectSetClaude, id, patch),
+    setGuard: (id, patch) => call(IPC.projectSetGuard, id, patch)
   },
   sessions: {
     create: (projectId, kind, title, permissionMode) =>
@@ -45,7 +46,8 @@ const api: Api = {
     setUsage: (patch) => call(IPC.settingsSetUsage, patch),
     setLaunchAtLogin: (enabled) => call(IPC.settingsSetLaunchAtLogin, enabled),
     setTestQueue: (patch) => call(IPC.settingsSetTestQueue, patch),
-    setClaude: (patch) => call(IPC.settingsSetClaude, patch)
+    setClaude: (patch) => call(IPC.settingsSetClaude, patch),
+    setGuard: (patch) => call(IPC.settingsSetGuard, patch)
   },
   pty: {
     startSession: (sessionId, resume, cols, rows) =>
@@ -116,6 +118,12 @@ const api: Api = {
     classify: (command, projectId) => call(IPC.testQueueClassify, command, projectId),
     hookStatus: () => call(IPC.testQueueHookStatus),
     builtins: () => call(IPC.testQueueBuiltins)
+  },
+  guard: {
+    rules: () => call(IPC.guardRules),
+    evaluate: (request) => call(IPC.guardEvaluate, request),
+    log: () => call(IPC.guardLog),
+    onEvent: (cb) => subscribe(IPC.guardEvent, cb)
   },
   agents: {
     watch: (sessionId) => call(IPC.agentsWatch, sessionId),

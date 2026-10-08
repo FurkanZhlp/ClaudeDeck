@@ -12,17 +12,20 @@ import {
 } from '../profile/settingsFile'
 import { findGitBash } from '../usage/statuslineScript'
 import {
+  GUARD_HOOK_TIMEOUT_SECONDS,
+  GUARD_MATCHER,
   HOOK_SCRIPT_FILE,
   hookCommand,
   hookScript,
+  LEGACY_HOOK_SCRIPT_FILE,
   OURS,
   POST_HOOK_TIMEOUT_SECONDS,
   preHookTimeout,
+  QUEUE_MATCHER,
   type HookEvent
 } from './hookScript'
 
 const SCRIPT_MODE = 0o755
-const BASH_MATCHER = 'Bash'
 
 /** settings.json hook events ClaudeDeck adds a group to, with the script event they call. */
 export const HOOK_EVENTS: readonly (readonly [string, HookEvent])[] = [
@@ -33,6 +36,19 @@ export const HOOK_EVENTS: readonly (readonly [string, HookEvent])[] = [
 
 export const hookScriptPath = (configDir: string): string =>
   join(configDir, 'claudedeck', HOOK_SCRIPT_FILE)
+
+const legacyScriptPath = (configDir: string): string =>
+  join(configDir, 'claudedeck', LEGACY_HOOK_SCRIPT_FILE)
+
+/** What the hook is installed for. */
+export interface HookFeatures {
+  /** Command guard on: PreToolUse for every guarded tool, fail closed. */
+  guard: boolean
+  /** Test queue on: PreToolUse and PostToolUse(Failure) for Bash and PowerShell. */
+  queue: boolean
+  /** Test queue max wait (pre hook timeout and poll count). */
+  maxWaitMinutes: number
+}
 
 /** Where the hooks are installed; tests pass a Windows host on a Mac. */
 export interface HookHost {
@@ -70,27 +86,41 @@ function withoutOurs(groups: unknown[]): unknown[] {
   return out
 }
 
-function ourGroup(scriptPath: string, event: HookEvent, os: OsName, maxWait: number): Json {
+/** Our group for one settings event, or null when the features need none there. */
+function ourGroup(
+  scriptPath: string,
+  event: HookEvent,
+  os: OsName,
+  features: HookFeatures
+): Json | null {
   const command = hookCommand(scriptPath, event, os)
-  const hook: Json =
-    event === 'pre'
-      ? { type: 'command', command, timeout: preHookTimeout(maxWait) }
-      : { type: 'command', command, timeout: POST_HOOK_TIMEOUT_SECONDS, async: true }
-  return { matcher: BASH_MATCHER, hooks: [hook] }
+  if (event === 'post') {
+    if (!features.queue) return null
+    const hook = { type: 'command', command, timeout: POST_HOOK_TIMEOUT_SECONDS, async: true }
+    return { matcher: QUEUE_MATCHER, hooks: [hook] }
+  }
+  const timeout = features.queue
+    ? preHookTimeout(features.maxWaitMinutes)
+    : GUARD_HOOK_TIMEOUT_SECONDS
+  return {
+    matcher: features.guard ? GUARD_MATCHER : QUEUE_MATCHER,
+    hooks: [{ type: 'command', command, timeout }]
+  }
 }
 
 /**
  * New `hooks` value with our groups replaced (`install`) or removed; null when the existing
  * value has a shape we must not touch (not an object, or an event that is not an array).
  */
-function nextHooks(current: unknown, add: ((event: HookEvent) => Json) | null): Json | null {
+function nextHooks(current: unknown, add: ((event: HookEvent) => Json | null) | null): Json | null {
   if (current !== undefined && !isObject(current)) return null
   const hooks: Json = { ...(current ?? {}) }
   for (const [name, event] of HOOK_EVENTS) {
     const existing = hooks[name]
     if (existing !== undefined && !Array.isArray(existing)) return null
     const kept = withoutOurs(existing ?? [])
-    if (add) hooks[name] = [...kept, add(event)]
+    const group = add ? add(event) : null
+    if (group) hooks[name] = [...kept, group]
     else if (kept.length > 0) hooks[name] = kept
     else if (existing !== undefined) delete hooks[name]
   }
@@ -100,24 +130,26 @@ function nextHooks(current: unknown, add: ((event: HookEvent) => Json) | null): 
 const sameJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
 
 /**
- * Adds ClaudeDeck's test queue groups to the account's settings.json and writes the script.
- * Idempotent; the user's own hooks are kept as they are. Windows without Git Bash gets no hook
- * (Claude Code has no Bash tool there either). Invalid settings.json is never touched.
+ * Adds ClaudeDeck's hook groups to the account's settings.json and writes the script; groups
+ * and scripts of older versions (`test-queue.sh`) are replaced. Idempotent; the user's own
+ * hooks are kept as they are. Windows without Git Bash gets no hook (the script needs a POSIX
+ * shell). Invalid settings.json is never touched.
  */
-export function installTestQueueHooks(
+export function installHooks(
   configDir: string,
-  maxWaitMinutes: number,
+  features: HookFeatures,
   host: HookHost = currentHookHost()
 ): HookInstallResult {
+  if (!features.guard && !features.queue) return removeHooks(configDir)
   if (host.os === 'win32' && !findGitBash(host.env, host.exists)) {
-    const removed = removeTestQueueHooks(configDir)
+    const removed = removeHooks(configDir)
     return { installed: false, problem: 'noGitBash', changed: removed.changed }
   }
   const file = settingsPath(configDir)
   const scriptPath = hookScriptPath(configDir)
   const withOurs = (settings: Json): Json | null => {
     const hooks = nextHooks(settings.hooks, (event) =>
-      ourGroup(scriptPath, event, host.os, maxWaitMinutes)
+      ourGroup(scriptPath, event, host.os, features)
     )
     return hooks && { ...settings, hooks }
   }
@@ -130,7 +162,8 @@ export function installTestQueueHooks(
   try {
     mkdirSync(join(configDir, 'claudedeck'), { recursive: true })
     // The script first: a hook pointing at a missing file would fail every Bash call's hook.
-    let changed = writeIfChanged(scriptPath, hookScript(maxWaitMinutes), SCRIPT_MODE)
+    const script = hookScript({ guard: features.guard, maxWaitMinutes: features.maxWaitMinutes })
+    let changed = writeIfChanged(scriptPath, script, SCRIPT_MODE)
     const result = updateSettings(file, (settings) => {
       const next = withOurs(settings)
       if (!next) return 'invalid'
@@ -138,15 +171,20 @@ export function installTestQueueHooks(
     })
     if (result === 'invalid') return { installed: false, problem: 'invalidSettings', changed }
     if (result === 'written') changed = true
+    // settings.json no longer points at the old script.
+    if (existsSync(legacyScriptPath(configDir))) {
+      rmSync(legacyScriptPath(configDir), { force: true })
+      changed = true
+    }
     return { installed: true, problem: null, changed }
   } catch (error) {
-    console.warn('[test-queue] could not install hooks', error)
+    console.warn('[hooks] could not install hooks', error)
     return { installed: false, problem: 'writeFailed', changed: false }
   }
 }
 
-/** Removes ClaudeDeck's groups (only those) and the script. */
-export function removeTestQueueHooks(configDir: string): HookInstallResult {
+/** Removes ClaudeDeck's groups (only those) and the scripts, old names included. */
+export function removeHooks(configDir: string): HookInstallResult {
   const file = settingsPath(configDir)
   let changed = false
   let problem: TestQueueHookProblem | null = null
@@ -165,13 +203,14 @@ export function removeTestQueueHooks(configDir: string): HookInstallResult {
       if (result === 'invalid') problem = 'invalidSettings'
       if (result === 'written') changed = true
     }
-    const script = hookScriptPath(configDir)
-    if (existsSync(script)) {
-      rmSync(script, { force: true })
-      changed = true
+    for (const script of [hookScriptPath(configDir), legacyScriptPath(configDir)]) {
+      if (existsSync(script)) {
+        rmSync(script, { force: true })
+        changed = true
+      }
     }
   } catch (error) {
-    console.warn('[test-queue] could not remove hooks', error)
+    console.warn('[hooks] could not remove hooks', error)
     problem = 'writeFailed'
   }
   return { installed: false, problem, changed }
