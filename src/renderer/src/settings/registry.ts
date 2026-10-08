@@ -1,10 +1,19 @@
 import type { LucideIcon } from 'lucide-react'
-import { Gauge, Info, KeyRound, ListChecks, SlidersHorizontal, UsersRound } from 'lucide-react'
+import {
+  Gauge,
+  Info,
+  KeyRound,
+  ListChecks,
+  ShieldCheck,
+  SlidersHorizontal,
+  UsersRound
+} from 'lucide-react'
 import type { ComponentType } from 'react'
 import { ClaudePermissionsSection } from '../permissions/PermissionSections'
 import { AboutSection } from './sections/AboutSection'
 import { AccountsSection } from './sections/AccountsSection'
 import { GeneralSection } from './sections/GeneralSection'
+import { GuardSection } from './sections/GuardSection'
 import { TestQueueSection } from './sections/TestQueueSection'
 import { UsageSection } from './sections/UsageSection'
 import type { SettingsSectionId } from './sectionIds'
@@ -41,7 +50,7 @@ export const settingsGroups: readonly SettingsGroup[] = [
   { id: 'app', labelKey: 'settings.nav.groups.app' }
 ]
 
-/** Navigation order. A new section (such as the command guard) is added here. */
+/** Navigation order. A new section is added here. */
 export const settingsSections: readonly SettingsSection[] = [
   {
     id: 'accounts',
@@ -61,7 +70,15 @@ export const settingsSections: readonly SettingsSection[] = [
     component: ClaudePermissionsSection,
     visible: always
   },
-  // The command guard section ('guard', label key settings.sections.guard.label) goes here.
+  {
+    id: 'guard',
+    group: 'app',
+    labelKey: 'settings.sections.guard.label',
+    descriptionKey: 'settings.sections.guard.description',
+    icon: ShieldCheck,
+    component: GuardSection,
+    visible: always
+  },
   {
     id: 'testQueue',
     group: 'app',

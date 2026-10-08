@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { ArrowUp, Bot, Play, Square, Unlock, X } from 'lucide-react'
+import { ArrowUp, Bot, Play, Settings, Square, Unlock, X } from 'lucide-react'
 import {
   useEffect,
   useLayoutEffect,
@@ -128,12 +128,12 @@ function Popover({ anchorRef, onClose }: Omit<Props, 'open'>): React.JSX.Element
         transition: { duration: reduced ? 0.1 : 0.16 }
       }}
     >
-      <QueueContent />
+      <QueueContent onClose={onClose} />
     </motion.div>
   )
 }
 
-function QueueContent(): React.JSX.Element {
+function QueueContent({ onClose }: { onClose: () => void }): React.JSX.Element {
   const { t } = useTranslation()
   const snapshot = useTestQueue((s) => s.snapshot)
   const { running, waiting } = groupRuns(snapshot)
@@ -145,7 +145,21 @@ function QueueContent(): React.JSX.Element {
     <>
       <header className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-3">
         <h2 className="text-[13px] font-semibold">{t('testQueue.title')}</h2>
-        <span className="truncate text-[11px] text-muted">{modeLabel}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-[11px] text-muted">{modeLabel}</span>
+          <button
+            type="button"
+            aria-label={t('testQueue.openSettings')}
+            data-tooltip={t('testQueue.openSettings')}
+            className="shrink-0 self-center rounded p-1 text-muted hover:bg-fg/[0.08] hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+            onClick={() => {
+              onClose()
+              useApp.getState().openSettings('testQueue')
+            }}
+          >
+            <Settings size={13} aria-hidden />
+          </button>
+        </span>
       </header>
       <div className="scroll-area min-h-0 flex-1 overflow-y-auto px-2 py-2">
         <Group

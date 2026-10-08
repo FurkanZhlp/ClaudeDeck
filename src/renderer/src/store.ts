@@ -27,6 +27,14 @@ export type Running = {
 export type ProjectDialogState = { mode: 'create' } | { mode: 'edit'; projectId: string } | null
 export type StatusEntry = AccountStatus | 'checking'
 
+/** An in-app notice toast; `action` adds a button (for example, open a settings section). */
+export interface AppNotice {
+  message: string
+  action?: { label: string; run: () => void }
+  /** Notices from the same source may merge (command guard denials). */
+  source?: 'guard'
+}
+
 export const errorCode = (error: unknown): string =>
   error instanceof Error && /^[A-Z_]+$/.test(error.message) ? error.message : 'UNKNOWN'
 
@@ -46,12 +54,12 @@ interface AppStore {
   projectDialog: ProjectDialogState
   loginAccountId: string | null
   error: string | null
-  notice: string | null
+  notice: AppNotice | null
   update: UpdateInfo | null
 
   init: () => Promise<void>
   setError: (code: string | null) => void
-  setNotice: (message: string | null) => void
+  setNotice: (notice: AppNotice | string | null) => void
   setLanguage: (language: Language | null) => Promise<void>
   setUsageSettings: (patch: Partial<UsageSettings>) => Promise<void>
   setLaunchAtLogin: (enabled: boolean) => Promise<void>
@@ -181,10 +189,12 @@ export const useApp = create<AppStore>((set, get) => {
         window.api.profile.onGuidelinesUpdated((update) => {
           const account = get().data?.accounts.find((a) => a.id === update.accountId)
           set({
-            notice: i18n.t('notices.guidelinesUpdated', {
-              account: account?.name ?? '',
-              version: update.to
-            })
+            notice: {
+              message: i18n.t('notices.guidelinesUpdated', {
+                account: account?.name ?? '',
+                version: update.to
+              })
+            }
           })
         })
       )
@@ -205,17 +215,20 @@ export const useApp = create<AppStore>((set, get) => {
         const account = data.accounts.find((a) => a.id === update?.accountId)
         if (update && account) {
           set({
-            notice: i18n.t('notices.guidelinesUpdated', {
-              account: account.name,
-              version: update.to
-            })
+            notice: {
+              message: i18n.t('notices.guidelinesUpdated', {
+                account: account.name,
+                version: update.to
+              })
+            }
           })
         }
       })
     },
 
     setError: (error) => set({ error }),
-    setNotice: (notice) => set({ notice }),
+    setNotice: (notice) =>
+      set({ notice: typeof notice === 'string' ? { message: notice } : notice }),
 
     async setLanguage(language) {
       const data = await guard(() => window.api.settings.setLanguage(language))

@@ -118,7 +118,8 @@
         "description": "Yeni Claude sekmelerinin hangi izin moduyla başlayacağını seçin."
       },
       "guard": {
-        "label": "Komut koruması"
+        "label": "Komut koruması",
+        "description": "Claude'un riskli komutlarını ve dosya değişikliklerini, her izin modunda, çalışmadan önce durdurun."
       },
       "testQueue": {
         "label": "Test kuyruğu",
@@ -775,7 +776,8 @@
       "globalOff": "Test kuyruğu Ayarlar'da kapalı; bu seçimler açıldığında geçerli olur.",
       "builtins": "Bu proje için yerleşik kurallar",
       "customRules": "Bu projeye özel ek kurallar"
-    }
+    },
+    "openSettings": "Test kuyruğu ayarları"
   },
   "agents": {
     "show": "Ajanları göster",
@@ -862,6 +864,204 @@
       "trust": "Yalnızca güvendiğiniz, tercihen yalıtılmış projelerde kullanın. Claude'un okuduğu içerik (web sayfaları, dosyalar, issue'lar) onu yönlendirebilir ve zararlı bir adımı durduracak bir onay sorusu çıkmaz.",
       "claude": "Claude da ilk seferde terminalde kendi uyarısını gösterir. Reddetme kurallarınız ve ClaudeDeck'in test kuyruğu geçerliliğini korur.",
       "accept": "İzinleri atla"
+    }
+  },
+  "guard": {
+    "categories": {
+      "disk": "Disk ve sistem",
+      "sensitive": "Hassas dosyalar",
+      "git": "Git",
+      "fetchExec": "İndir ve çalıştır",
+      "docker": "Docker",
+      "database": "Veritabanı",
+      "publish": "Yayınlama ve dağıtım",
+      "system": "Süreçler ve sistem",
+      "custom": "Özel kurallar"
+    },
+    "rules": {
+      "disk": {
+        "format": "Diski biçimlendirme, silme veya bölümleme",
+        "rawDevice": "Ham disk aygıtına yazma",
+        "systemDelete": "Kök dizini, bir sistem klasörünü, bir ev klasörünü veya proje klasörünü silme",
+        "recursivePermissions": "Sistem veya ev klasörlerinde izinleri ya da sahipliği toplu olarak değiştirme",
+        "forkBomb": "Çatallanma bombası (fork bomb)"
+      },
+      "sensitive": {
+        "ssh": "~/.ssh içindeki dosyaları değiştirme",
+        "credentials": "Kimlik bilgisi dosyalarını değiştirme (~/.aws, ~/.gnupg, ~/.kube, ~/.netrc)",
+        "keyRead": "Özel anahtarları ve kimlik bilgisi dosyalarını okuma veya kopyalama",
+        "system": "Sistem dosyalarını değiştirme (/etc, /System, /Library, C:\\Windows)",
+        "shellRc": "Kabuk başlangıç dosyalarını değiştirme",
+        "gitconfig": "Genel git yapılandırmasını değiştirme",
+        "claudeSettings": "Claude'un ayarlarını, hook'larını veya kimlik bilgilerini değiştirme",
+        "claudeConfig": "Claude'un yapılandırma klasöründeki dosyaları değiştirme",
+        "claudedeck": "ClaudeDeck verilerini veya diğer hesapların klasörlerini değiştirme",
+        "gitInternals": "Doğrudan .git içindeki dosyaları değiştirme"
+      },
+      "git": {
+        "forcePush": "Zorla gönderme (force push)",
+        "pushDelete": "Uzak depodaki bir dalı veya etiketi silme",
+        "resetHard": "Commit'leri ve değişiklikleri atma (reset --hard)",
+        "clean": "İzlenmeyen dosyaları silme (clean -f)",
+        "branchDelete": "Bir dalı zorla silme",
+        "discardChanges": "Commit edilmemiş değişiklikleri atma",
+        "stashDrop": "Saklanan (stash) değişiklikleri silme",
+        "rebaseShared": "Paylaşılan bir dalı yeniden temellendirme (rebase)",
+        "historyRewrite": "Geçmişi yeniden yazma veya nesneleri budama",
+        "repoDelete": "Bir depoyu silme"
+      },
+      "fetchExec": {
+        "pipeShell": "İndirilen içeriği doğrudan bir kabuğa veya yorumlayıcıya aktarma",
+        "substitution": "İndirilen kodu süreç ikamesiyle çalıştırma",
+        "downloadRun": "Bir betiği indirip çalıştırma"
+      },
+      "docker": {
+        "prune": "Docker verilerini temizleme (prune)",
+        "volumes": "Docker birimlerini (volume) silme",
+        "removeMany": "Çok sayıda konteyneri veya imajı aynı anda silme ya da durdurma"
+      },
+      "database": {
+        "drop": "Bir veritabanını, şemayı veya tabloyu silme (DROP)",
+        "truncate": "Tüm satırları silme (TRUNCATE, WHERE içermeyen DELETE)",
+        "migrateReset": "Veritabanını bir migration aracıyla sıfırlama"
+      },
+      "publish": {
+        "package": "Paket yayınlama",
+        "deploy": "Canlı ortama dağıtım yapma veya canlı altyapıyı değiştirme",
+        "release": "Sürüm (release) oluşturma veya silme",
+        "dockerPush": "Bir imajı kayıt deposuna gönderme"
+      },
+      "system": {
+        "sudo": "Bir komutu yönetici olarak çalıştırma (sudo)",
+        "killAll": "Tüm süreçleri veya geniş bir süreç grubunu sonlandırma",
+        "shutdown": "Bilgisayarı kapatma, yeniden başlatma veya oturumu kapatma",
+        "services": "Sistem hizmetlerini veya zamanlanmış görevleri durdurma ya da devre dışı bırakma"
+      }
+    },
+    "actions": {
+      "allow": "İzin ver",
+      "ask": "Sor",
+      "deny": "Reddet"
+    },
+    "categoryInfo": {
+      "disk": {
+        "description": "Diskleri biçimlendirme, ham aygıtlara yazma, sistem veya ev klasörlerini silme.",
+        "examples": "mkfs, diskutil eraseDisk, dd of=/dev/disk2, Format-Volume, rm -rf ~/, chmod -R 777 /"
+      },
+      "sensitive": {
+        "description": "Anahtarlar, kimlik bilgileri, sistem dosyaları, kabuk başlangıç dosyaları ve Claude'un kendi ayarları.",
+        "examples": "~/.ssh, ~/.aws, /etc/hosts, ~/.zshrc, ~/.gitconfig, ~/.claude/settings.json, .git/hooks"
+      },
+      "git": {
+        "description": "Geçmişi yeniden yazan veya başka bir yerde kaydı olmayan çalışmayı silen komutlar.",
+        "examples": "git push --force, git reset --hard, git clean -fdx, git branch -D, git checkout -- ."
+      },
+      "fetchExec": {
+        "description": "İnternetten indirilen kodu incelemeden doğrudan çalıştırma.",
+        "examples": "curl ... | sh, wget ... | bash, bash <(curl ...), iwr ... | iex"
+      },
+      "docker": {
+        "description": "Konteynerleri, imajları ve birimleri toplu olarak silme.",
+        "examples": "docker system prune -af, docker volume prune, docker compose down -v"
+      },
+      "database": {
+        "description": "Tabloları silme, tüm satırları silme veya bir veritabanını sıfırlama.",
+        "examples": "DROP TABLE, TRUNCATE, WHERE içermeyen DELETE, migrate:fresh, prisma migrate reset"
+      },
+      "publish": {
+        "description": "Paket, sürüm ve imaj yayınlama ya da canlı ortama dağıtım yapma.",
+        "examples": "npm publish, cargo publish, vercel --prod, gh release create, docker push"
+      },
+      "system": {
+        "description": "Yönetici komutları, süreçleri toplu sonlandırma, bilgisayarı kapatma ve hizmetleri durdurma.",
+        "examples": "sudo, kill -9 -1, killall, shutdown, launchctl bootout, systemctl stop, Stop-Computer"
+      }
+    },
+    "settings": {
+      "enabled": "Claude'un komutlarını ve dosya değişikliklerini denetle",
+      "enabledHint": "Her hesabın Claude ayarlarına bir hook ekler. İzinleri atla dahil her izin modunda çalışır. Sizin ! ile yazdığınız komutlar ve kendi terminaliniz denetlenmez.",
+      "categories": "Kategoriler",
+      "examplesLabel": "Örnekler: {{examples}}",
+      "rulesToggle": "Kurallar ({{count}})",
+      "overridden": "{{count}} tanesi ayrı ayarlı",
+      "categoryAction": "{{category}} için işlem",
+      "rulesOf": "{{category}} kuralları",
+      "ruleAction": "{{rule}} için işlem",
+      "followCategory": "Kategori ayarı ({{action}})",
+      "noGitBash": "Bu bilgisayarda Git Bash bulunamadığı için ClaudeDeck hook'u kurulmadı ve komut koruması etkin değil. Etkinleştirmek için Git for Windows'u kurup ClaudeDeck'i yeniden başlatın.",
+      "managedOnly": "Kuruluşunuzun yönetilen ayarları yalnızca yönetilen hook'lara izin verdiği için komut koruması çalışamaz."
+    },
+    "confirm": {
+      "title": "{{category}} kategorisindeki her şeye izin verilsin mi?",
+      "risk": {
+        "disk": "Bu durumda Claude, koruma engellemeden diskleri biçimlendirebilir veya silebilir, ham aygıtlara yazabilir ve sistem ya da ev klasörlerini silebilir.",
+        "sensitive": "Bu durumda Claude, koruma engellemeden anahtarları, kimlik bilgilerini, sistem dosyalarını, kabuk başlangıç dosyalarını ve Claude'un kendi ayarlarını değiştirebilir veya okuyabilir."
+      },
+      "advice": "Bunun yerine Sor seçeneği denetimi sizde tutar: Claude, izinleri atla modunda bile bu tür her adım için onayınızı almak zorunda kalır.",
+      "accept": "İzin ver"
+    },
+    "custom": {
+      "title": "Özel kurallar",
+      "none": "Henüz özel kural yok.",
+      "rejected": "Kural kaydedilemedi. Geçerli olduğunu kontrol edin.",
+      "empty": "Lütfen bir kural girin.",
+      "tooLong": "Bir kural en fazla {{max}} karakter olabilir.",
+      "regex": "Bu düzenli ifade geçerli değil: {{detail}}",
+      "unsafe": "Bu düzenli ifadenin eşleşmesi çok uzun sürebilir. İç içe tekrarlardan, tekrarlanan seçeneklerden ve geri başvurulardan kaçının.",
+      "ruleAction": "{{pattern}} için işlem",
+      "actionLabel": "İşlem",
+      "placeholder": {
+        "prefix": "terraform apply*",
+        "regex": "^kubectl delete\\b"
+      },
+      "help": {
+        "prefix": "Kelime kelime eşleşir; sondaki * sonraki tüm kelimeleri kabul eder. İzin ver kuralı, eşleştiği komutları yerleşik kuralların dışında tutar.",
+        "regex": "JavaScript düzenli ifadesi. Sadeleştirilmiş komutta env, npx ve cd gibi sarmalayıcılar çıkarılmıştır. İzin ver kuralı, eşleştiği komutları yerleşik kuralların dışında tutar."
+      }
+    },
+    "try": {
+      "title": "Bir komut deneyin",
+      "toolLabel": "Araç",
+      "tools": {
+        "Bash": "Bash",
+        "PowerShell": "PowerShell",
+        "Write": "Dosya yolu (Write)"
+      },
+      "label": "Denetlenecek komut veya yol",
+      "placeholder": {
+        "command": "git push --force origin main",
+        "path": "~/.ssh/config"
+      },
+      "note": "Yalnızca kurallarınıza göre denetlenir, hiçbir zaman çalıştırılmaz.",
+      "noMatch": "Hiçbir kural eşleşmiyor; bu her zamanki gibi çalışır.",
+      "result": "{{category}} · {{rule}}",
+      "effect": {
+        "allow": "Bir kural eşleşiyor ancak İzin ver olarak ayarlı: komut her zamanki gibi çalışır.",
+        "ask": "Claude, her izin modunda, çalıştırmadan önce onayınızı ister.",
+        "deny": "Claude bunu çalıştıramaz; gerekçesi Claude'a iletilir."
+      }
+    },
+    "log": {
+      "title": "Etkinlik",
+      "hint": "Bu oturumdaki son {{max}} karar, en yenisi üstte. Yalnızca ClaudeDeck kapanana kadar tutulur.",
+      "copy": "Kopyala",
+      "copied": "Kopyalandı",
+      "empty": "Henüz hiçbir komut bir kurala takılmadı."
+    },
+    "notice": {
+      "blocked": "Komut koruması bir komutu engelledi: {{category}} · {{command}}",
+      "blockedMany": "Komut koruması {{count}} komutu engelledi. Sonuncusu: {{category}} · {{command}}",
+      "open": "Komut koruması ayarlarını aç"
+    },
+    "project": {
+      "off": "Ayarlarda kapalı",
+      "changed": "{{count}} değişiklik",
+      "inherit": "Genel ayarlar",
+      "globalOff": "Komut koruması Ayarlar'da kapalı; bu değişiklikler koruma açıldığında geçerli olur.",
+      "hint": "Bu proje için kategori işlemlerini değiştirin. Ayarlar'da ayrıca ayarlanan kurallar kendi işlemini korur.",
+      "inheritAction": "Genel ayar ({{action}})",
+      "customRules": "Bu projeye özel ek kurallar",
+      "reset": "Genel ayarları kullan"
     }
   }
 }

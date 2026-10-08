@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { ClaudeBanner } from './components/ClaudeBanner'
 import { ErrorToast } from './components/ErrorToast'
+import { useGuard } from './guard/guardStore'
 import { NoticeToast } from './components/NoticeToast'
 import { OnboardingFlow } from './onboarding/OnboardingFlow'
 import { useOnboarding } from './onboarding/onboardingStore'
@@ -45,6 +46,9 @@ export default function App(): React.JSX.Element {
     void hydrate()
     return unsubscribe
   }, [])
+
+  // Command guard decisions feed the activity log; denials show a notice.
+  useEffect(() => useGuard.getState().subscribe(), [])
 
   // The menu bar can follow the account selected here.
   const selectedAccountId = useApp((s) => s.selectedAccountId)

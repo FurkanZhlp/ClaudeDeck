@@ -118,7 +118,8 @@
         "description": "Choose the permission mode new Claude tabs start in."
       },
       "guard": {
-        "label": "Command guard"
+        "label": "Command guard",
+        "description": "Stop risky commands and file changes by Claude before they run, in every permission mode."
       },
       "testQueue": {
         "label": "Test queue",
@@ -775,7 +776,8 @@
       "globalOff": "The test queue is turned off in Settings; these choices apply once it is on.",
       "builtins": "Built-in rules for this project",
       "customRules": "Extra rules for this project"
-    }
+    },
+    "openSettings": "Test queue settings"
   },
   "agents": {
     "show": "Show agents",
@@ -862,6 +864,204 @@
       "trust": "Use it only in projects you trust, ideally isolated ones. Content Claude reads (web pages, files, issues) can steer it, and no prompt stops a harmful step.",
       "claude": "Claude also shows its own warning in the terminal the first time. Your deny rules and ClaudeDeck's test queue still apply.",
       "accept": "Use bypass"
+    }
+  },
+  "guard": {
+    "categories": {
+      "disk": "Disk and system",
+      "sensitive": "Sensitive files",
+      "git": "Git",
+      "fetchExec": "Download and run",
+      "docker": "Docker",
+      "database": "Database",
+      "publish": "Publishing and deploy",
+      "system": "Processes and system",
+      "custom": "Custom rules"
+    },
+    "rules": {
+      "disk": {
+        "format": "Formatting, erasing or partitioning disks",
+        "rawDevice": "Writing to a raw disk device",
+        "systemDelete": "Deleting the root, a system folder, a home folder or the project folder",
+        "recursivePermissions": "Changing permissions or owners recursively on system or home folders",
+        "forkBomb": "Fork bomb"
+      },
+      "sensitive": {
+        "ssh": "Changing files in ~/.ssh",
+        "credentials": "Changing credential files (~/.aws, ~/.gnupg, ~/.kube, ~/.netrc)",
+        "keyRead": "Reading or copying private keys and credential files",
+        "system": "Changing system files (/etc, /System, /Library, C:\\Windows)",
+        "shellRc": "Changing shell startup files",
+        "gitconfig": "Changing the global git configuration",
+        "claudeSettings": "Changing Claude's settings, hooks or credentials",
+        "claudeConfig": "Changing files in Claude's configuration folder",
+        "claudedeck": "Changing ClaudeDeck's data or other accounts' folders",
+        "gitInternals": "Changing files inside .git directly"
+      },
+      "git": {
+        "forcePush": "Force push",
+        "pushDelete": "Deleting a remote branch or tag",
+        "resetHard": "Discarding commits and changes (reset --hard)",
+        "clean": "Deleting untracked files (clean -f)",
+        "branchDelete": "Force deleting a branch",
+        "discardChanges": "Discarding uncommitted changes",
+        "stashDrop": "Dropping stashed changes",
+        "rebaseShared": "Rebasing a shared branch",
+        "historyRewrite": "Rewriting history or pruning objects",
+        "repoDelete": "Deleting a repository"
+      },
+      "fetchExec": {
+        "pipeShell": "Piping a download into a shell or interpreter",
+        "substitution": "Running downloaded code through a substitution",
+        "downloadRun": "Downloading a script and running it"
+      },
+      "docker": {
+        "prune": "Pruning Docker data",
+        "volumes": "Removing Docker volumes",
+        "removeMany": "Removing or stopping many containers or images at once"
+      },
+      "database": {
+        "drop": "Dropping a database, schema or table",
+        "truncate": "Deleting all rows (TRUNCATE, DELETE without WHERE)",
+        "migrateReset": "Resetting the database with a migration tool"
+      },
+      "publish": {
+        "package": "Publishing a package",
+        "deploy": "Deploying to production or changing live infrastructure",
+        "release": "Creating or deleting a release",
+        "dockerPush": "Pushing an image to a registry"
+      },
+      "system": {
+        "sudo": "Running a command as administrator (sudo)",
+        "killAll": "Killing every process or a broad set of processes",
+        "shutdown": "Shutting down, restarting or logging out",
+        "services": "Stopping or disabling system services or scheduled jobs"
+      }
+    },
+    "actions": {
+      "allow": "Allow",
+      "ask": "Ask",
+      "deny": "Deny"
+    },
+    "categoryInfo": {
+      "disk": {
+        "description": "Formatting disks, writing to raw devices, deleting system or home folders.",
+        "examples": "mkfs, diskutil eraseDisk, dd of=/dev/disk2, Format-Volume, rm -rf ~/, chmod -R 777 /"
+      },
+      "sensitive": {
+        "description": "Keys, credentials, system files, shell startup files and Claude's own settings.",
+        "examples": "~/.ssh, ~/.aws, /etc/hosts, ~/.zshrc, ~/.gitconfig, ~/.claude/settings.json, .git/hooks"
+      },
+      "git": {
+        "description": "Commands that rewrite history or discard work that has not been saved elsewhere.",
+        "examples": "git push --force, git reset --hard, git clean -fdx, git branch -D, git checkout -- ."
+      },
+      "fetchExec": {
+        "description": "Running code straight from the internet without looking at it first.",
+        "examples": "curl ... | sh, wget ... | bash, bash <(curl ...), iwr ... | iex"
+      },
+      "docker": {
+        "description": "Removing containers, images and volumes in bulk.",
+        "examples": "docker system prune -af, docker volume prune, docker compose down -v"
+      },
+      "database": {
+        "description": "Dropping tables, deleting every row or resetting a database.",
+        "examples": "DROP TABLE, TRUNCATE, DELETE without WHERE, migrate:fresh, prisma migrate reset"
+      },
+      "publish": {
+        "description": "Publishing packages, releases and images, or deploying to production.",
+        "examples": "npm publish, cargo publish, vercel --prod, gh release create, docker push"
+      },
+      "system": {
+        "description": "Administrator commands, killing processes broadly, shutting down and stopping services.",
+        "examples": "sudo, kill -9 -1, killall, shutdown, launchctl bootout, systemctl stop, Stop-Computer"
+      }
+    },
+    "settings": {
+      "enabled": "Check Claude's commands and file changes",
+      "enabledHint": "Adds a hook to each account's Claude settings. It works in every permission mode, including bypass. Your own ! commands and your terminal are not checked.",
+      "categories": "Categories",
+      "examplesLabel": "Examples: {{examples}}",
+      "rulesToggle": "Rules ({{count}})",
+      "overridden": "{{count}} set separately",
+      "categoryAction": "Action for {{category}}",
+      "rulesOf": "Rules in {{category}}",
+      "ruleAction": "Action for {{rule}}",
+      "followCategory": "Category setting ({{action}})",
+      "noGitBash": "Git Bash was not found on this computer, so the ClaudeDeck hook is not installed and the command guard is not active. Install Git for Windows and restart ClaudeDeck to turn it on.",
+      "managedOnly": "Your organisation's managed settings allow only managed hooks, so the command guard cannot run."
+    },
+    "confirm": {
+      "title": "Allow everything in {{category}}?",
+      "risk": {
+        "disk": "Claude will then be able to format or erase disks, write to raw devices and delete system or home folders without the guard stopping it.",
+        "sensitive": "Claude will then be able to change or read keys, credentials, system files, shell startup files and Claude's own settings without the guard stopping it."
+      },
+      "advice": "Choosing Ask instead keeps you in control: Claude has to get your approval for each such step, even in bypass mode.",
+      "accept": "Allow"
+    },
+    "custom": {
+      "title": "Custom rules",
+      "none": "No custom rules yet.",
+      "rejected": "The rule could not be saved. Check that it is valid.",
+      "empty": "Please enter a rule.",
+      "tooLong": "A rule can be at most {{max}} characters long.",
+      "regex": "This regular expression is not valid: {{detail}}",
+      "unsafe": "This regular expression could take too long to match. Avoid nested repetition, repeated alternatives and backreferences.",
+      "ruleAction": "Action for {{pattern}}",
+      "actionLabel": "Action",
+      "placeholder": {
+        "prefix": "terraform apply*",
+        "regex": "^kubectl delete\\b"
+      },
+      "help": {
+        "prefix": "Matches word by word; a trailing * accepts any further words. An Allow rule exempts the commands it matches from the built-in rules.",
+        "regex": "JavaScript regular expression. Wrappers such as env, npx and cd are removed from the simplified command. An Allow rule exempts the commands it matches from the built-in rules."
+      }
+    },
+    "try": {
+      "title": "Try a command",
+      "toolLabel": "Tool",
+      "tools": {
+        "Bash": "Bash",
+        "PowerShell": "PowerShell",
+        "Write": "File path (Write)"
+      },
+      "label": "Command or path to check",
+      "placeholder": {
+        "command": "git push --force origin main",
+        "path": "~/.ssh/config"
+      },
+      "note": "Only checked against your rules, never run.",
+      "noMatch": "No rule matches; this would run as usual.",
+      "result": "{{category}} · {{rule}}",
+      "effect": {
+        "allow": "A rule matches, but it is set to Allow: the command runs as usual.",
+        "ask": "Claude asks for your approval before running it, in every permission mode.",
+        "deny": "Claude cannot run it; the reason is passed on to Claude."
+      }
+    },
+    "log": {
+      "title": "Activity",
+      "hint": "The last {{max}} decisions of this session, newest first. Kept only until ClaudeDeck quits.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "empty": "No command has matched a rule yet."
+    },
+    "notice": {
+      "blocked": "Command guard blocked a command: {{category}} · {{command}}",
+      "blockedMany": "Command guard blocked {{count}} commands. Last: {{category}} · {{command}}",
+      "open": "Open command guard settings"
+    },
+    "project": {
+      "off": "Off in Settings",
+      "changed": "{{count}} changes",
+      "inherit": "General settings",
+      "globalOff": "The command guard is off in Settings; these overrides apply once it is on.",
+      "hint": "Override category actions for this project. Rules set separately in Settings keep their own action.",
+      "inheritAction": "General setting ({{action}})",
+      "customRules": "Extra rules for this project",
+      "reset": "Use the general settings"
     }
   }
 }
