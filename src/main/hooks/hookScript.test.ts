@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   GUARD_UNAVAILABLE_REPLY,
+  guardKeyFile,
   hookBaseUrl,
   hookCommand,
   hookScript,
@@ -38,33 +39,52 @@ describe('hookScript', () => {
         p=\${p%%/*}
         case $p in ''|*[!0-9]*) return 1 ;; esac
       }
-      # The guard key file next to this script: the key, then the hook URL.
+      # The key file next to this script: the key, the hook URL, ClaudeDeck's pid and start time.
       key=
       keyurl=
+      kpid=
+      kstart=
       case $0 in
         */*) keyfile=\${0%/*}/guard.key ;;
         *\\\\*) keyfile=\${0%\\\\*}/guard.key ;;
         *) keyfile=./guard.key ;;
       esac
-      if [ "$guard" = 1 ] && [ "$event" = pre ] && [ -f "$keyfile" ]; then
-        { IFS= read -r key; IFS= read -r keyurl; } <"$keyfile" 2>/dev/null || :
-        hex64 "$key" && hookurl "$keyurl" || key=
+      if [ -f "$keyfile" ]; then
+        { IFS= read -r key; IFS= read -r keyurl; IFS= read -r kpid; IFS= read -r kstart; } <"$keyfile" 2>/dev/null || :
       fi
+      hex64 "$key" || key=
+      hookurl "$keyurl" || keyurl=
+      case $kpid in ''|*[!0-9]*) kpid= ;; esac
+      deny() {
+        [ "$guard" = 1 ] && [ "$event" = pre ] && printf '%s\\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"ClaudeDeck command guard is unavailable, so this tool call was blocked. Ask the user to check that ClaudeDeck is running, then try again."},"systemMessage":"ClaudeDeck command guard is unavailable; the tool call was blocked."}'
+      }
       token=\${CLAUDEDECK_MCP_TOKEN-}
-      url=\${CLAUDEDECK_HOOK_URL-}
+      url=$keyurl
       route=pre
-      if hex64 "$token" && hookurl "$url"; then
+      if hex64 "$token" && [ -n "$url" ]; then
         mode=tab
-      elif [ -n "$key" ]; then
+      elif [ "$guard" = 1 ] && [ "$event" = pre ] && [ -n "$key" ] && [ -n "$url" ]; then
         mode=key
         token=$key
-        url=$keyurl
         route=guard
+      elif hex64 "$token"; then
+        # A tab without a usable key file: the guard cannot be reached safely.
+        cat >/dev/null 2>&1
+        deny
+        exit 0
       else
         exit 0
       fi
-      deny() {
-        [ "$guard" = 1 ] && [ "$event" = pre ] && printf '%s\\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"ClaudeDeck command guard is unavailable, so this tool call was blocked. Ask the user to check that ClaudeDeck is running, then try again."},"systemMessage":"ClaudeDeck command guard is unavailable; the tool call was blocked."}'
+      # ClaudeDeck still runs: its pid is alive and started when the key file says.
+      alive() {
+        [ -n "$kpid" ] || return 1
+        kill -0 "$kpid" 2>/dev/null || return 1
+        [ -n "$kstart" ] || return 0
+        now=$(LC_ALL=C ps -o lstart= -p "$kpid" 2>/dev/null) || return 0
+        set -f
+        set -- $now
+        set +f
+        [ "$*" = "$kstart" ]
       }
       input=$(cat) || { deny; exit 0; }
       out=$(mktemp 2>/dev/null) || { deny; exit 0; }
@@ -105,19 +125,18 @@ describe('hookScript', () => {
       stage=guard
       send guard "$route" 5
       # A tab token the server does not know: the account key, when there is one.
-      if [ "$status" = 401 ] && [ "$mode" = tab ] && [ -n "$key" ]; then
+      if [ "$status" = 401 ] && [ "$mode" = tab ] && [ "$guard" = 1 ] && [ -n "$key" ]; then
         mode=key
         token=$key
-        url=$keyurl
         route=guard
         send guard "$route" 5
       fi
-      # With the key, no connection (refused, or never answered on Windows) means ClaudeDeck is
-      # not running: pass.
+      # With the key, no connection while ClaudeDeck is gone means it is not running: pass.
       case $mode:$status in
         *:200) ;;
-        tab:401) stage=; finish ;;
-        key:000) [ "$rc" = 7 ] || [ -z "$connected" ] && { stage=; finish; }; stage=; deny; finish ;;
+        key:000)
+          if { [ "$rc" = 7 ] || [ -z "$connected" ]; } && ! alive; then stage=; finish; fi
+          stage=; deny; finish ;;
         *) stage=; deny; finish ;;
       esac
       stage=
@@ -143,6 +162,33 @@ describe('hookScript', () => {
     // The reply sits in single quotes in the script.
     expect(GUARD_UNAVAILABLE_REPLY).not.toContain("'")
     expect(JSON.parse(GUARD_UNAVAILABLE_REPLY).hookSpecificOutput.permissionDecision).toBe('deny')
+  })
+
+  it('takes the server URL only from the key file, never from the environment', () => {
+    const script = hookScript({ guard: true, maxWaitMinutes: 60 })
+    expect(script).not.toContain('CLAUDEDECK_HOOK_URL')
+    expect(script).toContain('url=$keyurl')
+  })
+
+  it('checks that ClaudeDeck is gone before passing a key call, except on Windows', () => {
+    const mac = hookScript({ guard: true, maxWaitMinutes: 60, os: 'darwin' })
+    expect(mac).toContain('kill -0 "$kpid"')
+    expect(mac).toContain('LC_ALL=C ps -o lstart= -p "$kpid"')
+    const win = hookScript({ guard: true, maxWaitMinutes: 60, os: 'win32' })
+    expect(win).toContain('alive() { return 1; }')
+    expect(win).not.toContain('kill -0')
+  })
+
+  it('writes the key file with the process identity on its own lines', () => {
+    expect(
+      guardKeyFile({
+        key: 'k',
+        url: 'http://127.0.0.1:1/hooks/',
+        pid: 7,
+        startTime: ' Fri Oct  9 02:53:46 2026 '
+      })
+    ).toBe('k\nhttp://127.0.0.1:1/hooks/\n7\nFri Oct 9 02:53:46 2026\n')
+    expect(guardKeyFile({ key: 'k', url: null })).toBe('k\n\n\n\n')
   })
 
   it('never puts the token on a command line or into a file', () => {

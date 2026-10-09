@@ -9,6 +9,7 @@ import {
   hookScriptPath,
   installHooks,
   removeHooks,
+  secretReadRules,
   type HookFeatures,
   type HookHost
 } from './hookInstaller'
@@ -266,16 +267,62 @@ describe('installHooks (command guard)', () => {
 describe('guard key and script integrity', () => {
   const key = 'ab'.repeat(32)
 
-  it('writes the guard key with the hook URL, private, and removes it with the guard', () => {
+  it('writes the key file with the hook URL and process, private, and removes it with the hook', () => {
     write({})
-    installHooks(dir, { ...guardOnly, guardKey: { key, url: 'http://127.0.0.1:4000/hooks/' } }, mac)
-    expect(readFileSync(guardKeyPath(dir), 'utf8')).toBe(`${key}\nhttp://127.0.0.1:4000/hooks/\n`)
+    const url = 'http://127.0.0.1:4000/hooks/'
+    installHooks(
+      dir,
+      { ...guardOnly, guardKey: { key, url, pid: 4242, startTime: 'Fri Oct  9 02:53:46 2026' } },
+      mac
+    )
+    expect(readFileSync(guardKeyPath(dir), 'utf8')).toBe(
+      `${key}\n${url}\n4242\nFri Oct 9 02:53:46 2026\n`
+    )
     expectMode(guardKeyPath(dir), 0o600)
+    // The queue alone needs the file too: the script takes the server URL only from it.
+    installHooks(dir, { ...queueOnly, guardKey: { key, url } }, mac)
+    expect(readFileSync(guardKeyPath(dir), 'utf8')).toBe(`${key}\n${url}\n\n\n`)
     installHooks(dir, queueOnly, mac)
     expect(existsSync(guardKeyPath(dir))).toBe(false)
     installHooks(dir, { ...guardOnly, guardKey: { key, url: null } }, mac)
     removeHooks(dir, 'darwin')
     expect(existsSync(guardKeyPath(dir))).toBe(false)
+  })
+
+  it('adds Read deny rules for secrets while the guard is on, and removes only those', () => {
+    const host: HookHost = { ...mac, home: '/Users/dev' }
+    const cfg = '/Users/dev/Library/Application Support/ClaudeDeck/accounts/a1'
+    expect(secretReadRules(cfg, host)).toEqual([
+      'Read(~/.ssh/id_*)',
+      'Read(~/.aws/credentials)',
+      'Read(~/.gnupg/private-keys-v1.d/**)',
+      'Read(~/.gnupg/secring.gpg)',
+      'Read(~/Library/Application Support/ClaudeDeck/accounts/a1/claudedeck/guard.key)'
+    ])
+    expect(secretReadRules('/opt/cfg', host).at(-1)).toBe('Read(//opt/cfg/claudedeck/guard.key)')
+    expect(
+      secretReadRules('C:\\Users\\dev\\AppData\\Roaming\\ClaudeDeck\\accounts\\a1', {
+        os: 'win32',
+        env: {},
+        home: 'C:\\Users\\dev'
+      }).at(-1)
+    ).toBe('Read(~/AppData/Roaming/ClaudeDeck/accounts/a1/claudedeck/guard.key)')
+
+    write({ permissions: { allow: ['Bash(ls)'], deny: ['Bash(rm:*)'] } })
+    installHooks(dir, guardOnly, host)
+    const rules = secretReadRules(dir, host)
+    expect(read().permissions).toEqual({ allow: ['Bash(ls)'], deny: ['Bash(rm:*)', ...rules] })
+    expect(installHooks(dir, guardOnly, host).changed).toBe(false)
+    // Queue only: the rules go, the user's stay.
+    installHooks(dir, queueOnly, host)
+    expect(read().permissions).toEqual({ allow: ['Bash(ls)'], deny: ['Bash(rm:*)'] })
+    installHooks(dir, guardOnly, host)
+    removeHooks(dir, 'darwin', '/Users/dev')
+    expect(read()).toEqual({ permissions: { allow: ['Bash(ls)'], deny: ['Bash(rm:*)'] } })
+    // A permissions value of another shape is left alone; the hooks are still installed.
+    write({ permissions: { deny: 'odd' } })
+    expect(installHooks(dir, guardOnly, host).installed).toBe(true)
+    expect(read().permissions).toEqual({ deny: 'odd' })
   })
 
   it('rewrites a changed script and replaces a symlink instead of writing through it', () => {

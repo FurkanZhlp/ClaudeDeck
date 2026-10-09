@@ -16,7 +16,7 @@ import type { OsName } from '../platform/types'
 import { isObject } from '../profile/settingsFile'
 import { evaluateGuard, excerpt, type GuardContext } from './evaluate'
 import type { GuardLog } from './guardLog'
-import type { GuardRunner } from './guardRunner'
+import type { EvaluateOptions, GuardRunner } from './guardRunner'
 import { within } from './paths'
 
 /** Tools the hook sends; anything else is not checked. */
@@ -27,13 +27,17 @@ const TOOLS = new Set<GuardTool>([
   'Write',
   'Edit',
   'MultiEdit',
-  'NotebookEdit'
+  'NotebookEdit',
+  'Read',
+  'Grep'
 ])
 const FILE_KEYS: Partial<Record<GuardTool, string>> = {
   Write: 'file_path',
   Edit: 'file_path',
   MultiEdit: 'file_path',
-  NotebookEdit: 'notebook_path'
+  NotebookEdit: 'notebook_path',
+  Read: 'file_path',
+  Grep: 'path'
 }
 const AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/
 const MAX_CWD = 4096
@@ -72,6 +76,10 @@ export interface GuardServiceDeps {
   /** `realpathSync.native`; tests pass fakes. Errors mean "does not exist". */
   realpath?: (path: string) => string
   log: GuardLog
+  /** Port of the hook server while it runs (`lsof -ti :PORT | xargs kill`). */
+  hookPort?: () => number | null
+  /** ClaudeDeck's own process ids (`kill -STOP <pid>`). */
+  ownPids?: readonly number[]
 }
 
 /** Who a hook call comes from: a tab (its token) or only an account (its guard key). */
@@ -82,7 +90,7 @@ export interface GuardService {
    * The guard step of a PreToolUse hook: a decision reply (deny or ask) or null when the call
    * may go ahead. Never rejects: a failure becomes a deny reply.
    */
-  check(caller: GuardCaller, payload: unknown): Promise<string | null>
+  check(caller: GuardCaller, payload: unknown, signal?: AbortSignal): Promise<string | null>
   /** "Try a command" in Settings; nothing is logged. */
   evaluate(request: GuardEvaluateRequest): Promise<GuardDecision>
 }
@@ -101,7 +109,12 @@ export function decisionReply(decision: GuardDecision): string {
 
 /** The command or path a tool call is about (for the log). */
 function subject(tool: GuardTool, input: Record<string, unknown>): string {
-  const value = tool === 'NotebookEdit' ? input.notebook_path : (input.command ?? input.file_path)
+  const value =
+    tool === 'NotebookEdit'
+      ? input.notebook_path
+      : tool === 'Grep'
+        ? input.path
+        : (input.command ?? input.file_path)
   return typeof value === 'string' ? excerpt(value) : ''
 }
 
@@ -150,6 +163,7 @@ export function createGuardService(deps: GuardServiceDeps): GuardService {
     accountId?: string
   ): GuardContext => {
     const account = accountId ? deps.account(accountId) : undefined
+    const port = deps.hookPort?.() ?? null
     return {
       cwd,
       home: deps.home,
@@ -158,7 +172,9 @@ export function createGuardService(deps: GuardServiceDeps): GuardService {
       configDir: account?.configDir,
       appDataDir: deps.appDataDir,
       settings: deps.settings(),
-      projectOverrides: project?.guard
+      projectOverrides: project?.guard,
+      ...(port !== null ? { hookPort: port } : {}),
+      ...(deps.ownPids ? { ownPids: deps.ownPids } : {})
     }
   }
 
@@ -171,18 +187,24 @@ export function createGuardService(deps: GuardServiceDeps): GuardService {
     }
   }
 
-  const run = (tool: string, input: unknown, ctx: GuardContext): Promise<GuardDecision> =>
+  const run = (
+    tool: string,
+    input: unknown,
+    ctx: GuardContext,
+    options?: EvaluateOptions
+  ): Promise<GuardDecision> =>
     deps.runner
-      ? deps.runner.evaluate(tool, input, ctx)
+      ? deps.runner.evaluate(tool, input, ctx, options)
       : Promise.resolve(evaluateGuard(tool, input, ctx))
 
   /** File tools are checked on the path as given and on where its symlinks lead. */
   const decide = async (
     tool: GuardTool,
     input: Record<string, unknown>,
-    ctx: GuardContext
+    ctx: GuardContext,
+    options?: EvaluateOptions
   ): Promise<GuardDecision> => {
-    const decision = await run(tool, input, ctx)
+    const decision = await run(tool, input, ctx, options)
     const key = FILE_KEYS[tool]
     const path = key ? input[key] : undefined
     if (!key || typeof path !== 'string' || !path || decision.action === 'deny') return decision
@@ -193,7 +215,7 @@ export function createGuardService(deps: GuardServiceDeps): GuardService {
       real = null
     }
     if (!real) return decision
-    return severest(decision, await run(tool, { ...input, [key]: real }, ctx))
+    return severest(decision, await run(tool, { ...input, [key]: real }, ctx, options))
   }
 
   /** The project of a guard-only call: the account's project whose folder holds `cwd`. */
@@ -206,7 +228,7 @@ export function createGuardService(deps: GuardServiceDeps): GuardService {
   }
 
   return {
-    async check(caller, payload) {
+    async check(caller, payload, signal) {
       try {
         if (!deps.settings().enabled) return null
         if (!isObject(payload) || typeof payload.tool_name !== 'string') return null
@@ -224,7 +246,9 @@ export function createGuardService(deps: GuardServiceDeps): GuardService {
         const cwd = given ?? project?.path ?? null
         const text = subject(tool, input)
         const ctx = withBranch(context(cwd, project, caller.accountId), text)
-        const decision = await decide(tool, input, ctx)
+        const scope =
+          caller.kind === 'session' ? `session:${caller.sessionId}` : `account:${caller.accountId}`
+        const decision = await decide(tool, input, ctx, { scope, signal })
         if (decision.ruleId && decision.category) {
           const agentId =
             typeof payload.agent_id === 'string' && AGENT_ID.test(payload.agent_id)

@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { homedir } from 'node:os'
+import * as nodePath from 'node:path'
 import { join } from 'node:path'
 import type { TestQueueHookProblem } from '../../shared/types'
 import type { OsName } from '../platform/types'
@@ -16,6 +18,7 @@ import {
   GUARD_HOOK_TIMEOUT_SECONDS,
   GUARD_KEY_FILE,
   GUARD_MATCHER,
+  guardKeyFile,
   HOOK_SCRIPT_FILE,
   hookCommand,
   hookScript,
@@ -71,8 +74,11 @@ export interface HookFeatures {
   queue: boolean
   /** Test queue max wait (pre hook timeout and poll count). */
   maxWaitMinutes: number
-  /** Guard key and hook base URL for claude processes without the tab's env (guard only). */
-  guardKey?: { key: string; url: string | null }
+  /**
+   * The key file: guard key, hook base URL (the script's only source for it) and ClaudeDeck's
+   * process (pid and start time), written while the hook is installed.
+   */
+  guardKey?: { key: string; url: string | null; pid?: number | null; startTime?: string | null }
 }
 
 /** Where the hooks are installed; tests pass a Windows host on a Mac. */
@@ -80,9 +86,73 @@ export interface HookHost {
   os: OsName
   env: Record<string, string | undefined>
   exists?: (path: string) => boolean
+  /** Home folder for the `~/` permission rules; the current user's by default. */
+  home?: string
 }
 
 export const currentHookHost = (): HookHost => ({ os: process.platform, env: process.env })
+
+/**
+ * `permissions.deny` Read rules ClaudeDeck adds to an account's settings while the guard is on:
+ * private keys, credential files and the account's guard key. Claude Code applies them in every
+ * permission mode, next to the hook's own Read check.
+ */
+export function secretReadRules(configDir: string, host: HookHost): string[] {
+  const p = host.os === 'win32' ? nodePath.win32 : nodePath.posix
+  const home = host.home ?? homedir()
+  const key = p.join(configDir, 'claudedeck', GUARD_KEY_FILE)
+  const rel = p.relative(home, key)
+  const inHome = rel !== '' && !rel.startsWith('..') && !p.isAbsolute(rel)
+  const keyRule = inHome
+    ? `~/${rel.split(p.sep).join('/')}`
+    : `//${key
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .replace(/^([A-Za-z]):/, '$1')}`
+  return [
+    'Read(~/.ssh/id_*)',
+    'Read(~/.aws/credentials)',
+    'Read(~/.gnupg/private-keys-v1.d/**)',
+    'Read(~/.gnupg/secring.gpg)',
+    `Read(${keyRule})`
+  ]
+}
+
+/**
+ * New `permissions` value with our deny rules replaced (`add`) or removed; undefined when the
+ * key ends up absent, null when the existing value has a shape we must not touch.
+ */
+function nextPermissions(
+  current: unknown,
+  add: readonly string[] | null,
+  ours: ReadonlySet<string>
+): Json | undefined | null {
+  if (current !== undefined && !isObject(current)) return null
+  const deny = current?.deny
+  if (deny !== undefined && !Array.isArray(deny)) return null
+  const kept = (deny ?? []).filter((rule) => typeof rule !== 'string' || !ours.has(rule))
+  const next = add ? [...kept, ...add.filter((rule) => !kept.includes(rule))] : kept
+  if (current === undefined) return next.length ? { deny: next } : undefined
+  const out: Json = { ...current }
+  if (next.length) out.deny = next
+  // A list that only held our rules goes with them (and an object left empty too).
+  else if (deny !== undefined && deny.length > 0) delete out.deny
+  return Object.keys(out).length ? out : undefined
+}
+
+/** Settings with our deny rules added or removed (unchanged when `permissions` is odd). */
+function withPermissions(
+  settings: Json,
+  add: readonly string[] | null,
+  ours: ReadonlySet<string>
+): Json {
+  const permissions = nextPermissions(settings.permissions, add, ours)
+  if (permissions === null) return settings
+  const next = { ...settings }
+  if (permissions === undefined) delete next.permissions
+  else next.permissions = permissions
+  return next
+}
 
 export interface HookInstallResult {
   installed: boolean
@@ -192,20 +262,22 @@ export function installHooks(
   features: HookFeatures,
   host: HookHost = currentHookHost()
 ): HookInstallResult {
-  if (!features.guard && !features.queue) return removeHooks(configDir, host.os)
+  if (!features.guard && !features.queue) return removeHooks(configDir, host.os, host.home)
   if (host.os === 'win32' && !findGitBash(host.env, host.exists)) {
-    const removed = removeHooks(configDir, host.os)
+    const removed = removeHooks(configDir, host.os, host.home)
     return { installed: false, problem: 'noGitBash', changed: removed.changed }
   }
   const file = settingsPath(configDir)
   const scriptPath = hookScriptPath(configDir)
+  const rules = secretReadRules(configDir, host)
   const withOurs = (settings: Json): Json | null => {
     const hooks = nextHooks(
       settings.hooks,
       (event) => ourGroup(scriptPath, event, host.os, features),
       ourCommands(configDir, host.os)
     )
-    return hooks && { ...settings, hooks }
+    if (!hooks) return null
+    return withPermissions({ ...settings, hooks }, features.guard ? rules : null, new Set(rules))
   }
   // Checked before anything is written; the update below checks again on the fresh file.
   const current = readSettings(file)
@@ -216,12 +288,15 @@ export function installHooks(
   try {
     mkdirSync(join(configDir, 'claudedeck'), { recursive: true })
     // The script first: a hook pointing at a missing file would fail every Bash call's hook.
-    const script = hookScript({ guard: features.guard, maxWaitMinutes: features.maxWaitMinutes })
+    const script = hookScript({
+      guard: features.guard,
+      maxWaitMinutes: features.maxWaitMinutes,
+      os: host.os
+    })
     let changed = writeVerified(scriptPath, script, SCRIPT_MODE)
     const keyFile = guardKeyPath(configDir)
-    if (features.guard && features.guardKey) {
-      const { key, url } = features.guardKey
-      changed = writeVerified(keyFile, `${key}\n${url ?? ''}\n`, KEY_MODE) || changed
+    if (features.guardKey) {
+      changed = writeVerified(keyFile, guardKeyFile(features.guardKey), KEY_MODE) || changed
     } else if (existsSync(keyFile)) {
       rmSync(keyFile, { force: true })
       changed = true
@@ -229,7 +304,10 @@ export function installHooks(
     const result = updateSettings(file, (settings) => {
       const next = withOurs(settings)
       if (!next) return 'invalid'
-      return sameJson(settings.hooks, next.hooks) ? 'unchanged' : next
+      return sameJson(settings.hooks, next.hooks) &&
+        sameJson(settings.permissions, next.permissions)
+        ? 'unchanged'
+        : next
     })
     if (result === 'invalid') return { installed: false, problem: 'invalidSettings', changed }
     if (result === 'written') changed = true
@@ -246,21 +324,27 @@ export function installHooks(
 }
 
 /** Removes ClaudeDeck's groups (only those), the scripts (old names included) and the key. */
-export function removeHooks(configDir: string, os: OsName = process.platform): HookInstallResult {
+export function removeHooks(
+  configDir: string,
+  os: OsName = process.platform,
+  home?: string
+): HookInstallResult {
   const file = settingsPath(configDir)
+  const rules = new Set(secretReadRules(configDir, { os, env: {}, home }))
   let changed = false
   let problem: TestQueueHookProblem | null = null
   try {
     if (existsSync(file)) {
       const result = updateSettings(file, (settings) => {
-        if (settings.hooks === undefined) return 'unchanged'
-        const hooks = nextHooks(settings.hooks, null, ourCommands(configDir, os))
-        if (!hooks) return 'invalid'
-        if (sameJson(settings.hooks, hooks)) return 'unchanged'
-        const next = { ...settings }
-        if (Object.keys(hooks).length > 0) next.hooks = hooks
-        else delete next.hooks
-        return next
+        let next = withPermissions(settings, null, rules)
+        if (settings.hooks !== undefined) {
+          const hooks = nextHooks(settings.hooks, null, ourCommands(configDir, os))
+          if (!hooks) return 'invalid'
+          next = { ...next }
+          if (Object.keys(hooks).length > 0) next.hooks = hooks
+          else delete next.hooks
+        }
+        return sameJson(settings, next) ? 'unchanged' : next
       })
       if (result === 'invalid') problem = 'invalidSettings'
       if (result === 'written') changed = true

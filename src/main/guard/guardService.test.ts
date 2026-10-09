@@ -118,6 +118,43 @@ describe('guard service', () => {
     ).toBeNull()
   })
 
+  it('checks Read and Grep for secrets, through symlinks too', async () => {
+    const { service } = setup()
+    const read = (path: string): Promise<string | null> =>
+      service.check(scope, { tool_name: 'Read', tool_input: { file_path: path } })
+    expect(await read('/Users/dev/app/src/a.ts')).toBeNull()
+    expect(await read('/Users/dev/.ssh/id_ed25519')).toContain('deny')
+    expect(await read('/Users/dev/app/notes/id_rsa')).toContain('deny')
+    expect(await read('/Users/dev/cd/accounts/a1/claudedeck/guard.key')).toContain('deny')
+    expect(
+      await service.check(scope, {
+        tool_name: 'Grep',
+        tool_input: { pattern: 'x', path: '/Users/dev/.aws' }
+      })
+    ).toContain('deny')
+  })
+
+  it('knows the hook server port while it runs', async () => {
+    const events: unknown[] = []
+    const service = createGuardService({
+      settings: () => defaultGuardSettings(),
+      project: () => project,
+      account: () => undefined,
+      appDataDir: '/Users/dev/cd',
+      home: '/Users/dev',
+      os: 'darwin',
+      env: {},
+      log: createGuardLog({ onEntry: (e) => events.push(e) }),
+      hookPort: () => 47321,
+      ownPids: [4242]
+    })
+    const bash = (command: string): Promise<string | null> =>
+      service.check(scope, { tool_name: 'Bash', tool_input: { command } })
+    expect(await bash('lsof -ti :47321 | xargs kill')).toContain('deny')
+    expect(await bash('lsof -ti :3000 | xargs kill')).toBeNull()
+    expect(await bash('kill -STOP 4242')).toContain('deny')
+  })
+
   it('checks a guard-only call in the project that holds its folder', async () => {
     const { service, log } = setup()
     const reply = await service.check(
@@ -194,7 +231,7 @@ describe('guard service', () => {
     for (const bad of [
       null,
       { input: 3 },
-      { tool: 'Read', input: 'x' },
+      { tool: 'Glob', input: 'x' },
       { input: 'x'.repeat(70_000) }
     ]) {
       await expect(service.evaluate(bad as never)).rejects.toThrow(DomainError)

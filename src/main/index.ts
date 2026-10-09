@@ -58,6 +58,8 @@ import { createClaudeDeckHooks } from './hooks/claudeDeckHooks'
 import { createGuardKeys } from './hooks/guardKeys'
 import { hookRoutes } from './hooks/hookRoutes'
 import { hookBaseUrl } from './hooks/hookScript'
+import { nodeWatchFs } from './hooks/hookWatch'
+import { currentProcessIdentity } from './hooks/processIdentity'
 import { createStopProcess } from './testQueue/stopProcess'
 import { registerTestQueueIpc } from './testQueue/testQueueIpc'
 import { createTestQueueService } from './testQueue/testQueueService'
@@ -150,12 +152,44 @@ const testQueue = createTestQueueService({
   // Process discovery goes through CIM on Windows, which takes about a second per call.
   processCheckMs: platform.os === 'win32' ? 5000 : 2000
 })
+const guardLog = createGuardLog({ onEntry: (entry) => send(IPC.guardEvent, entry) })
 // The hook in each account's settings.json follows `settings.guard.enabled` and
 // `settings.testQueue.enabled` (installed while either is on).
 const guardKeys = createGuardKeys()
+// ClaudeDeck's pid and start time go into each guard key file: the hook tells "not running"
+// (pass) from "running but unreachable" (deny) with them.
+const identity = currentProcessIdentity(platform.os)
 const claudeDeckHooks = createClaudeDeckHooks({
   keys: guardKeys,
   hookUrl: () => (mcp ? hookBaseUrl(mcp.url) : null),
+  identity: () => identity,
+  watch: nodeWatchFs,
+  // Hook files or settings changed behind ClaudeDeck's back (and put back): a deny-level notice.
+  onTamper: (account, files) =>
+    guardLog.add({
+      kind: 'tamper',
+      sessionId: '',
+      projectId: '',
+      accountId: account.id,
+      tool: 'Write',
+      category: 'sensitive',
+      ruleId: 'sensitive.claudeSettings',
+      action: 'deny',
+      excerpt: files.join(', ')
+    }),
+  onProjectConfig: (project, change) =>
+    guardLog.add({
+      kind: 'projectConfig',
+      sessionId: '',
+      projectId: project.id,
+      accountId: project.accountId,
+      tool: 'Write',
+      category: 'sensitive',
+      ruleId: 'sensitive.projectAgentConfig',
+      action: 'ask',
+      excerpt: change.file,
+      hooksDisabled: change.hooksDisabled
+    }),
   accounts: () => repo.get().accounts,
   projects: () => repo.get().projects,
   settings: () => ({ guard: repo.get().settings.guard, testQueue: repo.get().settings.testQueue }),
@@ -165,7 +199,6 @@ const claudeDeckHooks = createClaudeDeckHooks({
 
 // Command guard: the first step of every PreToolUse hook call of a Claude tab. Its decisions
 // with a matching rule are kept in memory and pushed to the main window.
-const guardLog = createGuardLog({ onEntry: (entry) => send(IPC.guardEvent, entry) })
 const guard = createGuardService({
   settings: () => repo.get().settings.guard,
   project: (id) => repo.get().projects.find((p) => p.id === id),
@@ -178,7 +211,9 @@ const guard = createGuardService({
   os: platform.os,
   env: process.env,
   gitBranch: cachedGitBranch(),
-  log: guardLog
+  log: guardLog,
+  hookPort: () => (mcp ? Number(new URL(mcp.url).port) || null : null),
+  ownPids: [process.pid]
 })
 
 /**
@@ -723,5 +758,6 @@ app.on('before-quit', () => {
   mcpTokens.revokeAll()
   notes?.dispose()
   agents?.dispose()
+  claudeDeckHooks.stop()
   void mcp?.stop()
 })

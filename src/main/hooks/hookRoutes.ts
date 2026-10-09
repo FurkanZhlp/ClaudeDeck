@@ -13,7 +13,13 @@ export const POST_BODY_LIMIT = 4 * 1024 * 1024
 const QUEUE_TOOLS = new Set(['Bash', 'PowerShell'])
 
 export interface HookRouteDeps {
-  guard: { check(caller: GuardCaller, payload: unknown): Promise<string | null> | string | null }
+  guard: {
+    check(
+      caller: GuardCaller,
+      payload: unknown,
+      signal?: AbortSignal
+    ): Promise<string | null> | string | null
+  }
   /** The account of a guard key (guard-only calls of claude processes without a tab token). */
   accountForKey?: (key: string) => string | null
   service: Pick<TestQueueService, 'pre' | 'post'>
@@ -47,7 +53,7 @@ export function hookRoutes({
         const session = tab(scope)
         if (!session) return PASS
         if (event === GUARD_STEP) {
-          const reply = await guard.check(session, payload)
+          const reply = await guard.check(session, payload, signal)
           if (reply !== null) return reply
           const queued =
             queueEnabled() && isObject(payload) && QUEUE_TOOLS.has(String(payload.tool_name))
@@ -73,9 +79,9 @@ export function hookRoutes({
         const accountId = accountForKey(key)
         return accountId ? { kind: 'account', accountId } : null
       },
-      handle: async (scope, payload, _signal, event) => {
+      handle: async (scope, payload, signal, event) => {
         if (scope.kind !== 'account' || event !== GUARD_STEP) return PASS
-        return (await guard.check(scope, payload)) ?? PASS
+        return (await guard.check(scope, payload, signal)) ?? PASS
       }
     }
   }

@@ -408,6 +408,11 @@ export interface TestQueueHookStatus {
    * means its tool calls are not guarded, which the UI should warn about.
    */
   guardEnabled?: boolean
+  /**
+   * The guard is on but ClaudeDeck's hook server is not running: tool calls of tabs are denied
+   * as "guard unavailable" until it runs. The UI should warn.
+   */
+  guardUnavailable?: boolean
   /** Managed settings set `allowManagedHooksOnly`: the queue cannot work anywhere. */
   managedHooksOnly: boolean
   /** Projects whose settings set `disableAllHooks`: the queue is off in their tabs. */
@@ -519,7 +524,16 @@ export type GuardCategoryId =
 
 /** Tools the guard looks at (the hook matcher). */
 export type GuardTool =
-  'Bash' | 'PowerShell' | 'Monitor' | 'Write' | 'Edit' | 'MultiEdit' | 'NotebookEdit'
+  | 'Bash'
+  | 'PowerShell'
+  | 'Monitor'
+  | 'Write'
+  | 'Edit'
+  | 'MultiEdit'
+  | 'NotebookEdit'
+  /** Read-only tools: only secrets (private keys, credentials, the guard key) are checked. */
+  | 'Read'
+  | 'Grep'
 
 /**
  * A user rule for commands (Bash, PowerShell, Monitor), matched like a test queue rule:
@@ -607,4 +621,13 @@ export interface GuardLogEntry {
   action: GuardAction
   /** Command or path, single line, at most 200 characters. */
   excerpt: string
+  /**
+   * Not a tool call decision: `tamper` when ClaudeDeck's hook files or an account's settings
+   * were changed by something else and put back (deny level); `projectConfig` when a project's
+   * Claude settings or MCP servers changed while the guard is on (a warning, action `ask`).
+   * Absent for decisions.
+   */
+  kind?: 'tamper' | 'projectConfig'
+  /** `projectConfig`: the project's settings now switch every hook off. */
+  hooksDisabled?: boolean
 }

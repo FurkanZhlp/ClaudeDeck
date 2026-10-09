@@ -10,7 +10,11 @@ export const LEGACY_HOOK_SCRIPT_FILE = 'test-queue.sh'
 export const OURS =
   /^\/bin\/sh '(?:[^']|'\\'')*[\\/]claudedeck[\\/](hook|test-queue)\.sh' (pre|post)$/
 
-/** Env var with the tab's hook base URL, set next to the MCP token. */
+/**
+ * Env var with the tab's hook base URL, set next to the MCP token. Informational only: the
+ * script takes the URL from the protected key file, never from the environment (a process in
+ * the tab could point it at a server of its own that allows everything).
+ */
 export const HOOK_URL_ENV = 'CLAUDEDECK_HOOK_URL'
 
 /** Server path prefix of the hook routes; the script appends `pre` or `post`. */
@@ -21,10 +25,23 @@ export type HookEvent = 'pre' | 'post'
 /** Route of guard-only calls authenticated with the account's guard key. */
 export const GUARD_ROUTE = 'guard'
 /**
- * Per-account file next to the script: the guard key (64 hex) and the hook base URL, one per
- * line. Claude processes that lost the tab's env (`env -i claude`) still reach the guard with it.
+ * Per-account file next to the script, one value per line: the guard key (64 hex), the hook
+ * base URL, ClaudeDeck's process id and that process's start time (`ps -o lstart=`, blanks
+ * collapsed; empty where unknown). The script takes the server URL only from here; claude
+ * processes that lost the tab's env (`env -i claude`) still reach the guard with the key.
  */
 export const GUARD_KEY_FILE = 'guard.key'
+
+/** Contents of the guard key file. */
+export function guardKeyFile(entry: {
+  key: string
+  url: string | null
+  pid?: number | null
+  startTime?: string | null
+}): string {
+  const start = (entry.startTime ?? '').replace(/\s+/g, ' ').trim()
+  return `${entry.key}\n${entry.url ?? ''}\n${entry.pid ?? ''}\n${start}\n`
+}
 
 /** Body event of the first pre request: the guard step. Queue polls send `pre`. */
 export const GUARD_STEP = 'guard'
@@ -94,17 +111,24 @@ export interface HookScriptOptions {
   guard: boolean
   /** Test queue max wait; sets the number of queue polls. */
   maxWaitMinutes: number
+  /**
+   * Host OS. On Windows (Git Bash) the process check of the key file is skipped: a refused
+   * connection alone means ClaudeDeck is not running.
+   */
+  os?: OsName
 }
 
 /**
  * POSIX sh script Claude Code runs for PreToolUse and PostToolUse(Failure) (macOS /bin/sh,
  * Git Bash on Windows).
  *
- * - A ClaudeDeck tab is recognised by its token and hook URL (env). Without them, while the
- *   guard is on, the script uses the account's guard key file next to it (GUARD_KEY_FILE): a
- *   claude process started from a tab with a cleared env is still checked (guard only, no
- *   queue). Without either it does nothing (exit 0, no output), so other `claude` processes on
- *   the same config dir and shell tabs are unaffected.
+ * - The server URL comes only from the account's key file next to the script (GUARD_KEY_FILE),
+ *   which the guard protects; the environment gives the tab's token and nothing else.
+ * - A ClaudeDeck tab is recognised by its token (env). Without it, while the guard is on, the
+ *   script uses the account key from the file: a claude process started from a tab with a
+ *   cleared env is still checked (guard only, no queue). Without either it does nothing
+ *   (exit 0, no output), so other `claude` processes on the same config dir are unaffected. A
+ *   tab token without a usable key file is denied while the guard is on.
  * - The token or key never reaches argv: the builtin `printf` pipes the body into curl's
  *   stdin. `%s` prints the payload as it is (no escapes or expansions are applied to it).
  * - Pre: first the guard step (`e: guard`, 5 s). Its answer is printed as it is (a deny or ask
@@ -112,8 +136,9 @@ export interface HookScriptOptions {
  *   (`e: pre`, each answered within 20 s; WAIT_MARKER means poll again).
  * - Guard step failures (no connection, a status other than 200, no answer in 5 s) deny the
  *   call while the guard is on. A tab token the server does not know (401) falls back to the
- *   key, or lets the call through without one. With the key, a refused connection (ClaudeDeck
- *   is not running) lets the call through; any other failure denies it.
+ *   key, and is denied without one. With the key, no connection lets the call through only when
+ *   ClaudeDeck's process (pid and start time from the key file) is gone; while it lives the
+ *   call is denied (its server is blocked or stopped, not absent).
  * - A signal during the guard step (the hook timeout, a kill) denies the call before exiting.
  * - curl runs in the background and the script `wait`s for it, so a signal (Esc, the hook
  *   timeout) is handled at once: curl gets SIGTERM, the server sees the connection close.
@@ -121,8 +146,27 @@ export interface HookScriptOptions {
  *   ignores any .curlrc; `--noproxy` keeps loopback off proxies. Answers go to private temp
  *   files (mktemp) that are removed on exit.
  */
-export function hookScript({ guard, maxWaitMinutes }: HookScriptOptions): string {
+export function hookScript({ guard, maxWaitMinutes, os }: HookScriptOptions): string {
   const polls = prePolls(maxWaitMinutes)
+  const processCheck =
+    os === 'win32'
+      ? [
+          '# Windows: a refused connection alone means ClaudeDeck is not running.',
+          'alive() { return 1; }'
+        ]
+      : [
+          '# ClaudeDeck still runs: its pid is alive and started when the key file says.',
+          'alive() {',
+          '  [ -n "$kpid" ] || return 1',
+          '  kill -0 "$kpid" 2>/dev/null || return 1',
+          '  [ -n "$kstart" ] || return 0',
+          '  now=$(LC_ALL=C ps -o lstart= -p "$kpid" 2>/dev/null) || return 0',
+          '  set -f',
+          '  set -- $now',
+          '  set +f',
+          '  [ "$*" = "$kstart" ]',
+          '}'
+        ]
   return [
     '#!/bin/sh',
     '# Generated by ClaudeDeck: command guard and test queue hook. It checks tool calls against',
@@ -148,34 +192,43 @@ export function hookScript({ guard, maxWaitMinutes }: HookScriptOptions): string
     '  p=${p%%/*}',
     "  case $p in ''|*[!0-9]*) return 1 ;; esac",
     '}',
-    '# The guard key file next to this script: the key, then the hook URL.',
+    "# The key file next to this script: the key, the hook URL, ClaudeDeck's pid and start time.",
     'key=',
     'keyurl=',
+    'kpid=',
+    'kstart=',
     'case $0 in',
     `  */*) keyfile=\${0%/*}/${GUARD_KEY_FILE} ;;`,
     `  *\\\\*) keyfile=\${0%\\\\*}/${GUARD_KEY_FILE} ;;`,
     `  *) keyfile=./${GUARD_KEY_FILE} ;;`,
     'esac',
-    'if [ "$guard" = 1 ] && [ "$event" = pre ] && [ -f "$keyfile" ]; then',
-    '  { IFS= read -r key; IFS= read -r keyurl; } <"$keyfile" 2>/dev/null || :',
-    '  hex64 "$key" && hookurl "$keyurl" || key=',
+    'if [ -f "$keyfile" ]; then',
+    '  { IFS= read -r key; IFS= read -r keyurl; IFS= read -r kpid; IFS= read -r kstart; } <"$keyfile" 2>/dev/null || :',
     'fi',
-    'token=${CLAUDEDECK_MCP_TOKEN-}',
-    `url=\${${HOOK_URL_ENV}-}`,
-    `route=pre`,
-    'if hex64 "$token" && hookurl "$url"; then',
-    '  mode=tab',
-    'elif [ -n "$key" ]; then',
-    '  mode=key',
-    '  token=$key',
-    '  url=$keyurl',
-    `  route=${GUARD_ROUTE}`,
-    'else',
-    '  exit 0',
-    'fi',
+    'hex64 "$key" || key=',
+    'hookurl "$keyurl" || keyurl=',
+    "case $kpid in ''|*[!0-9]*) kpid= ;; esac",
     'deny() {',
     `  [ "$guard" = 1 ] && [ "$event" = pre ] && printf '%s\\n' '${GUARD_UNAVAILABLE_REPLY}'`,
     '}',
+    'token=${CLAUDEDECK_MCP_TOKEN-}',
+    'url=$keyurl',
+    'route=pre',
+    'if hex64 "$token" && [ -n "$url" ]; then',
+    '  mode=tab',
+    'elif [ "$guard" = 1 ] && [ "$event" = pre ] && [ -n "$key" ] && [ -n "$url" ]; then',
+    '  mode=key',
+    '  token=$key',
+    `  route=${GUARD_ROUTE}`,
+    'elif hex64 "$token"; then',
+    '  # A tab without a usable key file: the guard cannot be reached safely.',
+    '  cat >/dev/null 2>&1',
+    '  deny',
+    '  exit 0',
+    'else',
+    '  exit 0',
+    'fi',
+    ...processCheck,
     'input=$(cat) || { deny; exit 0; }',
     'out=$(mktemp 2>/dev/null) || { deny; exit 0; }',
     'code=$(mktemp 2>/dev/null) || { rm -f "$out"; deny; exit 0; }',
@@ -215,19 +268,18 @@ export function hookScript({ guard, maxWaitMinutes }: HookScriptOptions): string
     'stage=guard',
     `send ${GUARD_STEP} "$route" ${GUARD_CURL_MAX_TIME}`,
     '# A tab token the server does not know: the account key, when there is one.',
-    'if [ "$status" = 401 ] && [ "$mode" = tab ] && [ -n "$key" ]; then',
+    'if [ "$status" = 401 ] && [ "$mode" = tab ] && [ "$guard" = 1 ] && [ -n "$key" ]; then',
     '  mode=key',
     '  token=$key',
-    '  url=$keyurl',
     `  route=${GUARD_ROUTE}`,
     `  send ${GUARD_STEP} "$route" ${GUARD_CURL_MAX_TIME}`,
     'fi',
-    '# With the key, no connection (refused, or never answered on Windows) means ClaudeDeck is',
-    '# not running: pass.',
+    '# With the key, no connection while ClaudeDeck is gone means it is not running: pass.',
     'case $mode:$status in',
     '  *:200) ;;',
-    '  tab:401) stage=; finish ;;',
-    '  key:000) [ "$rc" = 7 ] || [ -z "$connected" ] && { stage=; finish; }; stage=; deny; finish ;;',
+    '  key:000)',
+    '    if { [ "$rc" = 7 ] || [ -z "$connected" ]; } && ! alive; then stage=; finish; fi',
+    '    stage=; deny; finish ;;',
     '  *) stage=; deny; finish ;;',
     'esac',
     'stage=',

@@ -11,6 +11,19 @@ import { evaluateGuard, type GuardContext } from './evaluate'
 export const GUARD_TIMEOUT_MS = 1500
 /** Checks waiting at once; more are denied at once (the hook would time out anyway). */
 export const MAX_PENDING = 256
+/**
+ * Checks of one caller (a tab token or an account key) queued or running at once; more are
+ * denied at once, so one caller cannot fill the queue for everyone else.
+ */
+export const MAX_PER_SCOPE = 8
+
+/** Who a check is for and when its answer is no longer wanted. */
+export interface EvaluateOptions {
+  /** Caller key (`session:<id>`, `account:<id>`) for the per-caller limit. */
+  scope?: string
+  /** Aborted when the hook went away: a check still waiting is dropped. */
+  signal?: AbortSignal
+}
 
 export interface GuardRequest {
   id: number
@@ -32,7 +45,12 @@ export interface WorkerLike {
 }
 
 export interface GuardRunner {
-  evaluate(tool: string, input: unknown, ctx: GuardContext): Promise<GuardDecision>
+  evaluate(
+    tool: string,
+    input: unknown,
+    ctx: GuardContext,
+    options?: EvaluateOptions
+  ): Promise<GuardDecision>
   stop(): void
 }
 
@@ -65,15 +83,26 @@ export function failedDecision(why: 'timeout' | 'error' | 'busy'): GuardDecision
 interface Job {
   request: GuardRequest
   done: (decision: GuardDecision) => void
+  scope?: string
 }
 
 export function createGuardRunner(opts: {
   spawn: () => WorkerLike
   timeoutMs?: number
   maxPending?: number
+  maxPerScope?: number
 }): GuardRunner {
   const timeoutMs = opts.timeoutMs ?? GUARD_TIMEOUT_MS
   const maxPending = opts.maxPending ?? MAX_PENDING
+  const maxPerScope = opts.maxPerScope ?? MAX_PER_SCOPE
+  /** Checks queued or running per caller. */
+  const perScope = new Map<string, number>()
+  const release = (scope: string | undefined): void => {
+    if (scope === undefined) return
+    const left = (perScope.get(scope) ?? 1) - 1
+    if (left > 0) perScope.set(scope, left)
+    else perScope.delete(scope)
+  }
   let worker: WorkerLike | null = null
   let current: (Job & { timer: ReturnType<typeof setTimeout> }) | null = null
   const queue: Job[] = []
@@ -141,10 +170,33 @@ export function createGuardRunner(opts: {
   }
 
   return {
-    evaluate(tool, input, ctx) {
+    evaluate(tool, input, ctx, options = {}) {
+      const { scope, signal } = options
+      if (signal?.aborted) return Promise.resolve(failedDecision('error'))
       if (stopped || queue.length >= maxPending) return Promise.resolve(failedDecision('busy'))
-      return new Promise((done) => {
-        queue.push({ request: { id: nextId++, tool, input, ctx }, done })
+      if (scope !== undefined && (perScope.get(scope) ?? 0) >= maxPerScope)
+        return Promise.resolve(failedDecision('busy'))
+      if (scope !== undefined) perScope.set(scope, (perScope.get(scope) ?? 0) + 1)
+      return new Promise((resolve) => {
+        let settled = false
+        const done = (decision: GuardDecision): void => {
+          if (settled) return
+          settled = true
+          signal?.removeEventListener('abort', abort)
+          release(scope)
+          resolve(decision)
+        }
+        const job: Job = { request: { id: nextId++, tool, input, ctx }, done, scope }
+        // A check nobody waits for any more leaves the queue (a running one finishes).
+        function abort(): void {
+          const at = queue.indexOf(job)
+          if (at >= 0) {
+            queue.splice(at, 1)
+            done(failedDecision('error'))
+          }
+        }
+        signal?.addEventListener('abort', abort, { once: true })
+        queue.push(job)
         pump()
       })
     },

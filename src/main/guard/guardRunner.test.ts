@@ -75,6 +75,49 @@ describe('guard runner', () => {
     error.mockRestore()
   })
 
+  it('drops a waiting check whose hook went away', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const posted: string[] = []
+    class Recording extends FakeWorker {
+      postMessage(request: GuardRequest): void {
+        posted.push((request.input as { command: string }).command)
+        super.postMessage(request)
+      }
+    }
+    const runner = createGuardRunner({ spawn: () => new Recording(), timeoutMs: 50 })
+    const busy = runner.evaluate('Bash', { command: 'echo GUARD-SENTINEL-hang' }, ctx)
+    const gone = new AbortController()
+    const dropped = runner.evaluate('Bash', { command: 'echo GUARD-SENTINEL-1' }, ctx, {
+      signal: gone.signal
+    })
+    gone.abort()
+    expect((await dropped).action).toBe('deny')
+    await busy
+    expect(posted).toEqual(['echo GUARD-SENTINEL-hang'])
+    // Already aborted: not queued at all.
+    expect(
+      (await runner.evaluate('Bash', { command: 'ls' }, ctx, { signal: gone.signal })).action
+    ).toBe('deny')
+    runner.stop()
+    warn.mockRestore()
+  })
+
+  it('limits the checks one caller has queued or running', async () => {
+    const runner = createGuardRunner({ spawn: () => new FakeWorker(), maxPerScope: 2 })
+    const scope = 'session:tab'
+    const first = runner.evaluate('Bash', { command: 'ls' }, ctx, { scope })
+    const second = runner.evaluate('Bash', { command: 'ls' }, ctx, { scope })
+    const third = runner.evaluate('Bash', { command: 'ls' }, ctx, { scope })
+    const other = runner.evaluate('Bash', { command: 'ls' }, ctx, { scope: 'session:other' })
+    expect(await third).toMatchObject({ action: 'deny', ruleId: 'disk.uncheckable' })
+    expect((await first).action).toBe('allow')
+    expect((await second).action).toBe('allow')
+    expect((await other).action).toBe('allow')
+    // Finished checks free their slots.
+    expect((await runner.evaluate('Bash', { command: 'ls' }, ctx, { scope })).action).toBe('allow')
+    runner.stop()
+  })
+
   it('terminates a real worker thread stuck in a loop', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     // A worker that never answers (an endless loop standing in for a runaway check).
