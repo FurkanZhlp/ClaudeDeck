@@ -892,7 +892,7 @@
         "systemDelete": "Deleting the root, a system folder, a home folder or the project folder",
         "recursivePermissions": "Changing permissions or owners recursively on system or home folders",
         "forkBomb": "Fork bomb",
-        "uncheckable": "Commands too long or nested to check"
+        "uncheckable": "Commands or targets the guard cannot check (too long, too nested, unknown path, too many brace expansions)"
       },
       "sensitive": {
         "ssh": "Changing files in ~/.ssh",
@@ -1007,7 +1007,8 @@
       "ruleDefault": "Default ({{action}})",
       "ruleDefaultHint": "This rule denies by default, even while its category asks. Setting the category to Allow allows it too.",
       "ruleCappedHint": "This check is too broad to block outright, so the category can make it ask at most. Deny is not available for it.",
-      "projectsHooksDisabled": "Hooks are disabled in these projects' Claude settings, so Claude's commands there are not checked: {{projects}}"
+      "projectsHooksDisabled": "Hooks are disabled in these projects' Claude settings, so Claude's commands there are not checked: {{projects}}",
+      "unavailable": "Command guard is on but its server is not running; tool calls in tabs are blocked"
     },
     "confirm": {
       "title": "Allow everything in {{category}}?",
@@ -1043,7 +1044,8 @@
       "tools": {
         "Bash": "Bash",
         "PowerShell": "PowerShell",
-        "Write": "File path (Write)"
+        "Write": "File path (Write)",
+        "Read": "File read (Read)"
       },
       "label": "Command or path to check",
       "placeholder": {
@@ -1086,6 +1088,11 @@
     "badge": {
       "hooksDisabled": "Hooks are disabled for this project, so the command guard does not check Claude's commands here",
       "hooksDisabledBoth": "Hooks are disabled for this project, so the command guard and the test queue do not apply here"
+    },
+    "event": {
+      "tamper": "ClaudeDeck's hook files or settings were changed and put back",
+      "projectConfig": "Project Claude settings or MCP servers changed",
+      "hooksDisabled": "Hooks are now off for this project; its tool calls are not guarded"
     }
   },
   "assistant": {

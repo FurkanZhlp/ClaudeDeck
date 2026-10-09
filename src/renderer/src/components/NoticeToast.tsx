@@ -16,17 +16,15 @@ export function NoticeToast(): React.JSX.Element | null {
   }, [notice, setNotice])
 
   if (!notice) return null
-  const Icon = notice.source === 'guard' ? ShieldAlert : Info
+  const guard = notice.source === 'guard' || notice.source === 'guardEvent'
+  const Icon = guard ? ShieldAlert : Info
+  const iconColor = !guard ? 'text-accent' : notice.tone === 'warn' ? 'text-warn' : 'text-danger'
   return (
     <div
       role="status"
       className="animate-fade-up fixed bottom-4 left-1/2 z-[90] flex max-w-md -translate-x-1/2 items-start gap-3 rounded-lg border border-border bg-elevated p-3 shadow-xl"
     >
-      <Icon
-        size={16}
-        aria-hidden
-        className={`mt-0.5 shrink-0 ${notice.source === 'guard' ? 'text-danger' : 'text-accent'}`}
-      />
+      <Icon size={16} aria-hidden className={`mt-0.5 shrink-0 ${iconColor}`} />
       <span className="min-w-0 flex-1 space-y-1">
         <span className="block break-words">{notice.message}</span>
         {notice.action && (

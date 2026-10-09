@@ -13,7 +13,9 @@ import {
   checkGuardPattern,
   excerpt,
   followedRuleAction,
+  guardEventKeys,
   guardHooksOff,
+  guardServerDown,
   needsAllowConfirm,
   nextDenyBurst,
   overrideCount,
@@ -210,5 +212,33 @@ describe('guardHooksOff', () => {
     expect(guardHooksOff(some, 'p2')).toBe(false)
     expect(guardHooksOff(some)).toBe(true)
     expect(guardHooksOff(status({ managedHooksOnly: true }), 'p2')).toBe(true)
+  })
+})
+
+describe('guardServerDown', () => {
+  const status = (patch: Partial<TestQueueHookStatus>): TestQueueHookStatus => ({
+    accounts: [],
+    managedHooksOnly: false,
+    hooksDisabledProjectIds: [],
+    ...patch
+  })
+
+  it('is true only while the guard is on and its server is not running', () => {
+    expect(guardServerDown(null)).toBe(false)
+    expect(guardServerDown(status({ guardEnabled: true }))).toBe(false)
+    expect(guardServerDown(status({ guardEnabled: false, guardUnavailable: true }))).toBe(false)
+    expect(guardServerDown(status({ guardEnabled: true, guardUnavailable: true }))).toBe(true)
+  })
+})
+
+describe('guardEventKeys', () => {
+  it('describes tamper and project config entries, and nothing for decisions', () => {
+    expect(guardEventKeys({})).toEqual([])
+    expect(guardEventKeys({ kind: 'tamper' })).toEqual(['guard.event.tamper'])
+    expect(guardEventKeys({ kind: 'projectConfig' })).toEqual(['guard.event.projectConfig'])
+    expect(guardEventKeys({ kind: 'projectConfig', hooksDisabled: true })).toEqual([
+      'guard.event.projectConfig',
+      'guard.event.hooksDisabled'
+    ])
   })
 })

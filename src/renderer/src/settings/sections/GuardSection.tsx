@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { GuardSettingsPatch } from '@shared/types'
-import { guardHooksOff } from '../../guard/guardModel'
+import { guardHooksOff, guardServerDown } from '../../guard/guardModel'
 import { useGuard } from '../../guard/guardStore'
 import { ActivityLog } from '../../guard/settings/ActivityLog'
 import { CategoryList } from '../../guard/settings/CategoryList'
@@ -47,6 +47,7 @@ export function GuardSection(): React.JSX.Element | null {
       />
       {settings.enabled && (
         <>
+          <GuardServerDown />
           <HookProblems />
           <h4 className={subTitleClass}>{t('guard.settings.categories')}</h4>
           <CategoryList settings={settings} save={(patch) => void save(patch)} />
@@ -69,6 +70,20 @@ export function GuardSection(): React.JSX.Element | null {
           <ActivityLog />
         </>
       )}
+    </div>
+  )
+}
+
+/** The guard is on but its hook server is not running, so every tool call in a tab is denied. */
+function GuardServerDown(): React.JSX.Element | null {
+  const { t } = useTranslation()
+  const down = useTestQueue((s) => guardServerDown(s.hookStatus))
+  if (!down) return null
+  return (
+    <div role="alert">
+      <Notice tone="danger">
+        <p className="font-medium">{t('guard.settings.unavailable')}</p>
+      </Notice>
     </div>
   )
 }

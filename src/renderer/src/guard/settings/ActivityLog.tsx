@@ -5,6 +5,7 @@ import { GUARD_LIMITS } from '@shared/guardLimits'
 import type { GuardLogEntry } from '@shared/types'
 import { useApp } from '../../store'
 import { Button } from '../../ui/Button'
+import { guardEventKeys } from '../guardModel'
 import { useGuard } from '../guardStore'
 import { ActionBadge } from './ActionBadge'
 import { useRuleLabeler } from './useRuleLabeler'
@@ -15,7 +16,8 @@ const COPIED_MS = 1500
 const sameDay = (a: Date, b: Date): boolean => a.toDateString() === b.toDateString()
 
 /**
- * The last guard decisions with a matching rule (memory only, newest first). Live entries
+ * The last guard decisions with a matching rule (memory only, newest first), plus tamper and
+ * project config notices, which are described by their own text instead of a rule. Live entries
  * arrive through the guard store's subscription.
  */
 export function ActivityLog(): React.JSX.Element {
@@ -55,11 +57,16 @@ export function ActivityLog(): React.JSX.Element {
     ]
       .filter(Boolean)
       .join(' · ')
+  /** Category and rule of a decision, or the text of a tamper or project config notice. */
+  const headline = (entry: GuardLogEntry): string[] => {
+    const keys = guardEventKeys(entry)
+    if (keys.length > 0) return keys.map((key) => t(key))
+    return [t(`guard.categories.${entry.category}`), ruleLabel(entry.ruleId, entry.projectId)]
+  }
   const describe = (entry: GuardLogEntry): string[] => [
     time(entry.at),
     where(entry),
-    t(`guard.categories.${entry.category}`),
-    ruleLabel(entry.ruleId, entry.projectId),
+    ...headline(entry),
     t(`guard.actions.${entry.action}`),
     entry.excerpt
   ]
@@ -93,17 +100,24 @@ export function ActivityLog(): React.JSX.Element {
         >
           {log.map((entry) => {
             const place = where(entry)
+            const [eventText, ...eventDetails] = guardEventKeys(entry).map((key) => t(key))
             return (
               <li key={entry.id} className="space-y-0.5 px-3 py-2">
                 <div className="flex min-w-0 items-center gap-2 text-[12px]">
                   <ActionBadge action={entry.action} />
-                  <span className="min-w-0 flex-1 truncate">
-                    <span className="font-medium">{t(`guard.categories.${entry.category}`)}</span>
-                    <span className="text-muted">
-                      {' '}
-                      · {ruleLabel(entry.ruleId, entry.projectId)}
+                  {eventText ? (
+                    <span className="min-w-0 flex-1 truncate font-medium" data-tooltip={eventText}>
+                      {eventText}
                     </span>
-                  </span>
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="font-medium">{t(`guard.categories.${entry.category}`)}</span>
+                      <span className="text-muted">
+                        {' '}
+                        · {ruleLabel(entry.ruleId, entry.projectId)}
+                      </span>
+                    </span>
+                  )}
                   <time
                     dateTime={new Date(entry.at).toISOString()}
                     className="shrink-0 text-[11px] tabular-nums text-muted"
@@ -117,6 +131,11 @@ export function ActivityLog(): React.JSX.Element {
                 >
                   {entry.excerpt}
                 </code>
+                {eventDetails.map((detail) => (
+                  <p key={detail} className="text-[11.5px] leading-snug text-warn">
+                    {detail}
+                  </p>
+                ))}
                 {place && <p className="truncate text-[11px] text-muted">{place}</p>}
               </li>
             )

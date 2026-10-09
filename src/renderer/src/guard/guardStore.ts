@@ -2,7 +2,14 @@ import { create } from 'zustand'
 import type { GuardLogEntry, GuardRuleInfo, GuardSettingsPatch, ProjectGuard } from '@shared/types'
 import i18n from '../i18n'
 import { errorCode, useApp } from '../store'
-import { excerpt, nextDenyBurst, prependLogEntry, type DenyBurst } from './guardModel'
+import { useTestQueue } from '../testQueue/testQueueStore'
+import {
+  excerpt,
+  guardEventKeys,
+  nextDenyBurst,
+  prependLogEntry,
+  type DenyBurst
+} from './guardModel'
 
 /** Longest command text shown in a deny notice. */
 const NOTICE_EXCERPT = 80
@@ -61,6 +68,23 @@ export const useGuard = create<GuardStore>()((set, get) => {
     })
   }
 
+  /**
+   * Shows a tamper or project config entry as its own notice (the most specific text). A project
+   * config change may switch hooks on or off, so the hook status is fetched again.
+   */
+  const notifyEvent = (entry: GuardLogEntry, keys: string[]): void => {
+    if (entry.kind === 'projectConfig') void useTestQueue.getState().loadHookStatus()
+    useApp.getState().setNotice({
+      source: 'guardEvent',
+      tone: entry.action === 'deny' ? 'danger' : 'warn',
+      message: i18n.t(keys[keys.length - 1]),
+      action: {
+        label: i18n.t('guard.notice.open'),
+        run: () => useApp.getState().openSettings('guard')
+      }
+    })
+  }
+
   return {
     rules: null,
     log: null,
@@ -90,7 +114,9 @@ export const useGuard = create<GuardStore>()((set, get) => {
       const off = window.api.guard.onEvent((entry) => {
         const log = get().log
         if (log) set({ log: prependLogEntry(log, entry) })
-        if (entry.action === 'deny') notifyDeny(entry)
+        const keys = guardEventKeys(entry)
+        if (keys.length > 0) notifyEvent(entry, keys)
+        else if (entry.action === 'deny') notifyDeny(entry)
       })
       cleanups.push(off)
       return () => {

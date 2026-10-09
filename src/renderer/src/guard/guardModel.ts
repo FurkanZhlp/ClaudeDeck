@@ -92,6 +92,22 @@ export function guardHooksOff(status: TestQueueHookStatus | null, projectId?: st
     : status.hooksDisabledProjectIds.includes(projectId)
 }
 
+/** The guard is on but ClaudeDeck's hook server is not running: tool calls in tabs are denied. */
+export const guardServerDown = (status: TestQueueHookStatus | null): boolean =>
+  !!status?.guardEnabled && !!status.guardUnavailable
+
+/**
+ * Locale keys describing a log entry that is not a tool call decision (a tamper or project
+ * config notice), most general first; empty for decisions.
+ */
+export function guardEventKeys(entry: Pick<GuardLogEntry, 'kind' | 'hooksDisabled'>): string[] {
+  if (entry.kind === 'tamper') return ['guard.event.tamper']
+  if (entry.kind !== 'projectConfig') return []
+  return entry.hooksDisabled
+    ? ['guard.event.projectConfig', 'guard.event.hooksDisabled']
+    : ['guard.event.projectConfig']
+}
+
 /** Rules in a category with their own action, for the collapsed row's counter. */
 export const overrideCount = (
   rules: readonly GuardRuleInfo[],

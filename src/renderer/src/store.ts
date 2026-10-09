@@ -31,8 +31,13 @@ export type StatusEntry = AccountStatus | 'checking'
 export interface AppNotice {
   message: string
   action?: { label: string; run: () => void }
-  /** Notices from the same source may merge (command guard denials). */
-  source?: 'guard'
+  /**
+   * `guard` notices merge (command guard denials); `guardEvent` notices (tamper, project config)
+   * stand alone. Both show the guard icon.
+   */
+  source?: 'guard' | 'guardEvent'
+  /** Icon color for guard notices; defaults to danger. */
+  tone?: 'warn' | 'danger'
 }
 
 export const errorCode = (error: unknown): string =>

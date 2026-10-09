@@ -11,8 +11,14 @@ import { useRuleLabeler } from './useRuleLabeler'
 /** Waits for a pause in typing before asking the main process. */
 const DEBOUNCE_MS = 250
 
-/** Tools offered here: two shells and a file path (Write stands for the file tools). */
-const TOOLS: readonly GuardTool[] = ['Bash', 'PowerShell', 'Write']
+/**
+ * Tools offered here: two shells, a file path to write (Write stands for the file tools) and a
+ * file path to read (Read and Grep are checked for secrets only).
+ */
+const TOOLS: readonly GuardTool[] = ['Bash', 'PowerShell', 'Write', 'Read']
+
+/** Tools whose input is a path rather than a command. */
+const PATH_TOOLS: readonly GuardTool[] = ['Write', 'Read']
 
 /**
  * "Try a command": shows what the guard would decide with the saved settings. The main process
@@ -61,7 +67,7 @@ export function GuardTryCommand({ projectId }: { projectId?: string }): React.JS
         <input
           className={`${inputClass} min-w-0 flex-1 font-mono [font-variant-ligatures:none]`}
           aria-label={t('guard.try.label')}
-          placeholder={t(`guard.try.placeholder.${tool === 'Write' ? 'path' : 'command'}`)}
+          placeholder={t(`guard.try.placeholder.${PATH_TOOLS.includes(tool) ? 'path' : 'command'}`)}
           spellCheck={false}
           maxLength={GUARD_LIMITS.maxEvaluateInput}
           value={input}

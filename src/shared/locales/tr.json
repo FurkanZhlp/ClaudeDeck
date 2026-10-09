@@ -892,7 +892,7 @@
         "systemDelete": "Kök dizini, bir sistem klasörünü, bir ev klasörünü veya proje klasörünü silme",
         "recursivePermissions": "Sistem veya ev klasörlerinde izinleri ya da sahipliği toplu olarak değiştirme",
         "forkBomb": "Çatallanma bombası (fork bomb)",
-        "uncheckable": "Denetlenemeyecek kadar uzun veya iç içe komutlar"
+        "uncheckable": "Korumanın denetleyemediği komut veya hedefler (çok uzun, çok iç içe, bilinmeyen yol, çok fazla küme genişlemesi)"
       },
       "sensitive": {
         "ssh": "~/.ssh içindeki dosyaları değiştirme",
@@ -1007,7 +1007,8 @@
       "ruleDefault": "Varsayılan ({{action}})",
       "ruleDefaultHint": "Bu kural, kategorisi Sor olarak ayarlı olsa bile varsayılan olarak reddeder. Kategori İzin ver olarak ayarlanırsa bu kurala da izin verilir.",
       "ruleCappedHint": "Bu denetim doğrudan engellenemeyecek kadar geniş olduğundan kategori ayarı en fazla Sor olarak uygulanır. Reddet seçeneği bu kural için kullanılamaz.",
-      "projectsHooksDisabled": "Şu projelerin Claude ayarlarında hook'lar kapalı olduğu için oradaki Claude komutları denetlenmez: {{projects}}"
+      "projectsHooksDisabled": "Şu projelerin Claude ayarlarında hook'lar kapalı olduğu için oradaki Claude komutları denetlenmez: {{projects}}",
+      "unavailable": "Komut koruması açık ama sunucusu çalışmıyor; sekmelerdeki araç çağrıları engelleniyor"
     },
     "confirm": {
       "title": "{{category}} kategorisindeki her şeye izin verilsin mi?",
@@ -1043,7 +1044,8 @@
       "tools": {
         "Bash": "Bash",
         "PowerShell": "PowerShell",
-        "Write": "Dosya yolu (Write)"
+        "Write": "Dosya yolu (Write)",
+        "Read": "Dosya okuma (Read)"
       },
       "label": "Denetlenecek komut veya yol",
       "placeholder": {
@@ -1086,6 +1088,11 @@
     "badge": {
       "hooksDisabled": "Bu projede hook'lar kapalı olduğu için komut koruması Claude'un komutlarını burada denetlemez",
       "hooksDisabledBoth": "Bu projede hook'lar kapalı olduğu için komut koruması ve test kuyruğu burada çalışmaz"
+    },
+    "event": {
+      "tamper": "ClaudeDeck'in hook dosyaları veya ayarları değiştirildi ve geri yüklendi",
+      "projectConfig": "Projenin Claude ayarları veya MCP sunucuları değişti",
+      "hooksDisabled": "Bu projede hook'lar kapalı; araç çağrıları korunmuyor"
     }
   },
   "assistant": {
