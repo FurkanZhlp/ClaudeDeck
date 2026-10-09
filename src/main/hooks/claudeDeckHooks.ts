@@ -213,6 +213,15 @@ export function createClaudeDeckHooks(deps: ClaudeDeckHooksDeps): ClaudeDeckHook
 
   /** Watches the hook files of guarded accounts and the settings of their projects. */
   function refreshWatches(): void {
+    try {
+      watchAll()
+    } catch (error) {
+      // Watching is a safety net; failing to watch must not stop installing hooks elsewhere.
+      console.warn('[hooks] could not refresh watches', error)
+    }
+  }
+
+  function watchAll(): void {
     if (!deps.watch) return
     const guardOn = deps.settings().guard.enabled
     const accounts = guardOn ? deps.accounts().filter((a) => installed.has(a.id)) : []

@@ -425,7 +425,14 @@ async function startMcp(): Promise<void> {
     console.error('[mcp] server did not start', error)
     mcp = null
   }
-  repo.get().accounts.forEach(prepareAccount)
+  // One account failing to prepare must not leave the others without guidelines, MCP or hooks.
+  for (const account of repo.get().accounts) {
+    try {
+      prepareAccount(account)
+    } catch (error) {
+      console.error('[accounts] could not prepare account', account.id, error)
+    }
+  }
 }
 
 function applyMenu(): void {
