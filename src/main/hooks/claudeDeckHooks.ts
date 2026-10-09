@@ -1,4 +1,4 @@
-import * as nodePath from 'node:path'
+import { join } from 'node:path'
 import type {
   Account,
   GuardSettings,
@@ -85,7 +85,6 @@ const PROJECT_FILES = /^(settings.*\.json|\.mcp\.json|\.claude)$/i
 export function createClaudeDeckHooks(deps: ClaudeDeckHooksDeps): ClaudeDeckHooks {
   const host = deps.host ?? currentHookHost()
   const fs = deps.fs ?? nodeHookStatusFs
-  const p = host.os === 'win32' ? nodePath.win32 : nodePath.posix
   const results = new Map<string, HookInstallResult>()
   /** Features last installed per account: the tamper check writes the same again. */
   const installed = new Map<string, HookFeatures>()
@@ -182,7 +181,7 @@ export function createClaudeDeckHooks(deps: ClaudeDeckHooksDeps): ClaudeDeckHook
 
   /** What in a project can switch hooks off or add hooks and MCP servers. */
   const projectPrint = (project: Project): string => {
-    const dir = p.join(project.path, '.claude')
+    const dir = join(project.path, '.claude')
     const pick = (file: string): unknown => {
       const json = fs.readJson(file)
       return json ? { off: json.disableAllHooks, hooks: json.hooks } : (json ?? null)
@@ -191,9 +190,9 @@ export function createClaudeDeckHooks(deps: ClaudeDeckHooksDeps): ClaudeDeckHook
       .list(dir)
       .filter((n) => /^settings.*\.json$/i.test(n))
       .sort()
-    const mcp = fs.readJson(p.join(project.path, '.mcp.json'))
+    const mcp = fs.readJson(join(project.path, '.mcp.json'))
     return JSON.stringify({
-      settings: names.map((n) => [n, pick(p.join(dir, n))]),
+      settings: names.map((n) => [n, pick(join(dir, n))]),
       mcp: mcp && typeof mcp.mcpServers === 'object' ? Object.keys(mcp.mcpServers ?? {}) : null
     })
   }
@@ -207,7 +206,7 @@ export function createClaudeDeckHooks(deps: ClaudeDeckHooksDeps): ClaudeDeckHook
     const account = accounts.find((a) => a.id === project.accountId)
     const accountSettings = account ? fs.readJson(settingsPath(account.configDir)) : undefined
     deps.onProjectConfig?.(project, {
-      file: p.join(project.path, '.claude'),
+      file: join(project.path, '.claude'),
       hooksDisabled: projectHooksDisabled(project.path, accountSettings, fs, host.os)
     })
   }
@@ -223,7 +222,7 @@ export function createClaudeDeckHooks(deps: ClaudeDeckHooksDeps): ClaudeDeckHook
       dirs.set(account.configDir, (name) => {
         if (name === null || ACCOUNT_FILES.has(name)) check()
       })
-      dirs.set(p.join(account.configDir, 'claudedeck'), check)
+      dirs.set(join(account.configDir, 'claudedeck'), check)
     }
     accountWatch.set(dirs)
     const ids = new Set(accounts.map((a) => a.id))
@@ -240,7 +239,7 @@ export function createClaudeDeckHooks(deps: ClaudeDeckHooksDeps): ClaudeDeckHook
         })
       }
       projectDirs.set(project.path, check)
-      projectDirs.set(p.join(project.path, '.claude'), check)
+      projectDirs.set(join(project.path, '.claude'), check)
     }
     for (const id of [...projectPrints.keys()]) {
       if (!projects.some((project) => project.id === id)) projectPrints.delete(id)
