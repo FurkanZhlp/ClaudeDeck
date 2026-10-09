@@ -22,8 +22,8 @@ const MAC_BASH: Row[] = [
   ['cp -r .ssh', 'cp -r ~/.ssh /tmp/k', 'deny', 'sensitive.keyRead'],
   ['backslash \\rm', '\\rm -rf ~', 'deny', 'disk.systemDelete'],
   ["ansi-c $'\\x72m'", "$'\\x72m' -rf ~", 'deny', 'disk.systemDelete'],
-  ['var head', 'x=rm; $x -rf ~', 'ask', 'disk.systemDelete'],
-  ['var head braces', 'x=rm; ${x} -rf ~', 'ask', 'disk.systemDelete'],
+  ['var head', 'x=rm; $x -rf ~', 'deny', 'disk.systemDelete'],
+  ['var head braces', 'x=rm; ${x} -rf ~', 'deny', 'disk.systemDelete'],
   ['tar .ssh', 'tar czf /tmp/k.tgz ~/.ssh', 'deny', 'sensitive.keyRead'],
   ['subst head', '$(echo rm) -rf ~', 'ask', 'disk.systemDelete'],
   ['zip -r .ssh', 'zip -r /tmp/k.zip ~/.ssh', 'deny', 'sensitive.keyRead'],
@@ -70,7 +70,12 @@ const MAC_BASH: Row[] = [
     'sensitive.gitconfig'
   ],
   ['glob mid ~/.ss?', 'rm -rf ~/.ss?', 'deny', 'sensitive.ssh'],
-  ['write .git/config via git', 'git config core.fsmonitor "rm -rf ~"', 'ask', 'git.execConfig'],
+  [
+    'write .git/config via git',
+    'git config core.fsmonitor "rm -rf ~"',
+    'deny',
+    'disk.systemDelete'
+  ],
   ['glob mid /U*/dev', 'rm -rf /U*/dev', 'deny', 'disk.systemDelete'],
   ['glob ~/D*', 'rm -rf ~/D*', 'deny', 'disk.systemDelete'],
   ['perl -i zshrc', "perl -pi -e 's/a/b/' ~/.zshrc", 'deny', 'sensitive.shellRc'],

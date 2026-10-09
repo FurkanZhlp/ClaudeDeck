@@ -1,17 +1,29 @@
-import { hasFlag, MAX_CODE, positionals, type Arg, type Cmd } from '../commands'
-import { expandBraces, globRules, hasGlob } from '../globs'
-import { CHANGE_API, codePaths, inlineCode, READ_API } from '../inlineCode'
+import { findInfo, hasFlag, MAX_CODE, positionals, type Arg, type Cmd } from '../commands'
+import { expandBraces, globRules, hasGlob, segmentMatches } from '../globs'
+import { CHANGE_API, codeClaudePaths, codePaths, inlineCode, READ_API } from '../inlineCode'
 import {
   globCandidates,
+  claudeDeckFolder,
+  inClaudeControlDir,
+  inSecretDir,
   isGuardKey,
   isCriticalDir,
   isSecretFile,
+  projectClaudeDir,
   protectedInside,
+  protectedTail,
   readsSecretDir,
   writeRule
 } from '../locations'
 import { globBase, isRoot, canon, resolveCollapsed, resolvePath, segments } from '../paths'
-import { deleteTargets, moveSources, readTargets, recursiveReads, writeTargets } from '../targets'
+import {
+  copyDestinations,
+  deleteTargets,
+  moveSources,
+  readTargets,
+  recursiveReads,
+  writeTargets
+} from '../targets'
 import { hit, type CmdDetector, type DetectContext, type Hit } from './types'
 
 /**
@@ -24,7 +36,7 @@ import { hit, type CmdDetector, type DetectContext, type Hit } from './types'
 const literalPrefix = (text: string): string => text.split(/[$%`]|^~[+-]/)[0]
 
 function resolveIn(text: string, cmd: Cmd, ctx: DetectContext): string | null {
-  return resolvePath(text, { ...ctx, cwd: cmd.cwd })
+  return resolvePath(text, { ...ctx, cwd: cmd.cwd, values: cmd.vars })
 }
 
 /** A target after brace expansion (POSIX shells only); null when it expands to too many. */
@@ -35,6 +47,25 @@ function expanded(target: Arg, cmd: Cmd): Arg[] | null {
 }
 
 const UNKNOWN_DETAIL = 'the target could not be told'
+const BRACE_DETAIL = 'it expands to too many paths to check'
+
+/**
+ * A changed path that cannot be told (`> "$X/.ssh/authorized_keys"`): what follows the unknown
+ * part is compared with protected names (denied when it names one); otherwise the call is
+ * asked about when `askUnknown`.
+ */
+function unknownTargetHits(text: string, cmd: Cmd, index: number, askUnknown: boolean): Hit[] {
+  const rule = protectedTail(text)
+  if (rule) return [hit(rule, cmd, index, { detail: UNKNOWN_DETAIL })]
+  return askUnknown
+    ? [hit('disk.uncheckable', cmd, index, { cap: 'ask', detail: UNKNOWN_DETAIL })]
+    : []
+}
+
+const PS_NON_FILE_DRIVE = /^["']?(env|variable|function|alias|cert|hk(lm|cu)|wsman):/i
+
+/** Unknown because of a variable or substitution (not only an unknown working folder). */
+const hasVariable = (a: Arg): boolean => a.opaque || /[$%`]|^~[+-]/.test(a.text)
 
 /** Hits for deleting `target`; `recursive` when folders go with everything inside them. */
 function deleteHits(
@@ -45,7 +76,7 @@ function deleteHits(
   ctx: DetectContext
 ): Hit[] {
   const unknown = (): Hit[] => {
-    if (!recursive) return []
+    if (!recursive) return unknownTargetHits(target.text, cmd, index, false)
     // `"${DIR:-}/"` or `"$EMPTY/"` may well be `/`.
     const collapsed = target.opaque ? null : resolveCollapsed(target.text, { ...ctx, cwd: cmd.cwd })
     if (collapsed && isCriticalDir(collapsed, ctx)) {
@@ -62,8 +93,7 @@ function deleteHits(
   }
   if (target.opaque) return unknown()
   const variants = expanded(target, cmd)
-  if (!variants)
-    return [hit('disk.systemDelete', cmd, index, { cap: 'ask', detail: UNKNOWN_DETAIL })]
+  if (!variants) return [hit('disk.uncheckable', cmd, index, { detail: BRACE_DETAIL })]
   if (variants.length > 1 || variants[0].text !== target.text) {
     return variants.flatMap((v) => deleteHits(v, recursive, cmd, index, ctx))
   }
@@ -78,6 +108,7 @@ function deleteHits(
   const path = resolveIn(target.text, cmd, ctx)
   if (path === null) return unknown()
   if (recursive && isCriticalDir(path, ctx)) return [hit('disk.systemDelete', cmd, index)]
+  if (recursive && projectClaudeDir(path, ctx)) return [hit('sensitive.claudeSettings', cmd, index)]
   const rule = writeRule(path, ctx)
   if (rule) return [hit(rule, cmd, index)]
   if (recursive) {
@@ -116,19 +147,166 @@ function globDeleteHits(
   return []
 }
 
-/** Rules of a written path, globs and braces included. */
-function writeHits(target: Arg, cmd: Cmd, index: number, ctx: DetectContext): Hit[] {
-  if (target.opaque) return []
-  const variants = expanded(target, cmd) ?? []
+/**
+ * Rules of a written path, globs and braces included. `copy`: the command copies, moves or
+ * extracts files there (a project's `.claude` folder as the destination is denied).
+ */
+function writeHits(target: Arg, cmd: Cmd, index: number, ctx: DetectContext, copy = false): Hit[] {
+  // PowerShell drives that are not files (`Set-Item env:X`, `variable:`, `function:`).
+  if (cmd.shell === 'powershell' && PS_NON_FILE_DRIVE.test(target.text)) return []
+  if (target.opaque) return unknownTargetHits(target.text, cmd, index, true)
+  const variants = expanded(target, cmd)
+  if (!variants) return [hit('disk.uncheckable', cmd, index, { detail: BRACE_DETAIL })]
   const hits: Hit[] = []
   for (const v of variants) {
     const path = resolveIn(v.text, cmd, ctx)
-    if (!path) continue
+    if (!path) {
+      hits.push(...unknownTargetHits(v.text, cmd, index, hasVariable(v)))
+      continue
+    }
     const rules = hasGlob(v.text) ? globRules(path, false, globCandidates(ctx), ctx.os) : []
     const rule = writeRule(path, ctx)
     for (const r of rule ? [rule, ...rules] : rules) hits.push(hit(r, cmd, index))
+    if (copy && projectClaudeDir(path, ctx)) hits.push(hit('sensitive.claudeSettings', cmd, index))
   }
   return hits
+}
+
+/** The guard key of an account, named directly or by a glob (`claudedeck/guard.k*`, `*`). */
+function namesGuardKey(path: string, glob: boolean, ctx: DetectContext): boolean {
+  if (isGuardKey(path, ctx)) return true
+  if (!glob) return false
+  const parts = segments(path, ctx.os)
+  const name = parts[parts.length - 1] ?? ''
+  const parent = parts[parts.length - 2] ?? ''
+  if (name === '**') return parts.some((p) => segmentMatches(p, 'claudedeck'))
+  return segmentMatches(name, 'guard.key') && segmentMatches(parent, 'claudedeck')
+}
+
+/**
+ * Brace expansion only rearranges the characters of a word: without a glob or a variable, it
+ * can only name the key when every letter of `guard.key` is in it (keeps long inputs fast).
+ */
+const mayNameKey = (text: string): boolean => {
+  if (/[*?[$%`]/.test(text)) return true
+  const lower = text.toLowerCase()
+  return [...'guardkey'].every((c) => lower.includes(c))
+}
+
+/** Texts of an argument that may be a path: as given, after `opt=` and after `@`. */
+function pathTexts(a: Arg): string[] {
+  const out = [a.text]
+  const eq = a.text.indexOf('=')
+  if (eq > 0) out.push(a.text.slice(eq + 1))
+  const at = a.text.indexOf('@')
+  if (at >= 0 && a.text[at + 1] !== '@') out.push(a.text.slice(at + 1))
+  return out
+}
+
+/**
+ * Any argument of any command that names an account's guard key: nothing but the hook needs
+ * it, so reading, copying or changing it is blocked whatever the command.
+ */
+function guardKeyHits(cmd: Cmd, index: number, ctx: DetectContext): Hit[] {
+  const words = [...cmd.args, ...cmd.redirects.map((r) => r.target)]
+  for (const a of words) {
+    if (a.opaque) continue
+    for (const text of pathTexts(a)) {
+      if (!mayNameKey(text)) continue
+      for (const v of expandBraces(text) ?? [text]) {
+        const path = resolveIn(v, cmd, ctx)
+        if (path && namesGuardKey(path, hasGlob(v), ctx))
+          return [hit('sensitive.claudedeck', cmd, index)]
+      }
+    }
+  }
+  return []
+}
+
+/** Quoted strings scanned for the guard key per input (PowerShell `[IO.File]::ReadAllText("...")`). */
+const MAX_LITERALS = 256
+
+/**
+ * Quoted strings anywhere in the input that name the guard key: covers forms no parser
+ * follows (.NET calls, inline code of any language).
+ */
+export function literalGuardKeyHits(input: string, ctx: DetectContext): Hit[] {
+  if (!/guard\.|claudedeck/i.test(input)) return []
+  let n = 0
+  for (const m of input.matchAll(/(["'])([^"'\n]{1,4096})\1/g)) {
+    if (++n > MAX_LITERALS) break
+    const text = m[2]
+    if (!/guard|claudedeck|\*|\?/i.test(text)) continue
+    const path = resolvePath(text, ctx)
+    if (path && namesGuardKey(path, hasGlob(text), ctx))
+      return [{ ruleId: 'sensitive.claudedeck', excerpt: input }]
+  }
+  return []
+}
+
+const READ_COMMANDS = new Set([
+  'cp',
+  'scp',
+  'rsync',
+  'cat',
+  'less',
+  'more',
+  'head',
+  'tail',
+  'base64',
+  'xxd',
+  'od',
+  'hexdump',
+  'strings',
+  'grep',
+  'awk',
+  'sed',
+  'diff',
+  'curl',
+  'nc',
+  'tar',
+  'zip',
+  'openssl',
+  'gpg',
+  'pbcopy',
+  'tee',
+  'dd',
+  'python',
+  'python3',
+  'node',
+  'perl',
+  'ruby'
+])
+
+/** `find ~ -name id_rsa -exec cat {} \;`: a reader run on the secret files a find selects. */
+function findReadHits(cmd: Cmd, index: number, ctx: DetectContext): Hit[] {
+  if (cmd.name !== 'find') return []
+  const execs: string[] = []
+  for (let i = 0; i < cmd.args.length; i++) {
+    if (/^-(exec|execdir|ok|okdir)$/.test(cmd.args[i].text) && cmd.args[i + 1])
+      execs.push(cmd.args[i + 1].text)
+  }
+  if (!execs.some((e) => READ_COMMANDS.has(e.replace(/^.*[\\/]/, '').toLowerCase()))) return []
+  const names: string[] = []
+  for (let i = 0; i < cmd.args.length; i++) {
+    if (/^-i?(name|path|wholename)$/.test(cmd.args[i].text) && cmd.args[i + 1])
+      names.push(cmd.args[i + 1].text.replace(/^.*\//, ''))
+  }
+  const { roots } = findInfo(cmd.args)
+  for (const root of roots.length ? roots : [{ text: '.', quoted: false, opaque: false }]) {
+    const path = root.opaque ? null : resolveIn(root.text, cmd, ctx)
+    if (path === null) continue
+    if (names.some((n) => segmentMatches(n, 'guard.key')))
+      return [hit('sensitive.claudedeck', cmd, index)]
+    const secretName = names.some((n) =>
+      ['id_rsa', 'id_ed25519', 'id_ecdsa', 'credentials', '.credentials.json', '.netrc'].some((s) =>
+        segmentMatches(n, s)
+      )
+    )
+    if (secretName || (!names.length && readsSecretDir(path, ctx, true)))
+      return [hit('sensitive.keyRead', cmd, index)]
+  }
+  return []
 }
 
 /** `find ROOT ... -delete` or `find ROOT | xargs rm`: deletes under the roots. */
@@ -264,6 +442,7 @@ function inlineCodeHits(cmd: Cmd, index: number, ctx: DetectContext): Hit[] {
   const stdin = cmd.redirects.flatMap((r) =>
     r.heredoc ? [r.heredoc.body] : r.op === '<<<' && !r.target.opaque ? [r.target.text] : []
   )
+  if (cmd.stdin !== undefined) stdin.push(cmd.stdin)
   const detail = 'in inline code'
   const hits: Hit[] = []
   for (const full of inlineCode({ name: cmd.name, args: cmd.args, stdin })) {
@@ -271,13 +450,34 @@ function inlineCodeHits(cmd: Cmd, index: number, ctx: DetectContext): Hit[] {
     const changes = CHANGE_API.test(code)
     const reads = READ_API.test(code)
     if (!changes && !reads) continue
+    if (changes) {
+      // `open(".claude/settings.local.json", "w")`: the project's Claude settings and hooks.
+      for (const text of codeClaudePaths(code)) {
+        const path = resolveIn(text, cmd, ctx)
+        if (!path) continue
+        const rule = writeRule(path, ctx)
+        // Code has no reason to write a project's Claude folder: denied, not asked about.
+        if (projectClaudeDir(path, ctx) && (!rule || rule === 'sensitive.projectAgentConfig'))
+          hits.push(hit('sensitive.claudeSettings', cmd, index, { detail }))
+        else if (rule) hits.push(hit(rule, cmd, index, { detail }))
+      }
+    }
     for (const text of codePaths(code)) {
       const path = resolvePath(text, { ...ctx, cwd: null })
       if (!path) continue
+      if (isGuardKey(path, ctx)) {
+        hits.push(hit('sensitive.claudedeck', cmd, index, { detail }))
+        continue
+      }
       if (reads && isSecretFile(path, ctx)) {
         hits.push(hit('sensitive.keyRead', cmd, index, { cap: 'ask', detail }))
       }
       if (!changes) continue
+      // ClaudeDeck's hook files and Claude's settings: no reason for code to change them.
+      if (inClaudeControlDir(path, ctx)) {
+        hits.push(hit(writeRule(path, ctx) ?? 'sensitive.claudedeck', cmd, index, { detail }))
+        continue
+      }
       if (isCriticalDir(path, ctx)) {
         hits.push(hit('disk.systemDelete', cmd, index, { cap: 'ask', detail }))
         continue
@@ -328,22 +528,31 @@ export const fileOps: CmdDetector = (cmd, index, ctx) => {
   hits.push(...permissionHits(cmd, index, ctx))
 
   if (!DELETERS.has(cmd.name)) {
-    for (const target of writeTargets(cmd)) hits.push(...writeHits(target, cmd, index, ctx))
+    const copies = new Set(copyDestinations(cmd).map((a) => a.text))
+    for (const target of writeTargets(cmd))
+      hits.push(...writeHits(target, cmd, index, ctx, copies.has(target.text)))
+    for (const dest of copyDestinations(cmd)) {
+      if (!dest.opaque && !writeTargets(cmd).some((t) => t.text === dest.text))
+        hits.push(...writeHits(dest, cmd, index, ctx, true))
+    }
   }
   for (const source of readTargets(cmd)) {
     if (source.opaque) continue
-    for (const v of expanded(source, cmd) ?? []) {
+    const variants = expanded(source, cmd)
+    if (!variants) {
+      hits.push(hit('disk.uncheckable', cmd, index, { cap: 'ask', detail: BRACE_DETAIL }))
+      continue
+    }
+    for (const v of variants) {
       const path = resolveIn(v.text, cmd, ctx)
-      if (path && isGuardKey(path, ctx)) {
-        hits.push(hit('sensitive.claudedeck', cmd, index))
-        break
-      }
-      if (path && isSecretFile(path, ctx)) {
+      if (path && isSecretFile(path, ctx) && !isGuardKey(path, ctx)) {
         hits.push(hit('sensitive.keyRead', cmd, index))
         break
       }
     }
   }
+  hits.push(...guardKeyHits(cmd, index, ctx))
+  hits.push(...findReadHits(cmd, index, ctx))
   hits.push(...secretDirHits(cmd, index, ctx))
   hits.push(...linkHits(cmd, index, ctx))
   hits.push(...unknownCommandHits(cmd, index, ctx))
@@ -358,4 +567,20 @@ export function fileToolHits(filePath: string, ctx: DetectContext): Hit[] {
   if (path === null) return []
   const rule = writeRule(path, ctx)
   return rule ? [{ ruleId: rule, excerpt: filePath }] : []
+}
+
+/**
+ * Read and Grep: only secrets are checked (private keys, credential files and folders, the
+ * guard key and ClaudeDeck's own folders); every other read is allowed. `folder`: Grep, which
+ * reads everything below its path.
+ */
+export function readToolHits(filePath: string, ctx: DetectContext, folder: boolean): Hit[] {
+  const path = resolvePath(filePath, ctx)
+  if (path === null) return []
+  const excerpt = filePath
+  if (namesGuardKey(path, hasGlob(filePath), ctx) || claudeDeckFolder(path, ctx, folder))
+    return [{ ruleId: 'sensitive.claudedeck', excerpt }]
+  if (isSecretFile(path, ctx)) return [{ ruleId: 'sensitive.keyRead', excerpt }]
+  if (folder && inSecretDir(path, ctx)) return [{ ruleId: 'sensitive.keyRead', excerpt }]
+  return []
 }

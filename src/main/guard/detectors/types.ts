@@ -19,6 +19,10 @@ export interface DetectContext extends LocationEnv {
   input: string
   /** Current branch of the working folder; null when not on a branch, undefined when unknown. */
   gitBranch?: string | null
+  /** Port of ClaudeDeck's hook server (`lsof -ti :PORT | xargs kill`). */
+  hookPort?: number
+  /** ClaudeDeck's own process ids (`kill -STOP <pid>`). */
+  ownPids?: readonly number[]
 }
 
 /** Looks at one command; `all` is the whole list (pipelines, earlier downloads). */

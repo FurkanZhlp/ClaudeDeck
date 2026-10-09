@@ -1,9 +1,11 @@
 import {
+  claudeScript,
   cmdName,
   cmdScript,
   full,
   nested,
   newState,
+  packageRunner,
   parsePosix,
   powershellScript,
   push,
@@ -502,6 +504,8 @@ function startProcess(cmd: Cmd, state: ParseState): void {
     .filter(Boolean)
     .map((text) => ({ text, quoted: false, opaque: false }))
   const name = cmdName(file.text)
+  // `-UseNewEnvironment` starts the program without the tab's variables.
+  const fresh = psParam(cmd.args, 'usenewenvironment', 2)
   nested(state, 'process', () => {
     push(state, {
       name,
@@ -509,7 +513,8 @@ function startProcess(cmd: Cmd, state: ParseState): void {
       redirects: [],
       raw: cmd.raw,
       pipeline: state.nextPipeline++,
-      shell: 'cmd'
+      shell: 'cmd',
+      ...(fresh ? { env: { set: [], unset: ['*'] } } : {})
     })
     followNative(name, words, state)
   })
@@ -518,6 +523,27 @@ function startProcess(cmd: Cmd, state: ParseState): void {
 /** Native programs started from PowerShell that wrap another command line. */
 function followNative(name: string, args: Arg[], state: ParseState): void {
   const texts = args.map((a) => a.text)
+  // `npx @anthropic-ai/claude-code ...`, `node .../claude-code/cli.js ...`.
+  const words = [name, ...texts].map((text) => ({
+    text,
+    quoted: false,
+    opaque: false,
+    assignable: false
+  }))
+  const runs = packageRunner(name, words) ?? claudeScript(name, words)
+  if (runs?.length) {
+    const inner = cmdName(runs[0].text)
+    nested(state, 'runner', () => {
+      push(state, {
+        name: inner,
+        args: runs.slice(1).map((w) => ({ text: w.text, quoted: false, opaque: false })),
+        redirects: [],
+        raw: [name, ...texts].join(' '),
+        pipeline: state.nextPipeline++,
+        shell: 'cmd'
+      })
+    })
+  }
   if (name === 'cmd') {
     const script = cmdScript(texts)
     if (script) nested(state, 'cmd', () => parseCmd(script, state))

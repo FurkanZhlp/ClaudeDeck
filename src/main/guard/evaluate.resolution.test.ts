@@ -79,7 +79,10 @@ describe('guard: Monitor and other tools', () => {
   })
   it('allows tools it does not know and malformed input', () => {
     const ctx = context('mac')
-    expect(evaluateGuard('Read', { file_path: '/Users/dev/.ssh/id_rsa' }, ctx)).toEqual({
+    expect(evaluateGuard('Glob', { pattern: '/Users/dev/.ssh/id_rsa' }, ctx)).toEqual({
+      action: 'allow'
+    })
+    expect(evaluateGuard('Read', { file_path: '/Users/dev/notes.txt' }, ctx)).toEqual({
       action: 'allow'
     })
     expect(evaluateGuard('Bash', null, ctx)).toEqual({ action: 'allow' })

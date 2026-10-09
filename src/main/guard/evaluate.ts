@@ -13,7 +13,7 @@ import { databaseRules } from './detectors/database'
 import { diskTools, forkBomb } from './detectors/disk'
 import { dockerRules } from './detectors/docker'
 import { fetchExecRules } from './detectors/fetchExec'
-import { fileOps, fileToolHits } from './detectors/files'
+import { fileOps, fileToolHits, literalGuardKeyHits, readToolHits } from './detectors/files'
 import { gitRules } from './detectors/git'
 import { publishRules } from './detectors/publish'
 import { systemRules } from './detectors/system'
@@ -33,6 +33,10 @@ export interface GuardContext extends LocationEnv {
   projectOverrides?: ProjectGuard
   /** Current branch of the working folder (rebase rule); null when not on a branch. */
   gitBranch?: string | null
+  /** Port of ClaudeDeck's hook server, when it runs. */
+  hookPort?: number
+  /** ClaudeDeck's own process ids. */
+  ownPids?: readonly number[]
 }
 
 /** Longer inputs are not parsed: they are denied as uncheckable (`disk.uncheckable`). */
@@ -65,6 +69,11 @@ const FILE_TOOLS: Record<string, string> = {
   Edit: 'file_path',
   MultiEdit: 'file_path',
   NotebookEdit: 'notebook_path'
+}
+/** Read-only tools: only secrets are checked (`folder`: Grep reads everything below it). */
+const READ_TOOLS: Record<string, { key: string; folder: boolean }> = {
+  Read: { key: 'file_path', folder: false },
+  Grep: { key: 'path', folder: true }
 }
 
 interface Scored {
@@ -153,7 +162,7 @@ function commandResults(input: string, parsed: ParseState, ctx: GuardContext): S
       }
     }
   })
-  for (const h of forkBomb(detect)) {
+  for (const h of [...forkBomb(detect), ...literalGuardKeyHits(input, detect)]) {
     const s = score(h, ctx)
     if (s) results.push(s)
   }
@@ -186,6 +195,7 @@ const parseContext = (ctx: GuardContext): ParseContext => ({
   home: ctx.home,
   os: ctx.os,
   env: ctx.env,
+  configDir: ctx.configDir,
   powershell: parsePowerShell,
   cmd: parseCmd
 })
@@ -238,6 +248,14 @@ export function evaluateGuard(
     if (typeof path !== 'string' || !path) return { action: 'allow' }
     const detect: DetectContext = { ...ctx, input: path }
     results = fileToolHits(path, detect)
+      .map((h) => score(h, ctx))
+      .filter((s): s is Scored => !!s)
+  } else if (READ_TOOLS[toolName]) {
+    const { key, folder } = READ_TOOLS[toolName]
+    const path = input[key]
+    if (typeof path !== 'string' || !path) return { action: 'allow' }
+    const detect: DetectContext = { ...ctx, input: path }
+    results = readToolHits(path, detect, folder)
       .map((h) => score(h, ctx))
       .filter((s): s is Scored => !!s)
   } else {

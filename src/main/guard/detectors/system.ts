@@ -1,7 +1,7 @@
 import { isSafeRegex } from '../../../shared/safeRegex'
 import { positionals, type Arg, type Cmd } from '../commands'
 import { psParam, psValue } from '../targets'
-import { hit, type CmdDetector, type Hit } from './types'
+import { hit, type CmdDetector, type DetectContext, type Hit } from './types'
 
 /** Administrator commands, broad kills, shutdowns and service changes. */
 
@@ -105,13 +105,25 @@ function killHits(cmd: Cmd, index: number): Hit[] {
 /* ClaudeDeck's own processes ------------------------------------------------------------------ */
 
 /** Process names of ClaudeDeck, Claude and the hook script (which runs under sh). */
-const OWN_NAMES = ['claude', 'claudedeck', 'ClaudeDeck', 'ClaudeDeck Helper', 'sh', 'bash']
+const OWN_NAMES = [
+  'claude',
+  'claudedeck',
+  'ClaudeDeck',
+  'ClaudeDeck Helper',
+  'ClaudeDeck Helper (Renderer)',
+  'Electron',
+  'Electron Helper',
+  'sh',
+  'bash'
+]
 /** Command lines `pkill -f` patterns are matched against. */
 const OWN_COMMAND_LINES = [
   '/bin/sh /Users/dev/Library/Application Support/ClaudeDeck/accounts/a1/claudedeck/hook.sh pre',
   '/bin/sh C:/Users/dev/AppData/Roaming/ClaudeDeck/accounts/a1/claudedeck/hook.sh pre',
   '/Applications/ClaudeDeck.app/Contents/MacOS/ClaudeDeck',
   'C:\\Users\\dev\\AppData\\Local\\Programs\\ClaudeDeck\\ClaudeDeck.exe',
+  '/Users/dev/ClaudeDeck/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron .',
+  '/Applications/ClaudeDeck.app/Contents/Frameworks/ClaudeDeck Helper.app/Contents/MacOS/ClaudeDeck Helper --type=utility',
   'claude --resume 0f0e',
   'node /usr/local/bin/claude --resume 0f0e'
 ]
@@ -154,20 +166,96 @@ function namesOwn(name: string): boolean {
 /** Text that names ClaudeDeck's processes (`$(pgrep -f hook.sh)`, `$PPID`). */
 const OWN_TEXT = /hook\.sh|claudedeck|\bclaude\b|\$\{?PPID\b/i
 
-function ownProcessHits(cmd: Cmd, index: number, all: Cmd[]): Hit[] {
+/** Ports an `lsof -i` selection names (`:47321`, `TCP:47321`, `@127.0.0.1:47321`). */
+function lsofPorts(cmd: Cmd): { ports: number[]; network: boolean; unknown: boolean } {
+  const ports: number[] = []
+  let network = false
+  let unknown = false
+  const args = cmd.args
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i].text
+    const glued = /^-[a-zA-Z]*i(.*)$/.exec(t)
+    if (!glued && !/^:/.test(t)) continue
+    network = true
+    const spec = glued
+      ? glued[1] || (args[i + 1] && !args[i + 1].text.startsWith('-') ? args[++i].text : '')
+      : t
+    if (args[i]?.opaque || /[$`]/.test(spec)) unknown = true
+    for (const m of spec.matchAll(/:(\d+)(?:-(\d+))?/g)) {
+      const from = Number(m[1])
+      const to = Number(m[2] ?? m[1])
+      if (to - from > 1000) unknown = true
+      else for (let p = from; p <= to; p++) ports.push(p)
+    }
+  }
+  return { ports, network, unknown }
+}
+
+/** `lsof -ti :<hook port> | xargs kill`: the feeder selects ClaudeDeck's hook server. */
+function lsofSelectsOwn(feeder: Cmd, ctx: DetectContext): 'own' | 'unknown' | null {
+  const { ports, network, unknown } = lsofPorts(feeder)
+  if (!network) {
+    // `lsof -t <file>`: the processes holding ClaudeDeck's files open.
+    const files = feeder.args.filter((a) => !a.text.startsWith('-'))
+    return files.some((a) => /claudedeck/i.test(a.text)) ? 'own' : null
+  }
+  if (unknown) return 'unknown'
+  if (!ports.length) return 'own'
+  if (ctx.hookPort === undefined) return null
+  return ports.includes(ctx.hookPort) ? 'own' : null
+}
+
+function ownProcessHits(cmd: Cmd, index: number, all: Cmd[], ctx: DetectContext): Hit[] {
   const { name, args } = cmd
   const one = (): Hit[] => [hit('sensitive.claudedeckProcess', cmd, index)]
   const texts = args.map((a) => a.text)
   if (name === 'kill' && cmd.shell !== 'powershell') {
     if (texts.some((t) => OWN_TEXT.test(t) && (/[$`]/.test(t) || /hook\.sh/.test(t)))) return one()
-    // `pgrep -f hook.sh | xargs kill`
+    // `kill -STOP 4242` with ClaudeDeck's own process id.
+    const own = ctx.ownPids ?? []
+    if (texts.some((t) => /^\d+$/.test(t) && own.includes(Number(t)))) return one()
+    // `pgrep -f hook.sh | xargs kill`, `lsof -ti :<hook port> | xargs kill`
     if (cmd.via.includes('xargs')) {
-      const feeder = all.find(
-        (c) =>
-          c.pipeline === cmd.pipeline && (c.name === 'pgrep' || c.name === 'pidof') && c !== cmd
-      )
-      if (feeder && ownProcessHits({ ...feeder, name: 'pkill' }, index, all).length) return one()
+      const feeders = all.filter((c) => c.pipeline === cmd.pipeline && c !== cmd)
+      const pgrep = feeders.find((c) => c.name === 'pgrep' || c.name === 'pidof')
+      if (pgrep && ownProcessHits({ ...pgrep, name: 'pkill' }, index, all, ctx).length) return one()
+      const lsof = feeders.find((c) => c.name === 'lsof')
+      const selects = lsof ? lsofSelectsOwn(lsof, ctx) : null
+      if (selects === 'own') return one()
+      if (selects === 'unknown')
+        return [hit('sensitive.claudedeckProcess', cmd, index, { cap: 'ask' })]
     }
+    // `kill $(lsof -ti :<hook port>)`
+    if (texts.some((t) => /[$`]/.test(t) && /\blsof\b/.test(t))) {
+      const lsof = all.find((c) => c.name === 'lsof' && c.via.includes('substitution'))
+      const selects = lsof ? lsofSelectsOwn(lsof, ctx) : null
+      if (selects === 'own') return one()
+      if (selects === 'unknown')
+        return [hit('sensitive.claudedeckProcess', cmd, index, { cap: 'ask' })]
+    }
+    return []
+  }
+  if (name === 'osascript') {
+    // `osascript -e 'quit app "ClaudeDeck"'`, `tell application "ClaudeDeck" to quit`.
+    const code = texts.join('\n')
+    if (
+      /\bquit\s+(app|application)\s+(id\s+)?["'](ClaudeDeck|Electron)/i.test(code) ||
+      /\btell\s+(app|application)\s+(id\s+)?["'](ClaudeDeck|Electron)[^"']*["']\s+to\s+quit\b/i.test(
+        code
+      ) ||
+      /\bkill\b[^\n]*\b(ClaudeDeck|Electron)\b/i.test(code)
+    )
+      return one()
+    return []
+  }
+  if (name === 'netsh' && ctx.hookPort !== undefined) {
+    // A firewall rule blocking the hook server's port.
+    const code = texts.join(' ')
+    if (
+      /\bblock\b/i.test(code) &&
+      new RegExp(`port=([\\d,-]*,)?${ctx.hookPort}\\b`, 'i').test(code)
+    )
+      return one()
     return []
   }
   if (name === 'pkill' || name === 'pgrep') {
@@ -220,7 +308,7 @@ function ownProcessHits(cmd: Cmd, index: number, all: Cmd[]): Hit[] {
 
 /* Login items, launch agents and scheduled jobs --------------------------------------------- */
 
-const LAUNCHCTL_ADD = /^(load|bootstrap|enable|submit|kickstart)$/
+const LAUNCHCTL_ADD = /^(load|bootstrap|enable|submit|kickstart|setenv|unsetenv|config)$/
 const PS_AUTOSTART = new Set([
   'register-scheduledtask',
   'new-scheduledtask',
@@ -308,9 +396,9 @@ function elevation(cmd: Cmd, index: number): Hit[] {
   return []
 }
 
-export const systemRules: CmdDetector = (cmd, index, _ctx, all) => [
+export const systemRules: CmdDetector = (cmd, index, ctx, all) => [
   ...elevation(cmd, index),
-  ...ownProcessHits(cmd, index, all),
+  ...ownProcessHits(cmd, index, all, ctx),
   ...killHits(cmd, index),
   ...shutdownOrService(cmd, index),
   ...autostartHits(cmd, index),

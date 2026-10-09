@@ -137,7 +137,7 @@ function segmentRegex(glob: string): RegExp {
 }
 
 /** A glob segment can name `part`. Leading dots are only matched by a literal dot. */
-function segmentMatches(glob: string, part: CandidatePart): boolean {
+export function segmentMatches(glob: string, part: CandidatePart): boolean {
   if (typeof part !== 'string') return part.dot || !glob.startsWith('.')
   if (part.startsWith('.') && !glob.startsWith('.')) return false
   if (!hasGlob(glob)) return glob === part

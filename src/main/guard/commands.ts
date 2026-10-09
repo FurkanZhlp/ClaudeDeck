@@ -7,8 +7,14 @@ import {
   type Segment,
   type Word
 } from '../shell/shellLexer'
-import { embeddedShell, inlineCode } from './inlineCode'
-import { resolvePath, type PathEnv } from './paths'
+import {
+  embeddedShell,
+  inlineCode,
+  isInterpreter,
+  opaqueShellCall,
+  terminalScripts
+} from './inlineCode'
+import { expandPath, resolvePath, type PathEnv } from './paths'
 
 /**
  * The guard's view of a command line: every simple command it would run, with wrappers
@@ -51,6 +57,10 @@ export interface Cmd {
   unknownArgs?: boolean
   /** A shell reading its script from standard input the guard cannot see. */
   unknownScript?: boolean
+  /** Variables with a known value when the command runs (`X=~/.ssh; echo k >> $X/k`). */
+  vars?: ReadonlyMap<string, string>
+  /** Text an interpreter reads on standard input (`echo 'code' | python3`), when known. */
+  stdin?: string
 }
 
 export interface ParseContext extends PathEnv {
@@ -79,6 +89,17 @@ export interface ParseState {
   aliases: Map<string, Word[]>
   /** PowerShell variables assigned a literal string (`$c = "..."`). */
   psVars: Map<string, string>
+  /**
+   * Variables assigned a known value once, unconditionally, at the top level. Replaced (never
+   * changed in place) on every update, so each command keeps the values of its own position.
+   */
+  values: Map<string, string>
+  /** Values are only tracked in inputs without subshells, groups or functions. */
+  trackValues: boolean
+  /** `if`/`while`/`for`/`case` blocks open at the current segment. */
+  blockDepth: number
+  /** Commands added now run with an emptied environment (a new terminal, a tmux server). */
+  clearedEnv: boolean
 }
 
 /** Nested shells, substitutions and wrappers followed before giving up. */
@@ -152,7 +173,11 @@ export const newState = (ctx: ParseContext): ParseState => ({
   argCount: 0,
   assigned: new Set(),
   aliases: new Map(),
-  psVars: new Map()
+  psVars: new Map(),
+  values: new Map(),
+  trackValues: true,
+  blockDepth: 0,
+  clearedEnv: false
 })
 
 /** Runs `fn` one level deeper with an extra wrapper name; stops at MAX_DEPTH. */
@@ -196,7 +221,16 @@ export function push(
     state.truncated = true
     state.oversized = true
   }
-  const full: Cmd = { ...cmd, cwd: cmd.cwd === undefined ? state.cwd : cmd.cwd, via: state.via }
+  const env = state.clearedEnv
+    ? { set: cmd.env?.set ?? [], unset: [...(cmd.env?.unset ?? []), '*'] }
+    : cmd.env
+  const full: Cmd = {
+    ...cmd,
+    ...(env ? { env } : {}),
+    ...(state.values.size ? { vars: state.values } : {}),
+    cwd: cmd.cwd === undefined ? state.cwd : cmd.cwd,
+    via: state.via
+  }
   state.cmds.push(full)
   return full
 }
@@ -259,6 +293,7 @@ const WRAPPER_FLAGS: Record<string, ReadonlySet<string>> = {
 
 const SIMPLE_WRAPPERS = set(
   'nohup',
+  'setsid',
   'command',
   'builtin',
   'exec',
@@ -324,6 +359,7 @@ function afterFlags(words: Word[], from: number, valueFlags: ReadonlySet<string>
 function innerWords(name: string, words: Word[]): Word[] | null {
   switch (name) {
     case 'nohup':
+    case 'setsid':
     case 'builtin':
     case 'caffeinate':
     case 'chronic':
@@ -484,7 +520,7 @@ const RUN_FLAGS = set(
 )
 
 /** `npx foo`, `pnpm exec foo`, `pnpm dlx foo`, `bun x foo`, `pnpm prisma ...`. */
-function packageRunner(name: string, words: Word[]): Word[] | null {
+export function packageRunner(name: string, words: Word[]): Word[] | null {
   if (NPX_LIKE.has(name)) {
     const rest = words.slice(afterFlags(words, 1, WRAPPER_FLAGS.npx))
     return rest.length ? [withoutVersion(rest[0]), ...rest.slice(1)] : null
@@ -678,19 +714,45 @@ function withAlias(words: Word[], state: ParseState): Word[] {
   return value && value.length ? [...value, ...words.slice(1)] : words
 }
 
+const BLOCK_OPEN = set('if', 'while', 'until', 'for', 'case', 'select', '{')
+const BLOCK_CLOSE = set('fi', 'done', 'esac', '}')
+
+/** Follows `if ... fi`, `for ... done`, `{ ... }`: assignments inside them are conditional. */
+function trackBlocks(words: Word[], state: ParseState): void {
+  for (const w of words) {
+    if (w.quoted || w.opaque) break
+    if (BLOCK_OPEN.has(w.text)) state.blockDepth++
+    else if (BLOCK_CLOSE.has(w.text)) state.blockDepth = Math.max(0, state.blockDepth - 1)
+    else if (!KEYWORDS.has(w.text)) break
+  }
+}
+
+/** Subshells, brace groups and functions: assignments may not reach the commands after them. */
+const UNTRACKABLE = /(^|[^$<>])\(|(^|[\s;&|])\{(\s|$)|\bfunction\b/
+
 /** Parses a POSIX shell command line into `state.cmds`. */
 export function parsePosix(input: string, state: ParseState): void {
   const { segments, truncated } = lexInfo(input)
   if (truncated) state.truncated = true
+  if (state.depth === 0 && UNTRACKABLE.test(input)) state.trackValues = false
   let pipeline = state.nextPipeline++
   let feeder: Cmd | null = null
+  let previousOp = ''
   for (const segment of segments) {
     if (full(state)) {
       state.truncated = true
       return
     }
     const before = state.cmds.length
-    addSegment(segment, state, pipeline, feeder)
+    trackBlocks(segment.words, state)
+    const certain =
+      state.trackValues &&
+      state.depth === 0 &&
+      state.blockDepth === 0 &&
+      CERTAIN_BEFORE.has(previousOp) &&
+      !BACKGROUND_AFTER.has(segment.op)
+    addSegment(segment, state, pipeline, feeder, certain)
+    previousOp = segment.op
     // The pipeline's next command reads what the first command of this segment writes.
     const first = state.cmds[before]
     if (segment.op === '|' || segment.op === '|&') {
@@ -702,11 +764,82 @@ export function parsePosix(input: string, state: ParseState): void {
   }
 }
 
+/** Operators after which the next segment always runs. */
+const CERTAIN_BEFORE = set('', ';', '\n')
+/** Operators that run the segment in a subshell (its assignments are lost). */
+const BACKGROUND_AFTER = set('|', '|&', '&')
+/** Variables whose value changes how later commands run or resolve: never taken as known. */
+const UNTRACKED = set('HOME', 'PATH', 'IFS', 'CDPATH', 'PWD', 'OLDPWD', 'SHELL', 'BASH_ENV', 'ENV')
+/**
+ * Variables holding a command line other programs run (`GIT_PAGER='cmd' git log`): the value
+ * is checked as a command.
+ */
+const COMMAND_VARS = set(
+  'PAGER',
+  'GIT_PAGER',
+  'MANPAGER',
+  'SYSTEMD_PAGER',
+  'EDITOR',
+  'VISUAL',
+  'GIT_EDITOR',
+  'GIT_SEQUENCE_EDITOR',
+  'GIT_SSH_COMMAND',
+  'GIT_SSH',
+  'GIT_ASKPASS',
+  'SSH_ASKPASS',
+  'SUDO_ASKPASS',
+  'GIT_EXTERNAL_DIFF',
+  'BROWSER',
+  'LESSOPEN',
+  'LESSCLOSE',
+  'PROMPT_COMMAND'
+)
+const MAX_VALUES = 64
+
+/** Path context of the parser at this point (folder, unknown and known variables). */
+export const pathEnvOf = (state: ParseState): PathEnv => ({
+  ...state.ctx,
+  cwd: state.cwd,
+  shadowed: state.assigned,
+  values: state.values
+})
+
+/**
+ * Records `NAME=value`: a single unconditional assignment of a value that can be told makes it
+ * known; anything else makes it unknown for the rest of the input.
+ */
+function assignValue(state: ParseState, name: string, text: string | null, certain: boolean): void {
+  if (!name) return
+  const seen = state.values.has(name) || state.assigned.has(name)
+  let value: string | null = null
+  if (certain && !seen && text !== null && !UNTRACKED.has(name) && state.values.size < MAX_VALUES)
+    value = expandPath(text, pathEnvOf(state))
+  if (value) {
+    state.values = new Map(state.values).set(name, value)
+    return
+  }
+  if (state.values.has(name)) {
+    const next = new Map(state.values)
+    next.delete(name)
+    state.values = next
+  }
+  state.assigned.add(name)
+}
+
+/** `NAME=value` words: their value is checked as a command when the variable holds one. */
+function commandVar(w: Word, state: ParseState): void {
+  const m = ASSIGNMENT_NAME.exec(w.text)
+  if (!m || !COMMAND_VARS.has(m[1])) return
+  const value = w.text.slice(m[0].length).replace(/^\|/, '')
+  if (value.trim()) nested(state, 'shell', () => parsePosix(value, state))
+}
+
 function addSegment(
   segment: Segment,
   state: ParseState,
   pipeline: number,
-  feeder: Cmd | null
+  feeder: Cmd | null,
+  certain = false
 ): void {
   const redirects: Cmd['redirects'] = segment.redirects.map((r) =>
     r.heredoc
@@ -717,21 +850,28 @@ function addSegment(
   for (const r of segment.redirects) if (r.heredoc?.expands) followText(r.heredoc.body, state)
   let words = withoutKeywords(segment.words)
   const assigned: string[] = []
+  const assignments: Word[] = []
   let i = 0
   while (i < words.length && words[i].assignable) {
     assigned.push(ASSIGNMENT_NAME.exec(words[i].text)?.[1] ?? '')
+    assignments.push(words[i])
+    commandVar(words[i], state)
     followSubstitutions(words[i++], state)
   }
   words = words.slice(i)
   if (!words.length) {
     // `X=/` on its own sets X for the rest of the line.
-    for (const name of assigned) if (name) state.assigned.add(name)
+    for (const w of assignments) {
+      const m = ASSIGNMENT_NAME.exec(w.text)
+      const plain = !!m && !m[0].endsWith('+=') && !w.opaque
+      assignValue(state, m?.[1] ?? '', plain ? w.text.slice(m[0].length) : null, certain)
+    }
     if (redirects.length) {
       push(state, { name: '', args: [], redirects, raw: segment.raw, pipeline, shell: 'posix' })
     }
     return
   }
-  for (const name of assignedNames(words)) state.assigned.add(name)
+  declared(words, state, certain)
   words = withAlias(words, state)
   const fromFind = feeder?.name === 'find' ? findInfo(feeder.args) : null
   addWords(words, state, {
@@ -747,16 +887,38 @@ function addSegment(
   const name = cmdName(words[0].text)
   if (name === 'cd' || name === 'pushd') {
     const target = words.slice(1).find((w) => !w.text.startsWith('-'))
+    // CDPATH makes a relative folder name relative to other folders.
+    const cdpath =
+      assigned.includes('CDPATH') || state.assigned.has('CDPATH') || !!state.ctx.env.CDPATH
     if (!target) state.cwd = state.ctx.home
     else if (target.opaque || target.text === '-') state.cwd = null
-    else
-      state.cwd = resolvePath(target.text, {
-        ...state.ctx,
-        cwd: state.cwd,
-        shadowed: state.assigned
-      })
+    else if (cdpath && !/^([\\/~$]|[A-Za-z]:)/.test(target.text)) state.cwd = null
+    else state.cwd = resolvePath(target.text, pathEnvOf(state))
   }
 }
+
+/** `export X=1`, `read X`, `unset X`, `for X in`: values set, read or removed by a builtin. */
+function declared(words: Word[], state: ParseState, certain: boolean): void {
+  const head = words[0].quoted ? '' : words[0].text
+  if (DECLARE.has(head)) {
+    for (const w of words.slice(1)) {
+      if (w.text.startsWith('-') && !w.quoted) continue
+      commandVar(w, state)
+      const m = ASSIGNMENT_NAME.exec(w.text)
+      if (!m) {
+        // `export X` keeps the value; `local X` and `declare X` may empty it.
+        if (head !== 'export' && VAR_NAME.test(w.text)) assignValue(state, w.text, null, false)
+        continue
+      }
+      const plain = !m[0].endsWith('+=') && !w.opaque && head !== 'local'
+      assignValue(state, m[1], plain ? w.text.slice(m[0].length) : null, certain)
+    }
+    return
+  }
+  for (const name of assignedNames(words)) assignValue(state, name, null, false)
+}
+
+const DECLARE = set('export', 'declare', 'typeset', 'readonly', 'local')
 
 interface SegmentInfo {
   raw: string
@@ -823,10 +985,14 @@ function addWords(input: Word[], state: ParseState, info: SegmentInfo): void {
   if (!words[0].quoted && !words[0].opaque && /^=[^=]/.test(words[0].text)) {
     words = [{ ...words[0], text: words[0].text.slice(1) }, ...words.slice(1)]
   }
+  // `c=claude; $c --bare`: a variable with a known value is the command it holds.
+  const held = heldCommand(words[0], state)
+  if (held) words = [...held, ...words.slice(1)]
   const head = words[0]
-  const name = head.opaque ? head.text.toLowerCase() : cmdName(head.text)
+  const name = gnuName(head.opaque ? head.text.toLowerCase() : cmdName(head.text))
   const args = words.slice(1).map(arg)
   const viaXargs = state.via[state.via.length - 1] === 'xargs'
+  const stdin = isInterpreter(name) ? stdinText(info) : null
   const self = push(state, {
     name,
     args,
@@ -836,12 +1002,16 @@ function addWords(input: Word[], state: ParseState, info: SegmentInfo): void {
     shell: 'posix',
     ...(info.env.set.length || info.env.unset.length ? { env: info.env } : {}),
     ...(info.unknownArgs ? { unknownArgs: true } : {}),
+    ...(stdin !== null ? { stdin } : {}),
     ...(info.fromFind && (viaXargs || name === 'xargs')
       ? { findRoots: info.fromFind.roots, findFiltered: info.fromFind.filtered }
       : {})
   })
   for (const w of words) followSubstitutions(w, state)
   for (const r of info.redirects) if (r.target.opaque) followText(r.target.text, state)
+  // `IFS=_; cmd=rm_-rf_~; $cmd`: word splitting the guard does not follow.
+  if (self && /[$`]/.test(head.text) && (state.assigned.has('IFS') || state.values.has('IFS')))
+    self.unknownScript = true
 
   const inner = (
     via: string,
@@ -851,7 +1021,10 @@ function addWords(input: Word[], state: ParseState, info: SegmentInfo): void {
     if (!next) return false
     if (!next.length) return true
     let k = 0
-    const env = { set: [...info.env.set], unset: [...info.env.unset, ...(extra.env?.unset ?? [])] }
+    const env = {
+      set: [...info.env.set, ...(extra.env?.set ?? [])],
+      unset: [...info.env.unset, ...(extra.env?.unset ?? [])]
+    }
     while (k < next.length && next[k].assignable) {
       env.set.push(ASSIGNMENT_NAME.exec(next[k].text)?.[1] ?? '')
       k++
@@ -877,6 +1050,11 @@ function addWords(input: Word[], state: ParseState, info: SegmentInfo): void {
   }
   if (name === 'env') {
     envWrapper(words, inner, script)
+    return
+  }
+  // `exec -c cmd` runs cmd with an empty environment.
+  if (name === 'exec' && words.slice(1).some((w) => /^-[a-z]*c[a-z]*$/.test(w.text))) {
+    inner('exec', innerWords('exec', words), { env: { set: [], unset: ['*'] } })
     return
   }
   if (SIMPLE_WRAPPERS.has(name)) {
@@ -932,15 +1110,168 @@ function addWords(input: Word[], state: ParseState, info: SegmentInfo): void {
     }
     return
   }
-  if (otherRunners(name, words, state, info, inner, script)) return
+  if (otherRunners(name, words, state, info, inner, script, self)) return
   if (name === 'bundle' && words[1]?.text === 'exec') {
     inner('runner', words.slice(2))
     return
   }
   if (/^python[\d.]*$/.test(name) && inner('python', pythonModule(words))) return
-  embedded(name, args, info, script)
+  if (inner('runner', claudeScript(name, words))) return
+  embedded(name, args, info, state, self)
   if (inner('container', containerInner(name, words))) return
-  inner('runner', packageRunner(name, words))
+  if (inner('runner', packageRunner(name, words))) return
+  unknownWrapper(name, words, inner)
+}
+
+/** GNU coreutils installed with a `g` prefix (Homebrew): `grm`, `gcp`, `gchmod`, ... */
+const GNU_PREFIXED =
+  /^g(rm|rmdir|mv|cp|ln|dd|chmod|chown|chgrp|truncate|shred|install|touch|mkdir|tee|find|xargs|env|timeout|nice|stdbuf|sed|cat|head|tail|base64|od|unlink|readlink|realpath)$/
+const gnuName = (name: string): string => (GNU_PREFIXED.test(name) ? name.slice(1) : name)
+
+/** The words a `$VAR` command stands for when the variable has a known value. */
+function heldCommand(head: Word, state: ParseState): Word[] | null {
+  if (head.opaque) return null
+  const m = /^\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))$/.exec(head.text)
+  const value = m ? state.values.get(m[1] ?? m[2]) : undefined
+  if (value === undefined || state.assigned.has('IFS') || state.values.has('IFS')) return null
+  const words = splitWords(value)
+  return words.length ? words : null
+}
+
+/** Claude Code started through node: `node .../@anthropic-ai/claude-code/cli.js args`. */
+const CLAUDE_SCRIPT =
+  /(^|[\\/])@anthropic-ai[\\/]claude-code([\\/]|$)|(^|[\\/])claude-code[\\/]cli\.m?js$/i
+const NODE_RUNTIMES = set('node', 'nodejs', 'bun')
+
+export function claudeScript(name: string, words: Word[]): Word[] | null {
+  if (!NODE_RUNTIMES.has(name)) return null
+  const i = words.findIndex((w, k) => k > 0 && !w.text.startsWith('-'))
+  if (i < 0 || !CLAUDE_SCRIPT.test(words[i].text)) return null
+  return [{ ...words[i], text: 'claude' }, ...words.slice(i + 1)]
+}
+
+/**
+ * Commands that only print or search their arguments: a dangerous command name among them is
+ * data (`echo rm -rf ~`, `grep -r git .`), not something they run.
+ */
+const DATA_COMMANDS = set(
+  'echo',
+  'printf',
+  'print',
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'ag',
+  'ack',
+  'man',
+  'which',
+  'whereis',
+  'whatis',
+  'apropos',
+  'help',
+  'info',
+  'tldr',
+  'type',
+  'test',
+  '[',
+  '[[',
+  'alias',
+  'export',
+  'declare',
+  'typeset',
+  'readonly',
+  'local',
+  'unset',
+  'hash',
+  'complete',
+  'compgen',
+  'history',
+  'read',
+  'logger',
+  'say',
+  'git',
+  'gh',
+  'brew',
+  'apt',
+  'apt-get',
+  'dnf',
+  'yum',
+  'pacman',
+  'port',
+  'winget',
+  'choco',
+  'scoop',
+  'pip',
+  'pip3',
+  'cargo',
+  'go',
+  'gem',
+  'composer'
+)
+/**
+ * Command names that, found among another program's arguments, are likely what that program
+ * runs (`strace -f rm -rf ~`, `arch -arm64 rm ...`, `faketime x env -i claude`).
+ */
+const RUN_NAMES = set(
+  'rm',
+  'rmdir',
+  'unlink',
+  'shred',
+  'srm',
+  'dd',
+  'diskutil',
+  'format',
+  'chmod',
+  'chown',
+  'chflags',
+  'git',
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  'dash',
+  'ksh',
+  'claude',
+  'curl',
+  'wget',
+  'kill',
+  'pkill',
+  'killall',
+  'launchctl',
+  'crontab',
+  'osascript',
+  'env',
+  'sudo',
+  'xargs',
+  'find',
+  'mv',
+  'cp',
+  'tee',
+  'truncate',
+  'nohup',
+  'exec',
+  'eval',
+  'python',
+  'python3',
+  'node',
+  'perl',
+  'ruby'
+)
+
+/** `strace -f rm -rf ~`: an unknown program given a command line to run. */
+function unknownWrapper(name: string, words: Word[], inner: Inner): void {
+  if (DATA_COMMANDS.has(name) || RUN_NAMES.has(name) || isInterpreter(name)) return
+  if (/[$`]/.test(name) || name === '') return
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i]
+    if (w.quoted || w.opaque) continue
+    const runs = cmdName(w.text)
+    if (RUN_NAMES.has(runs) || /^mkfs(\.\w+)?$/.test(runs)) {
+      inner('wrapper', words.slice(i))
+      return
+    }
+  }
 }
 
 type Inner = (
@@ -953,7 +1284,9 @@ type Script = (via: string, text: string) => void
 /** `xargs CMD`: CMD gets the items `echo`, a here-string or `find` feeds it, or unknown ones. */
 function xargs(words: Word[], state: ParseState, info: SegmentInfo, inner: Inner): void {
   let next = innerWords('xargs', words) ?? []
-  const text = stdinText(info)
+  // `xargs -a FILE`: the items come from a file the guard cannot read.
+  const fromFile = words.some((w) => /^(-a|--arg-file)(=|$)|^-a./.test(w.text))
+  const text = fromFile ? null : stdinText(info)
   const items = text === null ? null : splitWords(text)
   const r = words.findIndex((w) => w.text === '-I' || w.text === '--replace' || w.text === '-i')
   const replace = r >= 0 ? (words[r].text === '-i' ? '{}' : (words[r + 1]?.text ?? '{}')) : null
@@ -969,7 +1302,7 @@ function xargs(words: Word[], state: ParseState, info: SegmentInfo, inner: Inner
   const viaXargs = state.via[state.via.length - 1] === 'xargs'
   inner('xargs', next, {
     keepFind: true,
-    unknownArgs: !items && !info.fromFind && !viaXargs && hasStdin(info)
+    unknownArgs: fromFile || (!items && !info.fromFind && !viaXargs && hasStdin(info))
   })
 }
 
@@ -997,8 +1330,22 @@ function envWrapper(words: Word[], inner: Inner, script: Script): void {
     if (text === '--') break
     if (!text.includes('=') && WRAPPER_FLAGS.env.has(text)) i++
   }
-  inner('env', words.slice(i), { env: { set: [], unset } })
+  // `env $(cat vars) cmd`: words the guard cannot see may set any variable.
+  const rest: Word[] = []
+  const set: string[] = []
+  const tail = words.slice(i)
+  tail.forEach((w, k) => {
+    const next = tail[k + 1]
+    const leading = !rest.some((r) => !r.assignable)
+    if (leading && w.opaque && !w.assignable && next && !next.text.startsWith('-'))
+      set.push(UNKNOWN_VAR)
+    else rest.push(w)
+  })
+  inner('env', rest, { env: { set, unset } })
 }
+
+/** Marks an environment change the guard could not read (`env $(cat f) cmd`). */
+export const UNKNOWN_VAR = '?'
 
 /** Commands that run a command line given to them: `su -c`, `ssh host cmd`, `trap`, ... */
 function otherRunners(
@@ -1007,7 +1354,8 @@ function otherRunners(
   state: ParseState,
   info: SegmentInfo,
   inner: Inner,
-  script: Script
+  script: Script,
+  own: Cmd | null
 ): boolean {
   const texts = words.slice(1).map((w) => w.text)
   switch (name) {
@@ -1069,32 +1417,209 @@ function otherRunners(
       return true
     }
     case 'git': {
-      // `git -c alias.x='!cmd' x` and `git config alias.x '!cmd'` define shell aliases.
+      // `git -c alias.x='!cmd' x` and `git config alias.x '!cmd'` define shell aliases;
+      // `git -c core.pager='cmd' log` and friends run a command line.
       for (let i = 1; i < words.length; i++) {
         const t = words[i].text
         const value = t === '-c' ? words[i + 1]?.text : t.startsWith('-c') ? t.slice(2) : null
         const m = value ? /^alias\.[^=]+=\s*!(.*)$/is.exec(value) : null
         if (m) script('shell', m[1])
+        const run = value ? GIT_COMMAND_OPTION.exec(value) : null
+        if (run && run[1].trim()) script('shell', run[1].replace(/^!/, ''))
       }
       const config = texts.indexOf('config')
       if (config >= 0) {
         const pos = texts.slice(config + 1).filter((t) => !t.startsWith('-'))
         if (/^alias\./i.test(pos[0] ?? '') && pos[1]?.startsWith('!'))
           script('shell', pos[1].slice(1))
+        if (pos[1] && GIT_COMMAND_OPTION.test(`${pos[0]}=`))
+          script('shell', pos[1].replace(/^!/, ''))
       }
       return false
+    }
+    case 'tmux':
+      tmuxCommand(words, state)
+      return true
+    case 'screen':
+      screenCommand(words, inner, script)
+      return true
+    case 'at':
+    case 'batch': {
+      if (texts.some((t) => t === '-f' || /^-f./.test(t))) {
+        if (own) own.unknownScript = true
+        return true
+      }
+      const text = stdinText(info)
+      if (text !== null) script('shell', text)
+      else if (hasStdin(info) && own) own.unknownScript = true
+      return true
+    }
+    case 'vim':
+    case 'vi':
+    case 'nvim':
+    case 'view':
+    case 'ex':
+    case 'gvim':
+    case 'mvim':
+    case 'less':
+    case 'more':
+      for (const command of editorCommands(name, texts)) script('shell', command)
+      return false
+    case 'expect':
+      for (let i = 0; i < texts.length; i++) {
+        if (texts[i] !== '-c' || texts[i + 1] === undefined) continue
+        for (const m of texts[i + 1].matchAll(/\b(?:spawn|exec|system)\s+([^;\n\]}]+)/g))
+          script('shell', m[1])
+      }
+      return false
+    case 'make':
+    case 'gmake': {
+      const f = texts.findIndex((t) => t === '-f' || t === '--file' || t === '--makefile')
+      const file =
+        f >= 0 ? texts[f + 1] : texts.find((t) => /^--(make)?file=/.test(t))?.split('=')[1]
+      if (file === undefined || !STDIN_FILES.has(file)) return false
+      const text = stdinText(info)
+      if (text === null) {
+        if (own) own.unknownScript = true
+        return true
+      }
+      for (const m of text.matchAll(/^\t[@+-]*(.*)$/gm)) if (m[1].trim()) script('shell', m[1])
+      return true
     }
   }
   return false
 }
 
+/** Files that are standard input. */
+const STDIN_FILES = set('-', '/dev/stdin', '/dev/fd/0')
+
+/** git options whose value is a command line (`core.pager`, `core.sshCommand`, ...). */
+const GIT_COMMAND_OPTION =
+  /^(?:core\.(?:pager|sshcommand|editor|fsmonitor|askpass)|sequence\.editor|diff\.external|pager\.[^=]+|credential(?:\.[^=]+)?\.helper|gpg(?:\.\w+)?\.program|uploadpack\.packobjectshook|filter\.[^=]+\.(?:clean|smudge|process)|merge\.[^=]+\.driver|diff\.[^=]+\.(?:textconv|command))=(.*)$/is
+
+/** `vim -c ':!cmd'`, `vim '+!cmd'`, `less '+!cmd'`: shell commands run from an editor or pager. */
+function editorCommands(name: string, texts: string[]): string[] {
+  const out: string[] = []
+  const take = (value: string | undefined): void => {
+    const m = value ? /^:*\s*(?:silent!?\s*)?!(.*)$/s.exec(value) : null
+    if (m && m[1].trim()) out.push(m[1])
+  }
+  for (let i = 0; i < texts.length; i++) {
+    const t = texts[i]
+    if ((t === '-c' || t === '--cmd') && name !== 'less' && name !== 'more') take(texts[++i])
+    else if (t.startsWith('+')) take(t.slice(1))
+  }
+  return out
+}
+
+const TMUX_VALUE_FLAGS = set(
+  '-t',
+  '-s',
+  '-n',
+  '-c',
+  '-F',
+  '-x',
+  '-y',
+  '-e',
+  '-l',
+  '-L',
+  '-S',
+  '-f',
+  '-T',
+  '-w',
+  '-p'
+)
+
+/** `tmux new-session 'cmd'`, `tmux send-keys 'cmd' Enter`: run by the tmux server's shell. */
+function tmuxCommand(words: Word[], state: ParseState): void {
+  const parts: string[] = []
+  let sub = false
+  for (let i = 1; i < words.length; i++) {
+    const t = words[i].text
+    if (!words[i].quoted && t.startsWith('-') && t.length > 1) {
+      if (
+        TMUX_VALUE_FLAGS.has(t) ||
+        (/^-[A-Za-z]+$/.test(t) && TMUX_VALUE_FLAGS.has(`-${t.slice(-1)}`))
+      )
+        i++
+      continue
+    }
+    if (t === ';' || t === '\\;') {
+      sub = false
+      continue
+    }
+    if (!sub) {
+      sub = true
+      continue
+    }
+    if (/^(Enter|C-m|KPEnter)$/.test(t)) continue
+    parts.push(t)
+  }
+  if (parts.length) freshScript(state, 'tmux', parts.join(' '))
+}
+
+const SCREEN_VALUE_FLAGS = 'SceEhpTtsX'
+
+/** `screen -dmS name cmd args`, `screen -X stuff 'cmd'`. */
+function screenCommand(words: Word[], inner: Inner, script: Script): void {
+  for (let i = 1; i < words.length; i++) {
+    const t = words[i].text
+    if (t === '-X' || /^-[a-zA-Z]*X$/.test(t)) {
+      script(
+        'shell',
+        words
+          .slice(i + 1)
+          .map((w) => w.text)
+          .join(' ')
+      )
+      return
+    }
+    if (t === '-Logfile') {
+      i++
+      continue
+    }
+    if (/^-[a-zA-Z]+$/.test(t)) {
+      if (SCREEN_VALUE_FLAGS.includes(t.slice(-1))) i++
+      continue
+    }
+    inner('screen', words.slice(i))
+    return
+  }
+}
+
 /** Shell commands inside an interpreter's inline code (`osascript -e 'do shell script ...'`). */
-function embedded(name: string, args: Arg[], info: SegmentInfo, script: Script): void {
-  const stdin = info.input.flatMap((r) =>
-    r.heredoc ? [r.heredoc.body] : r.op === '<<<' && !r.target.opaque ? [r.target.text] : []
-  )
-  for (const code of inlineCode({ name, args, stdin })) {
-    for (const command of embeddedShell(code.slice(0, MAX_CODE), name)) script('shell', command)
+function embedded(
+  name: string,
+  args: Arg[],
+  info: SegmentInfo,
+  state: ParseState,
+  self: Cmd | null
+): void {
+  const piped = self?.stdin
+  const stdin =
+    piped !== undefined
+      ? [piped]
+      : info.input.flatMap((r) =>
+          r.heredoc ? [r.heredoc.body] : r.op === '<<<' && !r.target.opaque ? [r.target.text] : []
+        )
+  for (const full of inlineCode({ name, args, stdin })) {
+    const code = full.slice(0, MAX_CODE)
+    for (const command of embeddedShell(code, name))
+      nested(state, 'shell', () => parsePosix(command, state))
+    // `tell app "Terminal" to do script "..."` runs in a new terminal: a fresh environment.
+    for (const command of terminalScripts(code)) freshScript(state, 'terminal', command)
+    if (self && opaqueShellCall(code)) self.unknownScript = true
+  }
+}
+
+/** Parses `text` as commands that run with an emptied environment. */
+function freshScript(state: ParseState, via: string, text: string): void {
+  const before = state.clearedEnv
+  state.clearedEnv = true
+  try {
+    nested(state, via, () => parsePosix(text, state))
+  } finally {
+    state.clearedEnv = before
   }
 }
 

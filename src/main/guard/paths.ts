@@ -15,7 +15,17 @@ export interface PathEnv {
   env: Record<string, string | undefined>
   /** Variables the command line assigns itself (`X=/; rm -rf $X`): their value is unknown. */
   shadowed?: ReadonlySet<string>
+  /**
+   * Variables the command line assigns a known value once, unconditionally (`X=~/.ssh; ...`):
+   * they expand to it.
+   */
+  values?: ReadonlyMap<string, string>
+  /** The tab's CLAUDE_CONFIG_DIR: `$CLAUDE_CONFIG_DIR` expands to it. */
+  configDir?: string
 }
+
+/** Claude's config folder variable; in a tab it is the account's folder. */
+export const CONFIG_DIR_VAR = 'CLAUDE_CONFIG_DIR'
 
 export const pathApi = (os: OsName): typeof nodePath.posix =>
   os === 'win32' ? nodePath.win32 : nodePath.posix
@@ -25,8 +35,12 @@ const NAME = /^[A-Za-z_][A-Za-z0-9_]*/
 const SPECIAL = /^([0-9]|[@*#?$!-])/
 
 function lookup(name: string, e: PathEnv): string | undefined {
+  const known = e.values?.get(name)
+  if (known !== undefined) return known
   if (e.shadowed?.has(name)) return undefined
   const upper = name.toUpperCase()
+  if (e.configDir && (name === CONFIG_DIR_VAR || (e.os === 'win32' && upper === CONFIG_DIR_VAR)))
+    return e.configDir
   if (upper === 'HOME' || (e.os === 'win32' && upper === 'USERPROFILE')) return e.home
   if (upper === 'PWD') return e.cwd ?? undefined
   if (e.os !== 'win32') return e.env[name]

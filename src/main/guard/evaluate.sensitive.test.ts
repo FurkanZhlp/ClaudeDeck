@@ -134,7 +134,7 @@ const FILE_TOOLS: [string, string | null][] = [
   ['/dev/disk2', 'disk.rawDevice'],
   ['/Users/dev/projects/app/src/index.ts', null],
   ['src/index.ts', null],
-  ['/Users/dev/projects/app/.claude/commands/review.md', null],
+  ['/Users/dev/projects/app/.claude/commands/review.md', 'sensitive.projectAgentConfig'],
   ['/Users/dev/.claude/plans/plan.md', null],
   ['/Users/dev/.claude/projects/x/memory/MEMORY.md', null],
   ['/Users/dev/Library/Application Support/ClaudeDeck/accounts/a1/projects/x/memory/note.md', null],

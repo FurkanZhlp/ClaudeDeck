@@ -115,6 +115,9 @@ export function deleteTargets(cmd: Cmd): DeleteTargets | null {
         recursive: false
       }
     case 'rimraf':
+    case 'trash':
+    case 'trash-put':
+    case 'rmtrash':
       return { targets: positionals(args), recursive: true }
     case 'rd':
       return {
@@ -198,6 +201,7 @@ export function writeTargets(cmd: Cmd): Arg[] {
       return [...out, ...positionals(args, set('-S', '--suffix', '-t'))]
     case 'touch':
     case 'mkdir':
+    case 'mkfifo':
     case 'truncate':
       return [
         ...out,
@@ -253,8 +257,99 @@ export function writeTargets(cmd: Cmd): Arg[] {
     }
     case 'unzip':
       return [...out, ...flagValues(args, ['-d'], [])]
+    case '7z':
+    case '7za':
+      return /^[ex]$/.test(args[0]?.text ?? '') ? [...out, ...flagValues(args, ['-o'], [])] : out
+    case 'mknod':
+      return [...out, ...positionals(args, set('-m', '--mode')).slice(0, 1)]
+    case 'find':
+      // `find / -fprint ~/.zshrc` writes the list to a file.
+      return [...out, ...flagValues(args, ['-fprint', '-fprint0', '-fprintf', '-fls'], [])]
+    case 'icacls':
+    case 'cacls':
+      return [...out, ...args.slice(0, 1)]
+    case 'attrib':
+      return [...out, ...args.filter((a) => !/^[+-/]/.test(a.text)).slice(-1)]
+    case 'takeown': {
+      const f = args.findIndex((a) => /^\/f$/i.test(a.text))
+      return f >= 0 && args[f + 1] ? [...out, args[f + 1]] : out
+    }
+    case 'patch': {
+      // `patch [opts] FILE < x.patch` changes FILE; `-d DIR` works in DIR.
+      const files = positionals(
+        args,
+        set('-d', '--directory', '-p', '-i', '--input', '-o', '--output', '-r', '-D', '-F', '-B')
+      ).slice(0, 1)
+      return [
+        ...out,
+        ...files,
+        ...flagValues(args, ['-d', '--directory', '-o'], ['--directory', '--output'])
+      ]
+    }
+    case 'git':
+      return [...out, ...gitWrites(args)]
   }
   return out
+}
+
+/** `git checkout x -- .claude`, `git restore .claude`, `git apply --directory=.claude`. */
+function gitWrites(args: Arg[]): Arg[] {
+  const sub = args.findIndex((a) => !a.text.startsWith('-'))
+  const name = args[sub]?.text
+  const rest = args.slice(sub + 1)
+  if (name === 'checkout') {
+    const dashes = rest.findIndex((a) => a.text === '--')
+    return dashes >= 0 ? rest.slice(dashes + 1) : []
+  }
+  if (name === 'restore') return positionals(rest, set('-s', '--source'))
+  if (name === 'apply' || name === 'am') return flagValues(rest, ['--directory'], ['--directory'])
+  if (name === 'mv') return positionals(rest).slice(-1)
+  return []
+}
+
+/**
+ * Where a command copies, moves, links or extracts files to (`cp x .claude/`, `tar -xf a -C
+ * dir`, `Copy-Item x -Destination dir`). A subset of `writeTargets`, plus the folders of
+ * extractions.
+ */
+export function copyDestinations(cmd: Cmd): Arg[] {
+  const { name, args } = cmd
+  if (cmd.shell === 'powershell') {
+    if (name !== 'copy-item' && name !== 'move-item' && name !== 'expand-archive') return []
+    const listed = psPositionals(args, PS_PATH_PARAMS)
+    const dest = psValue(args, 'destination', 1) ?? psValue(args, 'destinationpath', 1) ?? listed[1]
+    return dest ? [dest] : []
+  }
+  switch (name) {
+    case 'cp':
+    case 'mv':
+    case 'install':
+    case 'ln':
+    case 'rsync':
+    case 'scp':
+    case 'ditto':
+    case 'copy':
+    case 'move': {
+      const t = args.findIndex((a) => a.text === '-t' || a.text === '--target-directory')
+      if (t >= 0 && args[t + 1]) return [args[t + 1]]
+      const list =
+        name === 'copy' || name === 'move'
+          ? args.filter((a) => !a.text.startsWith('/'))
+          : positionals(args, set('-m', '-o', '-g', '--mode', '-S', '--suffix', '-e', '--rsh'))
+      return list.length > 1 ? list.slice(-1) : []
+    }
+    case 'tar':
+    case 'bsdtar':
+    case 'gtar':
+    case 'unzip':
+    case '7z':
+    case '7za':
+    case 'patch':
+      return writeTargets(cmd).filter((a) => !cmd.redirects.some((r) => r.target === a))
+    case 'git':
+      return gitWrites(args)
+  }
+  return []
 }
 
 /** Values of `-o x`, `--output x`, `--output=x` (and `-ox`) style options. */
@@ -344,6 +439,17 @@ export function moveSources(cmd: Cmd): Arg[] {
 }
 
 const READERS = set(
+  'diff',
+  'cmp',
+  'sort',
+  'uniq',
+  'cut',
+  'paste',
+  'jq',
+  'fold',
+  'rev',
+  'iconv',
+  'split',
   'cat',
   'less',
   'more',
@@ -378,10 +484,9 @@ export function readTargets(cmd: Cmd): Arg[] {
   if (READERS.has(name)) {
     if (cmd.shell === 'powershell' || name === 'get-content')
       return [...inputs, ...psPaths(args, 'path', 'literalpath')]
-    return [
-      ...inputs,
-      ...positionals(args, set('-n', '-c', '--lines', '--bytes', '-o', '-r', '-f', '-C', '-x'))
-    ]
+    // Every word that is not an option: only secrets are looked for, so a flag value taken
+    // for a path (`head -n 5`) costs nothing, while `od -c FILE` is not missed.
+    return [...inputs, ...args.filter((a) => !isFlag(a))]
   }
   switch (name) {
     case 'cp':

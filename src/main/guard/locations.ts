@@ -23,8 +23,10 @@ const CLAUDE_CONTROL_FILES = new Set([
   'managed-settings.json'
 ])
 const CLAUDE_CONTROL_DIRS = new Set(['claudedeck', 'hooks'])
-/** Folders of a project's `.claude` that run code or define agents. */
-const PROJECT_AGENT_DIRS = new Set(['hooks', 'agents'])
+/** Folders of a project's `.claude` that run code or define agents and commands. */
+const PROJECT_AGENT_DIRS = new Set(['hooks', 'agents', 'commands', 'skills'])
+/** Claude reads every `settings*.json` name in a `.claude` folder the same way. */
+const SETTINGS_NAME = /^settings.*\.json$/
 /** Claude's own working data written through its tools (auto memory, plans, todos). */
 const CLAUDE_WORK_DIRS = new Set(['projects', 'plans', 'todos', 'tasks'])
 
@@ -159,7 +161,8 @@ export function writeRule(path: string, e: LocationEnv): string | null {
   const parts = segments(path, e.os)
   const name = parts[parts.length - 1] ?? ''
   const parent = parts[parts.length - 2] ?? ''
-  if (parent === '.claude' && CLAUDE_CONTROL_FILES.has(name)) return 'sensitive.claudeSettings'
+  if (parent === '.claude' && (CLAUDE_CONTROL_FILES.has(name) || SETTINGS_NAME.test(name)))
+    return 'sensitive.claudeSettings'
   if (name === '.claude.json' && within(p.dirname(path), e.home, e.os)) {
     return 'sensitive.claudeSettings'
   }
@@ -295,6 +298,76 @@ function buildGlobCandidates(e: LocationEnv): Candidate[] {
 
 /** Folders holding keys and credentials: copying or archiving them exposes secrets. */
 const SECRET_DIRS = ['.ssh', '.aws', '.gnupg', '.kube', '.azure', '.config/gcloud', '.docker']
+
+/** `path` is in one of the home folders holding keys and credentials. */
+export function inSecretDir(path: string, e: LocationEnv): boolean {
+  const rel = homeRel(path, e)
+  return rel !== null && rel !== '' && SECRET_DIRS.some((dir) => startsWithDir(rel, dir))
+}
+
+/**
+ * A project's own `.claude` folder or a path inside it (not the home `~/.claude` or the
+ * account's config folder, which `writeRule` covers). Files copied or extracted there can
+ * replace the project's Claude settings and hooks.
+ */
+export function projectClaudeDir(path: string, e: LocationEnv): boolean {
+  if (claudeRule(path, e) !== undefined) return false
+  return segments(path, e.os).includes('.claude')
+}
+
+/** ClaudeDeck's hook folder of any account (`<data>/accounts/<id>/claudedeck`) or inside it. */
+function inAccountHookDir(path: string, e: LocationEnv): boolean {
+  const rel = e.appDataDir ? relativeParts(path, e.appDataDir, e.os) : null
+  return !!rel && rel[0] === 'accounts' && rel[2] === 'claudedeck'
+}
+
+/** Claude's settings and hook files, or ClaudeDeck's hook folder of any account. */
+export function inClaudeControlDir(path: string, e: LocationEnv): boolean {
+  return claudeRule(path, e) === 'sensitive.claudeSettings' || inAccountHookDir(path, e)
+}
+
+/**
+ * ClaudeDeck's hook folder (`<config>/claudedeck`: the script and the guard key) or a path in
+ * it. `search`: a folder search (Grep) from a folder that holds one (the account folder,
+ * `accounts`, ClaudeDeck's data folder).
+ */
+export function claudeDeckFolder(path: string, e: LocationEnv, search: boolean): boolean {
+  const p = pathApi(e.os)
+  if (e.configDir && within(path, p.join(e.configDir, 'claudedeck'), e.os)) return true
+  if (inAccountHookDir(path, e)) return true
+  if (!search) return false
+  if (e.configDir && canon(path, e.os) === canon(e.configDir, e.os)) return true
+  const rel = e.appDataDir ? relativeParts(path, e.appDataDir, e.os) : null
+  return !!rel && rel.length <= 2
+}
+
+/** Shell startup file names (the last part of SHELL_RC). */
+const RC_NAMES = new Set(
+  [...SHELL_RC].map((f) => f.split('/').pop() as string).filter((n) => n.startsWith('.'))
+)
+
+/**
+ * Rule for a changed path that cannot be told, from the text after its last unknown part
+ * (`"$X/.ssh/authorized_keys"`, `${DIR}/claudedeck/hook.sh`, `settings.json` in an unknown
+ * folder); null when that text names nothing protected.
+ */
+export function protectedTail(text: string): string | null {
+  const pieces = text.split(/\$\{[^}]*\}|\$\([^)]*\)|\$env:\w+|\$\w+|%\w+%|`[^`]*`/i)
+  const tail = (pieces[pieces.length - 1] ?? '').replace(/\\/g, '/').toLowerCase()
+  const parts = tail.split('/').filter((p) => p && p !== '.')
+  if (!parts.length) return null
+  const name = parts[parts.length - 1]
+  if (parts.includes('claudedeck')) return 'sensitive.claudedeck'
+  if (parts.includes('.claude') || SETTINGS_NAME.test(name) || CLAUDE_CONTROL_FILES.has(name))
+    return 'sensitive.claudeSettings'
+  if (parts.includes('.ssh')) return 'sensitive.ssh'
+  if (parts.some((p) => ['.aws', '.gnupg', '.kube', '.azure'].includes(p)))
+    return 'sensitive.credentials'
+  if (RC_NAMES.has(name) || (parts.includes('fish') && name === 'config.fish'))
+    return 'sensitive.shellRc'
+  if (parts.includes('.git')) return 'sensitive.gitInternals'
+  return null
+}
 
 /**
  * A recursive read (`cp -r`, `tar`, `zip -r`, `grep -r`) of `path` takes a secret folder along:
