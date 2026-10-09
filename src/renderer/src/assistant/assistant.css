@@ -1,0 +1,30 @@
+/* "Edit settings with Claude": the compact thinking orb and the flash on changed rows. */
+
+.assistant-orb.optimize-orb {
+  --orb-size: 72px;
+}
+
+@keyframes setting-flash {
+  0%,
+  35% {
+    background-color: color-mix(in srgb, var(--accent) 20%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+.setting-flash {
+  border-radius: 8px;
+  animation: setting-flash 2.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setting-flash {
+    animation: none;
+    background-color: color-mix(in srgb, var(--accent) 14%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+}

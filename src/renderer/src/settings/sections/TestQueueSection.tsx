@@ -2,6 +2,7 @@ import { ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { TEST_QUEUE_LIMITS } from '@shared/testQueueLimits'
 import type { TestQueueMode, TestQueueSettingsPatch } from '@shared/types'
+import { AssistantInlineButton } from '../../assistant/AssistantButtons'
 import { useApp } from '../../store'
 import { BuiltinList } from '../../testQueue/settings/BuiltinList'
 import { CustomRules } from '../../testQueue/settings/CustomRules'
@@ -45,11 +46,13 @@ export function TestQueueSection(): React.JSX.Element | null {
         label={t('testQueue.settings.enabled')}
         hint={t('testQueue.settings.enabledHint')}
         checked={settings.enabled}
+        settingKey="testQueue.enabled"
         onChange={(enabled) => void save({ enabled })}
       />
       {settings.enabled && (
         <>
           <SettingRow
+            settingKey="testQueue.mode"
             label={t('testQueue.settings.mode')}
             hint={t(`testQueue.settings.modeHint.${settings.mode}`)}
           >
@@ -65,6 +68,7 @@ export function TestQueueSection(): React.JSX.Element | null {
           </SettingRow>
           {auto ? (
             <SettingRow
+              settingKey="testQueue.auto.maxConcurrent"
               label={t('testQueue.settings.autoMax')}
               hint={t('testQueue.settings.autoMaxHint')}
             >
@@ -79,7 +83,10 @@ export function TestQueueSection(): React.JSX.Element | null {
               />
             </SettingRow>
           ) : (
-            <SettingRow label={t('testQueue.settings.maxConcurrent')}>
+            <SettingRow
+              settingKey="testQueue.maxConcurrent"
+              label={t('testQueue.settings.maxConcurrent')}
+            >
               <NumberInput
                 label={t('testQueue.settings.maxConcurrent')}
                 value={settings.maxConcurrent}
@@ -90,6 +97,7 @@ export function TestQueueSection(): React.JSX.Element | null {
             </SettingRow>
           )}
           <SettingRow
+            settingKey="testQueue.maxWaitMinutes"
             label={t('testQueue.settings.maxWait')}
             hint={t('testQueue.settings.maxWaitHint')}
           >
@@ -116,6 +124,7 @@ export function TestQueueSection(): React.JSX.Element | null {
               {auto && (
                 <>
                   <SettingRow
+                    settingKey="testQueue.auto.cpuHighPercent"
                     label={t('testQueue.settings.cpuHigh')}
                     hint={t('testQueue.settings.cpuHighHint')}
                   >
@@ -129,6 +138,7 @@ export function TestQueueSection(): React.JSX.Element | null {
                     />
                   </SettingRow>
                   <SettingRow
+                    settingKey="testQueue.auto.cpuResumePercent"
                     label={t('testQueue.settings.cpuResume')}
                     hint={t('testQueue.settings.cpuResumeHint')}
                   >
@@ -142,6 +152,7 @@ export function TestQueueSection(): React.JSX.Element | null {
                     />
                   </SettingRow>
                   <SettingRow
+                    settingKey="testQueue.auto.minAvailableMemoryPercent"
                     label={t('testQueue.settings.minMemory')}
                     hint={t('testQueue.settings.minMemoryHint')}
                   >
@@ -157,6 +168,7 @@ export function TestQueueSection(): React.JSX.Element | null {
                     />
                   </SettingRow>
                   <SettingRow
+                    settingKey="testQueue.auto.rampUpSeconds"
                     label={t('testQueue.settings.rampUp')}
                     hint={t('testQueue.settings.rampUpHint')}
                   >
@@ -172,6 +184,7 @@ export function TestQueueSection(): React.JSX.Element | null {
                 </>
               )}
               <SettingRow
+                settingKey="testQueue.startGraceSeconds"
                 label={t('testQueue.settings.startGrace')}
                 hint={t('testQueue.settings.startGraceHint')}
               >
@@ -185,6 +198,7 @@ export function TestQueueSection(): React.JSX.Element | null {
                 />
               </SettingRow>
               <SettingRow
+                settingKey="testQueue.backgroundMaxHoldMinutes"
                 label={t('testQueue.settings.backgroundHold')}
                 hint={t('testQueue.settings.backgroundHoldHint')}
               >
@@ -200,17 +214,24 @@ export function TestQueueSection(): React.JSX.Element | null {
             </div>
           </details>
 
-          <h4 className={subTitleClass}>{t('testQueue.settings.builtins')}</h4>
-          <BuiltinList
-            disabled={settings.disabledBuiltins}
-            onChange={(disabledBuiltins) => void save({ disabledBuiltins })}
-          />
+          <div data-setting="testQueue.disabledBuiltins" className="space-y-3">
+            <h4 className={subTitleClass}>{t('testQueue.settings.builtins')}</h4>
+            <BuiltinList
+              disabled={settings.disabledBuiltins}
+              onChange={(disabledBuiltins) => void save({ disabledBuiltins })}
+            />
+          </div>
 
-          <h4 className={subTitleClass}>{t('testQueue.settings.customRules')}</h4>
-          <CustomRules
-            patterns={settings.customPatterns}
-            onSave={(customPatterns) => saveSettings({ customPatterns })}
-          />
+          <div data-setting="testQueue.customPatterns" className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className={subTitleClass}>{t('testQueue.settings.customRules')}</h4>
+              <AssistantInlineButton section="testQueue" hintKey="assistant.hints.testPatterns" />
+            </div>
+            <CustomRules
+              patterns={settings.customPatterns}
+              onSave={(customPatterns) => saveSettings({ customPatterns })}
+            />
+          </div>
 
           <h4 className={subTitleClass}>{t('testQueue.try.title')}</h4>
           <TryCommand />

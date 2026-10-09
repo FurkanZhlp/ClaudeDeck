@@ -92,7 +92,18 @@ export const IPC = {
   agentsClose: 'agents:close',
   agentsOlder: 'agents:older',
   agentsUpdate: 'agents:update',
-  agentsEvents: 'agents:events'
+  agentsEvents: 'agents:events',
+  assistantStart: 'assistant:start',
+  assistantFollowUp: 'assistant:followUp',
+  assistantCancel: 'assistant:cancel',
+  assistantApply: 'assistant:apply',
+  assistantReject: 'assistant:reject',
+  assistantUndo: 'assistant:undo',
+  assistantStatus: 'assistant:status',
+  assistantProposal: 'assistant:proposal',
+  assistantQuestion: 'assistant:question',
+  assistantDone: 'assistant:done',
+  assistantError: 'assistant:error'
 } as const
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; code: string }

@@ -557,6 +557,13 @@
         "proposal": {
           "shortcut": "Ctrl+Enter gönderir"
         }
+      },
+      "assistant": {
+        "suggestions": {
+          "usage": {
+            "1": "Kullanımı kullanılan olarak göster"
+          }
+        }
       }
     }
   },
@@ -1079,6 +1086,113 @@
     "badge": {
       "hooksDisabled": "Bu projede hook'lar kapalı olduğu için komut koruması Claude'un komutlarını burada denetlemez",
       "hooksDisabledBoth": "Bu projede hook'lar kapalı olduğu için komut koruması ve test kuyruğu burada çalışmaz"
+    }
+  },
+  "assistant": {
+    "open": "Claude ile düzenle",
+    "openHint": "İstediğinizi yazın, Claude ayar değişikliği önersin.",
+    "writeWithClaude": "Claude ile yaz",
+    "title": "Ne yapmak istiyorsunuz?",
+    "windowTitle": "Claude ile düzenle",
+    "promptLabel": "İsteğiniz",
+    "placeholder": "Örneğin: Docker silme komutlarında bana sor",
+    "hints": {
+      "guardRules": "Örneğin: terraform apply komutlarında bana sor",
+      "testPatterns": "Örneğin: make e2e komutunu test olarak say"
+    },
+    "suggestionsLabel": "Öneriler",
+    "suggestions": {
+      "guard": {
+        "0": "Docker silmelerinde bana sor",
+        "1": "Prod deploy komutlarını engelle",
+        "2": "git push --force komutunu tamamen engelle"
+      },
+      "testQueue": {
+        "0": "pytest'i kuyruğa al",
+        "1": "Aynı anda en fazla 2 test çalışsın",
+        "2": "make e2e komutunu test olarak say"
+      },
+      "claude": {
+        "0": "Yeni sekmeler plan modunda başlasın",
+        "1": "Bu projede düzenlemeleri otomatik kabul et"
+      },
+      "usage": {
+        "0": "Kullanımı kalan olarak göster",
+        "1": "Menü çubuğunda yalnızca haftalık kullanımı göster"
+      },
+      "general": {
+        "0": "Arayüzü İngilizce yap",
+        "1": "Oturum açıldığında ClaudeDeck'i başlat"
+      }
+    },
+    "account": "Hesap",
+    "noAccounts": "Önce Ayarlar > Hesaplar bölümünden bir Claude hesabı ekleyin.",
+    "privacy": "İsteğiniz ve mevcut ayarlarınız, seçtiğiniz hesap üzerinden Anthropic'e gönderilir.",
+    "send": "Claude'a sor",
+    "working": "Claude ayarlarınız üzerinde çalışıyor",
+    "stop": "Durdur",
+    "phase": {
+      "starting": "Başlatılıyor",
+      "thinking": "Düşünüyor",
+      "reading": "Ayarları inceliyor",
+      "testing": "Kuralı örneklerle deniyor",
+      "proposing": "Öneriyi hazırlıyor"
+    },
+    "question": {
+      "title": "Claude soruyor",
+      "answer": "Cevabınız",
+      "send": "Cevabı gönder"
+    },
+    "proposal": {
+      "changes": "Değişiklikler",
+      "global": "Tüm projeler",
+      "project": "Proje: {{name}}",
+      "becomes": "şuna dönüşür",
+      "before": "Şimdi",
+      "ruleAdded": "Yeni kural",
+      "ruleRemoved": "Kaldırılan kural",
+      "regex": "düzenli ifade",
+      "builtinOff": "Kapanan yerleşik kural",
+      "builtinOn": "Açılan yerleşik kural",
+      "examples": "Denenen örnekler",
+      "queued": "Kuyruğa alınır",
+      "notQueued": "Kuyruğa alınmaz",
+      "risks": "Uygulamadan önce bilin",
+      "followUp": "Şunu da ekle",
+      "followUpPlaceholder": "Örneğin: git push için de aynısını yap",
+      "followUpSend": "Gönder",
+      "apply": "Uygula"
+    },
+    "risks": {
+      "guardOff": "Komut koruması tamamen kapanır; Claude'un komutları denetlenmez.",
+      "guardAllow": "{{category}} kategorisine izin verilir. Bu kategori geri alınamayan işlemleri kapsar.",
+      "guardRelaxed": "{{category}} için koruma gevşer: {{action}}.",
+      "bypass": "İzinleri atla, Claude'un her işlemi size sormadan yapmasına izin verir.",
+      "testQueueOff": "Test kuyruğu kapanır; testler aynı anda sınırsız çalışabilir."
+    },
+    "answered": {
+      "title": "Claude'un yanıtı",
+      "empty": "Claude bir değişiklik önermedi.",
+      "followUp": "Devam edin"
+    },
+    "error": {
+      "TIMEOUT": "Claude zamanında yanıt vermedi. Lütfen yeniden deneyin.",
+      "FAILED": "Claude çalışırken bir hata oluştu.",
+      "details": "Ayrıntılar",
+      "retry": "Yeniden dene"
+    },
+    "applied": "Ayarlar güncellendi.",
+    "undo": "Geri al",
+    "undone": "Değişiklik geri alındı.",
+    "undoFailed": "Değişiklik geri alınamadı.",
+    "value": {
+      "on": "Açık",
+      "off": "Kapalı",
+      "inherit": "Genel ayar",
+      "followCategory": "Kategori ayarı",
+      "none": "Yok",
+      "queueOff": "Kuyruğa alma",
+      "percent": "%{{value}}"
     }
   }
 }

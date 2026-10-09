@@ -135,6 +135,19 @@ const api: Api = {
     onUpdate: (cb) => subscribe(IPC.agentsUpdate, cb),
     onEvents: (cb) => subscribe(IPC.agentsEvents, cb)
   },
+  assistant: {
+    start: (input) => call(IPC.assistantStart, input),
+    followUp: (runId, text) => call(IPC.assistantFollowUp, runId, text),
+    cancel: (runId) => call(IPC.assistantCancel, runId),
+    apply: (proposalId, confirmed) => call(IPC.assistantApply, proposalId, confirmed),
+    reject: (proposalId) => call(IPC.assistantReject, proposalId),
+    undo: (token) => call(IPC.assistantUndo, token),
+    onStatus: (cb) => subscribe(IPC.assistantStatus, cb),
+    onProposal: (cb) => subscribe(IPC.assistantProposal, cb),
+    onQuestion: (cb) => subscribe(IPC.assistantQuestion, cb),
+    onDone: (cb) => subscribe(IPC.assistantDone, cb),
+    onError: (cb) => subscribe(IPC.assistantError, cb)
+  },
   app: {
     platform: process.platform,
     optimizeSupported: optimizeSupported(process.platform),

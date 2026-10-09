@@ -32,6 +32,7 @@ If you keep separate Claude accounts for personal and work use, switching betwee
 - **Account usage:** a ring per account shows plan usage, with a pace tick that marks where you would be at an even rate. On macOS the usage can also sit in the menu bar.
 - **Project notes:** read what Claude has written down about a project; notes follow the project when you move it to another account.
 - **Profile import and optimization:** copy your existing `~/.claude` setup (or another account's) into an account, then let Claude tidy it up in a headless run.
+- **Edit settings with Claude:** say what you want in plain words ("ask me before Docker deletes"); your own Claude, run headless with no shell, file or web tools, proposes the change with tested examples, and nothing changes until you click Apply. Undo is one click.
 - **ClaudeDeck MCP server:** Claude in a ClaudeDeck tab can read and write the project's notes, and can ask to create a project or open a tab, which you confirm in the app.
 - **Launch at login.**
 - **English and Turkish UI:** follows the system language by default, switchable in Settings.

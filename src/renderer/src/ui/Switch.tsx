@@ -4,13 +4,23 @@ interface Props {
   label: string
   hint?: string
   disabled?: boolean
+  /** `data-setting` key, so the row can be highlighted after a change (settings assistant). */
+  settingKey?: string
 }
 
 /** Labelled on/off switch row. */
-export function Switch({ checked, onChange, label, hint, disabled }: Props): React.JSX.Element {
+export function Switch({
+  checked,
+  onChange,
+  label,
+  hint,
+  disabled,
+  settingKey
+}: Props): React.JSX.Element {
   return (
     <button
       type="button"
+      data-setting={settingKey}
       role="switch"
       aria-checked={checked}
       disabled={disabled}

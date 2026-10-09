@@ -8,6 +8,7 @@ import { CategoryList } from '../../guard/settings/CategoryList'
 import { GuardCustomRules } from '../../guard/settings/GuardCustomRules'
 import { GuardTryCommand } from '../../guard/settings/GuardTryCommand'
 import { subTitleClass } from '../../guard/settings/categoryIcons'
+import { AssistantInlineButton } from '../../assistant/AssistantButtons'
 import { useApp } from '../../store'
 import { useTestQueue } from '../../testQueue/testQueueStore'
 import { Notice } from '../../ui/Notice'
@@ -36,6 +37,7 @@ export function GuardSection(): React.JSX.Element | null {
         label={t('guard.settings.enabled')}
         hint={t('guard.settings.enabledHint')}
         checked={settings.enabled}
+        settingKey="guard.enabled"
         onChange={(enabled) =>
           void save({ enabled }).then((code) => {
             // The hook status says whether the guard is on; it changes with the switch.
@@ -49,11 +51,16 @@ export function GuardSection(): React.JSX.Element | null {
           <h4 className={subTitleClass}>{t('guard.settings.categories')}</h4>
           <CategoryList settings={settings} save={(patch) => void save(patch)} />
 
-          <h4 className={subTitleClass}>{t('guard.custom.title')}</h4>
-          <GuardCustomRules
-            rules={settings.customRules}
-            onSave={(customRules) => saveSettings({ customRules })}
-          />
+          <div data-setting="guard.customRules" className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className={subTitleClass}>{t('guard.custom.title')}</h4>
+              <AssistantInlineButton section="guard" hintKey="assistant.hints.guardRules" />
+            </div>
+            <GuardCustomRules
+              rules={settings.customRules}
+              onSave={(customRules) => saveSettings({ customRules })}
+            />
+          </div>
 
           <h4 className={subTitleClass}>{t('guard.try.title')}</h4>
           <GuardTryCommand />

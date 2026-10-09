@@ -1,6 +1,10 @@
 import { X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { AssistantHeaderButton } from '../assistant/AssistantButtons'
+import { AssistantDialog } from '../assistant/AssistantDialog'
+import { assistantSectionOf } from '../assistant/assistantModel'
+import { useSettingsFlash } from '../assistant/useSettingsFlash'
 import { useApp } from '../store'
 import { SettingsNav } from './SettingsNav'
 import { pageScrollDelta } from './navKeys'
@@ -28,6 +32,8 @@ function SettingsScreen(): React.JSX.Element | null {
   const section = resolveSettingsSection(requested, sections)
   const scrollRef = useRef<HTMLDivElement>(null)
   const navRef = useRef<HTMLDivElement>(null)
+  // Rows changed by "Claude ile düzenle" flash briefly after an apply.
+  useSettingsFlash(scrollRef)
 
   // Focus the current nav item on open; give focus back to where it was on close.
   useEffect(() => {
@@ -93,9 +99,12 @@ function SettingsScreen(): React.JSX.Element | null {
           <div className="flex justify-center gap-6 px-10 pb-16 pt-4">
             <main aria-labelledby="settings-page-title" className="w-full min-w-0 max-w-[640px]">
               <header className="mb-6 border-b border-border pb-5">
-                <h1 id="settings-page-title" className="text-[20px] font-semibold tracking-tight">
-                  {t(section.labelKey)}
-                </h1>
+                <div className="flex items-start justify-between gap-4">
+                  <h1 id="settings-page-title" className="text-[20px] font-semibold tracking-tight">
+                    {t(section.labelKey)}
+                  </h1>
+                  <AssistantHeaderButton section={assistantSectionOf(section.id)} />
+                </div>
                 {section.descriptionKey && (
                   <p className="mt-1.5 max-w-prose leading-relaxed text-muted">
                     {t(section.descriptionKey)}
@@ -131,6 +140,7 @@ function SettingsScreen(): React.JSX.Element | null {
           </div>
         </div>
       </div>
+      <AssistantDialog />
     </div>
   )
 }

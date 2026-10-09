@@ -42,6 +42,17 @@ import type {
   TestQueueSnapshot
 } from './types'
 
+import type {
+  AssistantApplyResult,
+  AssistantDoneEvent,
+  AssistantErrorEvent,
+  AssistantProposal,
+  AssistantQuestion,
+  AssistantStartInput,
+  AssistantStartResult,
+  AssistantStatusEvent
+} from './assistant'
+
 type Unsubscribe = () => void
 
 export interface Api {
@@ -225,6 +236,23 @@ export interface Api {
     onUpdate(cb: (sessionId: string, agents: AgentSummary[]) => void): Unsubscribe
     /** New events of the open agent, oldest first. */
     onEvents(cb: (sessionId: string, agentId: string, events: AgentEvent[]) => void): Unsubscribe
+  }
+  /** "Edit settings with Claude": one run at a time (main window only). */
+  assistant: {
+    start(input: AssistantStartInput): Promise<AssistantStartResult>
+    /** Answers a question, refines a waiting proposal, or continues after Claude's reply. */
+    followUp(runId: string, text: string): Promise<null>
+    cancel(runId: string): Promise<null>
+    /** `confirmed`: the proposal's confirmations the user accepted (all are required). */
+    apply(proposalId: string, confirmed: string[]): Promise<AssistantApplyResult>
+    reject(proposalId: string): Promise<null>
+    /** Restores the values an apply replaced; single use. */
+    undo(token: string): Promise<AppState>
+    onStatus(cb: (event: AssistantStatusEvent) => void): Unsubscribe
+    onProposal(cb: (proposal: AssistantProposal) => void): Unsubscribe
+    onQuestion(cb: (question: AssistantQuestion) => void): Unsubscribe
+    onDone(cb: (event: AssistantDoneEvent) => void): Unsubscribe
+    onError(cb: (event: AssistantErrorEvent) => void): Unsubscribe
   }
   /** App level actions shared by the main window and the menu bar popover. */
   app: {

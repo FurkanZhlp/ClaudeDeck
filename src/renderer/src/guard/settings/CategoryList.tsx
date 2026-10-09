@@ -90,7 +90,7 @@ function CategoryRow({
   const examples = t(`guard.categoryInfo.${category}.examples`)
 
   return (
-    <li>
+    <li data-setting={`guard.categories.${category}`}>
       <div className="flex items-start gap-3 px-3 py-2.5">
         <span
           aria-hidden

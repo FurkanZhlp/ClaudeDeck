@@ -32,7 +32,7 @@ export function GeneralSection(): React.JSX.Element | null {
 
   return (
     <div className="space-y-3">
-      <SettingRow label={t('settings.language')}>
+      <SettingRow settingKey="general.language" label={t('settings.language')}>
         <select
           aria-label={t('settings.language')}
           className={`${inputClass} max-w-52`}
@@ -53,6 +53,7 @@ export function GeneralSection(): React.JSX.Element | null {
           label={t('settings.launchAtLogin')}
           hint={hint}
           checked={launchAtLogin}
+          settingKey="general.launchAtLogin"
           onChange={(enabled) => void setLaunchAtLogin(enabled)}
         />
       )}

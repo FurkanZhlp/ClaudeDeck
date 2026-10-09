@@ -22,6 +22,11 @@ import icon from '../../resources/icon.png?asset'
 import trayIcon from '../../resources/trayTemplate.png?asset'
 import guidelinesText from '../../resources/claudedeck/guidelines.md?raw'
 import optimizePrompt from '../../resources/claudedeck/optimize-prompt.md?raw'
+import assistantPrompt from '../../resources/claudedeck/settings-assistant-prompt.md?raw'
+import { AssistantManager } from './assistant/assistantManager'
+import { registerAssistantIpc } from './assistant/assistantIpc'
+import { SettingsWriter } from './assistant/settingsWriter'
+import { createAssistantTools } from './mcp/assistantTools'
 import { createIpcTools } from './ipcUtil'
 import { registerMcpInConfig, unregisterMcpInConfig } from './mcp/register'
 import { createSessionTokens } from './mcp/sessionTokens'
@@ -199,12 +204,13 @@ const claudeDeckHooks = createClaudeDeckHooks({
 
 // Command guard: the first step of every PreToolUse hook call of a Claude tab. Its decisions
 // with a matching rule are kept in memory and pushed to the main window.
+// The evaluator runs in a worker with a hard time limit, never on the main thread.
+const guardRunner = createGuardRunner({ spawn: () => createGuardWorker({}) })
 const guard = createGuardService({
   settings: () => repo.get().settings.guard,
   project: (id) => repo.get().projects.find((p) => p.id === id),
   projects: () => repo.get().projects,
-  // The evaluator runs in a worker with a hard time limit, never on the main thread.
-  runner: createGuardRunner({ spawn: () => createGuardWorker({}) }),
+  runner: guardRunner,
   account: (id) => repo.get().accounts.find((a) => a.id === id),
   appDataDir: userData,
   home: homedir(),
@@ -243,6 +249,67 @@ const optimize = new OptimizeManager({
   onRunEnded: (accountId) => {
     const account = repo.get().accounts.find((a) => a.id === accountId)
     if (account) claudeDeckHooks.sync(account)
+  }
+})
+
+// "Edit settings with Claude": the user's own Claude proposes changes through MCP tools; only
+// the user's click applies them, through the same setters as manual edits.
+const assistantGitBranch = cachedGitBranch()
+const assistant = new AssistantManager({
+  account: (id) => repo.account(id),
+  claudeAvailable: () => accounts.claudeAvailable(),
+  baseEnv: platform.resolveBaseEnv,
+  tokens: mcpTokens,
+  mcpUrl: () => mcp?.url ?? null,
+  prompt: assistantPrompt,
+  state: () => repo.get(),
+  language: () => resolveLanguage(repo.get().settings.language, app.getLocale()),
+  evaluators: {
+    catalog: { guardRules: guardRuleList(), testBuiltins: builtinPatternList() },
+    classify,
+    // The real guard, on any state (current or proposed); "try a command" logs nothing.
+    evaluateGuard: (request, state) =>
+      createGuardService({
+        settings: () => state.settings.guard,
+        project: (id) => state.projects.find((p) => p.id === id),
+        projects: () => state.projects,
+        runner: guardRunner,
+        account: (id) => state.accounts.find((a) => a.id === id),
+        appDataDir: userData,
+        home: homedir(),
+        os: platform.os,
+        env: process.env,
+        gitBranch: assistantGitBranch,
+        log: guardLog,
+        hookPort: () => (mcp ? Number(new URL(mcp.url).port) || null : null),
+        ownPids: [process.pid]
+      }).evaluate(request)
+  },
+  writer: new SettingsWriter({
+    repo,
+    catalog: { guardRules: guardRuleList(), testBuiltins: builtinPatternList() },
+    // The same follow-up work as the IPC setters (see registerIpc below).
+    effects: {
+      guardEnabledChanged: () => claudeDeckHooks.syncAll(),
+      testQueueChanged: () => {
+        claudeDeckHooks.syncAll()
+        testQueue.settingsChanged()
+      },
+      usageChanged: () => menuBar?.sync(),
+      languageChanged: () => {
+        applyMenu()
+        menuBar?.sync()
+      },
+      launchAtLoginChanged: (enabled) => applyLaunchAtLogin(enabled),
+      stateChanged: (state) => broadcast(IPC.stateChanged, state)
+    }
+  }),
+  events: {
+    status: (event) => send(IPC.assistantStatus, event),
+    proposal: (proposal) => send(IPC.assistantProposal, proposal),
+    question: (question) => send(IPC.assistantQuestion, question),
+    done: (event) => send(IPC.assistantDone, event),
+    error: (event) => send(IPC.assistantError, event)
   }
 })
 
@@ -339,7 +406,11 @@ async function startMcp(): Promise<void> {
   rmSync(join(userData, 'mcp.json'), { force: true })
   try {
     mcp = await startMcpServer({
-      tools: { ...tools, ...createOptimizeTools(optimize.port) },
+      tools: {
+        ...tools,
+        ...createOptimizeTools(optimize.port),
+        ...createAssistantTools(assistant.port)
+      },
       tokens: mcpTokens,
       version: app.getVersion(),
       routes: hookRoutes({
@@ -498,6 +569,8 @@ function onMainWindowClosed(): void {
   testQueue.dropAll()
   notes?.reset()
   agents?.reset()
+  // The settings assistant lives in the window's settings view.
+  assistant.disposeAll()
   app.dock?.hide()
 }
 
@@ -550,6 +623,7 @@ function createWindow(): void {
     testQueue.dropAll()
     notes?.reset()
     agents?.reset()
+    assistant.disposeAll()
   })
 
   loadRenderer(win)
@@ -692,6 +766,7 @@ app.whenReady().then(() => {
     }
   })
   registerOptimizeIpc({ handle: ipcTools.handle, manager: optimize })
+  registerAssistantIpc({ handle: ipcTools.handle, manager: assistant })
   agents = registerAgentsIpc({
     repo,
     ipcTools,
@@ -752,6 +827,7 @@ app.on('before-quit', () => {
   ptys.killAll()
   testQueue.dispose()
   optimize.disposeAll()
+  assistant.disposeAll()
   usagePoller.stop()
   usage.dispose()
   stats.dispose()

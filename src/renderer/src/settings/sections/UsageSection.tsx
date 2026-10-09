@@ -22,7 +22,7 @@ export function UsageSection(): React.JSX.Element | null {
 
   return (
     <div className="space-y-3">
-      <SettingRow label={t('settings.usageDisplay')}>
+      <SettingRow settingKey="usage.display" label={t('settings.usageDisplay')}>
         <Segmented<UsageDisplay>
           label={t('settings.usageDisplay')}
           value={usage.display}
@@ -52,9 +52,10 @@ function MenuBarSettings(): React.JSX.Element | null {
         label={t('settings.trayEnabled')}
         hint={t('settings.trayEnabledHint')}
         checked={usage.trayEnabled}
+        settingKey="usage.trayEnabled"
         onChange={(trayEnabled) => void setUsageSettings({ trayEnabled })}
       />
-      <SettingRow label={t('settings.trayMetric')} disabled={trayOff}>
+      <SettingRow settingKey="usage.trayMetric" label={t('settings.trayMetric')} disabled={trayOff}>
         <Segmented<TrayMetric>
           label={t('settings.trayMetric')}
           value={usage.trayMetric}
@@ -67,7 +68,11 @@ function MenuBarSettings(): React.JSX.Element | null {
           onChange={(trayMetric) => void setUsageSettings({ trayMetric })}
         />
       </SettingRow>
-      <SettingRow label={t('settings.trayAccount')} disabled={trayOff}>
+      <SettingRow
+        settingKey="usage.trayAccount"
+        label={t('settings.trayAccount')}
+        disabled={trayOff}
+      >
         <select
           aria-label={t('settings.trayAccount')}
           className={`${inputClass} max-w-52 disabled:opacity-50`}

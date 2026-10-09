@@ -10,14 +10,16 @@ import { INHERIT, PermissionModeSelect } from './PermissionModeSelect'
 function ModeRow({
   label,
   hint,
-  children
+  children,
+  settingKey
 }: {
   label: string
   hint: string
   children: React.ReactNode
+  settingKey?: string
 }): React.JSX.Element {
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div data-setting={settingKey} className="flex items-center justify-between gap-4">
       <span className="min-w-0">
         <span className="block">{label}</span>
         <span className="block text-[12px] leading-snug text-muted">{hint}</span>
@@ -39,6 +41,7 @@ export function ClaudePermissionsSection(): React.JSX.Element | null {
     <section className="mt-6 space-y-3">
       <h3 className={sectionTitleClass}>{t('permissions.title')}</h3>
       <ModeRow
+        settingKey="claude.permissionMode"
         label={t('permissions.mode')}
         hint={t(`permissions.modeHints.${claude.permissionMode}`)}
       >
@@ -54,6 +57,7 @@ export function ClaudePermissionsSection(): React.JSX.Element | null {
         label={t('permissions.allowBypass')}
         hint={t('permissions.allowBypassHint')}
         checked={claude.allowBypass}
+        settingKey="claude.allowBypass"
         onChange={(allowBypass) => {
           if (!allowBypass) void setClaudeSettings({ allowBypass })
           else choose('bypassPermissions', () => void setClaudeSettings({ allowBypass }))

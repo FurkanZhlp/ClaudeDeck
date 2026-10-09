@@ -18,7 +18,14 @@ export interface OptimizeScope {
   accountId: string
 }
 
-export type McpScope = SessionScope | OptimizeScope
+/** A headless "edit settings with Claude" run; it only reaches the settings assistant tools. */
+export interface AssistantScope {
+  kind: 'assistant'
+  runId: string
+  accountId: string
+}
+
+export type McpScope = SessionScope | OptimizeScope | AssistantScope
 export type McpScopeKind = McpScope['kind']
 
 /** Session scopes may omit `kind` so older callers keep working. */
@@ -36,11 +43,11 @@ export interface SessionTokens {
 
 /** Session id or run id: the owner a token and its rate limit belong to. */
 export const scopeId = (scope: McpScope): string =>
-  scope.kind === 'optimize' ? scope.runId : scope.sessionId
+  scope.kind === 'session' ? scope.sessionId : scope.runId
 
 function normalize(scope: McpScopeInput): McpScope {
-  if ('kind' in scope && scope.kind === 'optimize') {
-    return Object.freeze({ kind: 'optimize', runId: scope.runId, accountId: scope.accountId })
+  if ('kind' in scope && (scope.kind === 'optimize' || scope.kind === 'assistant')) {
+    return Object.freeze({ kind: scope.kind, runId: scope.runId, accountId: scope.accountId })
   }
   const { sessionId, projectId, accountId } = scope as Omit<SessionScope, 'kind'>
   return Object.freeze({ kind: 'session', sessionId, projectId, accountId })

@@ -557,6 +557,13 @@
         "proposal": {
           "shortcut": "Ctrl+Enter sends"
         }
+      },
+      "assistant": {
+        "suggestions": {
+          "usage": {
+            "1": "Show usage as used"
+          }
+        }
       }
     }
   },
@@ -1079,6 +1086,113 @@
     "badge": {
       "hooksDisabled": "Hooks are disabled for this project, so the command guard does not check Claude's commands here",
       "hooksDisabledBoth": "Hooks are disabled for this project, so the command guard and the test queue do not apply here"
+    }
+  },
+  "assistant": {
+    "open": "Edit with Claude",
+    "openHint": "Say what you want and Claude proposes a settings change.",
+    "writeWithClaude": "Write with Claude",
+    "title": "What would you like to do?",
+    "windowTitle": "Edit with Claude",
+    "promptLabel": "Your request",
+    "placeholder": "For example: ask me before Docker deletes",
+    "hints": {
+      "guardRules": "For example: ask me before terraform apply",
+      "testPatterns": "For example: count make e2e as a test"
+    },
+    "suggestionsLabel": "Suggestions",
+    "suggestions": {
+      "guard": {
+        "0": "Ask me before Docker deletes",
+        "1": "Block production deploy commands",
+        "2": "Always block git push --force"
+      },
+      "testQueue": {
+        "0": "Queue pytest runs",
+        "1": "Run at most 2 tests at once",
+        "2": "Count make e2e as a test"
+      },
+      "claude": {
+        "0": "Start new tabs in plan mode",
+        "1": "Accept edits automatically in this project"
+      },
+      "usage": {
+        "0": "Show remaining usage",
+        "1": "Show only weekly usage in the menu bar"
+      },
+      "general": {
+        "0": "Switch the interface to Turkish",
+        "1": "Open ClaudeDeck when I log in"
+      }
+    },
+    "account": "Account",
+    "noAccounts": "Add a Claude account in Settings > Accounts first.",
+    "privacy": "Your request and current settings are sent to Anthropic through the chosen account.",
+    "send": "Ask Claude",
+    "working": "Claude is working on your settings",
+    "stop": "Stop",
+    "phase": {
+      "starting": "Starting",
+      "thinking": "Thinking",
+      "reading": "Reviewing your settings",
+      "testing": "Trying the rule on examples",
+      "proposing": "Preparing the proposal"
+    },
+    "question": {
+      "title": "Claude asks",
+      "answer": "Your answer",
+      "send": "Send answer"
+    },
+    "proposal": {
+      "changes": "Changes",
+      "global": "All projects",
+      "project": "Project: {{name}}",
+      "becomes": "becomes",
+      "before": "Now",
+      "ruleAdded": "New rule",
+      "ruleRemoved": "Removed rule",
+      "regex": "regex",
+      "builtinOff": "Built-in rule turned off",
+      "builtinOn": "Built-in rule turned on",
+      "examples": "Tested examples",
+      "queued": "Queued",
+      "notQueued": "Not queued",
+      "risks": "Before you apply",
+      "followUp": "Also add",
+      "followUpPlaceholder": "For example: do the same for git push",
+      "followUpSend": "Send",
+      "apply": "Apply"
+    },
+    "risks": {
+      "guardOff": "The command guard turns off completely; Claude's commands are not checked.",
+      "guardAllow": "{{category}} is allowed. This category covers actions that cannot be undone.",
+      "guardRelaxed": "Protection for {{category}} is relaxed: {{action}}.",
+      "bypass": "Bypass permissions lets Claude do everything without asking you.",
+      "testQueueOff": "The test queue turns off; tests can run all at once."
+    },
+    "answered": {
+      "title": "Claude's reply",
+      "empty": "Claude did not propose a change.",
+      "followUp": "Continue"
+    },
+    "error": {
+      "TIMEOUT": "Claude did not answer in time. Please try again.",
+      "FAILED": "Something went wrong while Claude was working.",
+      "details": "Details",
+      "retry": "Try again"
+    },
+    "applied": "Settings updated.",
+    "undo": "Undo",
+    "undone": "The change was undone.",
+    "undoFailed": "The change could not be undone.",
+    "value": {
+      "on": "On",
+      "off": "Off",
+      "inherit": "Global setting",
+      "followCategory": "Category setting",
+      "none": "None",
+      "queueOff": "Do not queue",
+      "percent": "{{value}}%"
     }
   }
 }
