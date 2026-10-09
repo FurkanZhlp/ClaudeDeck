@@ -52,7 +52,7 @@ export const WAIT_MARKER = 'claudedeck-wait'
 export const QUEUE_MARKER = 'claudedeck-queue'
 
 /** Tools the PreToolUse hook runs for while the guard is on. */
-export const GUARD_MATCHER = 'Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit'
+export const GUARD_MATCHER = 'Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|Grep'
 /** Tools the test queue handles (pre and post). */
 export const QUEUE_MATCHER = 'Bash|PowerShell'
 

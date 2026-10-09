@@ -199,7 +199,9 @@ describe('installHooks (command guard)', () => {
         hooks: [{ type: 'command', command: `/bin/sh '${hookScriptPath(dir)}' pre`, timeout: 30 }]
       }
     ])
-    expect(GUARD_MATCHER).toBe('Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit')
+    expect(GUARD_MATCHER).toBe(
+      'Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|Grep'
+    )
     expect(readFileSync(hookScriptPath(dir), 'utf8')).toContain('guard=1')
   })
 
